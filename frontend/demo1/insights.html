@@ -1,6 +1,7 @@
 <!DOCTYPE html>
 <html lang="en">
-<head>
+<head><script src="paraiq-config.js"></script>
+<script src="paraiq-auth.js?v=3"></script>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>Document Insights — Entity Linking & Contradiction Detection</title>
@@ -48,7 +49,7 @@
     .sent-badge { font-size: 11px; font-weight: 600; padding: 2px 8px; border-radius: 20px; }
     .sb-positive{background:#d1fae5;color:#065f46}
     .sb-negative{background:#fee2e2;color:#991b1b}
-    .sb-neutral {background:#f3f4f6;color:#374151}
+    .sb-neutral {background:#f3f4f6;color:#cbd5e1}
     .sb-mixed   {background:#fef3c7;color:#92400e}
     .doc-id { font-size: 11px; color: #94a3b8; }
 
@@ -558,24 +559,24 @@ async function runCoref() {
       </div>`).join('');
 
     const resolvedHtml = d.resolved_text
-      ? `<div style="font-size:13px;line-height:1.8;color:#374151;background:#f0fdf4;border:1px solid #bbf7d0;border-radius:8px;padding:14px;border-left:4px solid #059669">
+      ? `<div style="font-size:13px;line-height:1.8;color:#cbd5e1;background:#f0fdf4;border:1px solid #bbf7d0;border-radius:8px;padding:14px;border-left:4px solid #059669">
            ${d.resolved_text.replace(/\[([^\]]+)\]/g, '<strong style="color:#059669;background:#d1fae5;padding:1px 4px;border-radius:3px">[$1]</strong>')}</div>` : '';
 
     document.getElementById('corefResults').innerHTML = `
       <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(110px,1fr));gap:10px;margin-bottom:14px">
-        <div style="background:#fff;border:1px solid #e2e8f0;border-radius:8px;padding:10px;text-align:center">
+        <div style="background:#1e293b;border:1px solid #334155;border-radius:8px;padding:10px;text-align:center">
           <div style="font-size:24px;font-weight:700">${stats.chains_found||d.chains?.length||0}</div>
           <div style="font-size:11px;color:#94a3b8;margin-top:2px">chains found</div>
         </div>
-        <div style="background:#fff;border:1px solid #e2e8f0;border-radius:8px;padding:10px;text-align:center">
+        <div style="background:#1e293b;border:1px solid #334155;border-radius:8px;padding:10px;text-align:center">
           <div style="font-size:24px;font-weight:700">${stats.total_mentions||0}</div>
           <div style="font-size:11px;color:#94a3b8;margin-top:2px">total mentions</div>
         </div>
-        <div style="background:#fff;border:1px solid #e2e8f0;border-radius:8px;padding:10px;text-align:center">
+        <div style="background:#1e293b;border:1px solid #334155;border-radius:8px;padding:10px;text-align:center">
           <div style="font-size:24px;font-weight:700;color:#6366f1">${stats.pronouns_resolved||0}</div>
           <div style="font-size:11px;color:#94a3b8;margin-top:2px">pronouns resolved</div>
         </div>
-        <div style="background:#fff;border:1px solid #e2e8f0;border-radius:8px;padding:10px;text-align:center">
+        <div style="background:#1e293b;border:1px solid #334155;border-radius:8px;padding:10px;text-align:center">
           <div style="font-size:24px;font-weight:700;color:#d97706">${stats.ambiguous_count||0}</div>
           <div style="font-size:11px;color:#94a3b8;margin-top:2px">ambiguous</div>
         </div>
@@ -599,7 +600,7 @@ async function runCoref() {
   }
 }
 </script>
-  <script src="paraiq-sidebar.js"></script>
+  <script src="paraiq-sidebar-v3.js"></script>
   <script src="paraiq-persist.js"></script>
 </body>
 </html>

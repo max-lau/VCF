@@ -4,11 +4,13 @@ auth.py
 FastAPI APIRouter: User Authentication (#11)
 JWT-based authentication with bcrypt password hashing.
 Endpoints:
-  POST /auth/register  - create account
-  POST /auth/login     - get JWT token
-  GET  /auth/me        - get current user info
-  POST /auth/refresh   - refresh token
-  PUT  /auth/password  - change password
+  POST /auth/register       - create account
+  POST /auth/login          - get JWT token + permission snapshot
+  GET  /auth/me             - get current user info
+  GET  /auth/me/permissions - get role + module permissions (Vue frontend)
+  POST /auth/refresh        - refresh token
+  PUT  /auth/password       - change password
+  GET  /auth/users          - list all users (admin only)
 
 Users stored in analyses.db (users table).
 Token expiry: 24 hours (configurable via .env JWT_EXPIRE_HOURS).
@@ -32,6 +34,21 @@ bearer  = HTTPBearer(auto_error=False)
 SECRET_KEY   = os.getenv("JWT_SECRET_KEY", "nlp-portfolio-secret-change-in-production")
 ALGORITHM    = "HS256"
 EXPIRE_HOURS = int(os.getenv("JWT_EXPIRE_HOURS", "24"))
+
+# ── Role → tier mapping ────────────────────────────────────────────────────────
+ROLE_TIER_MAP = {
+    "paraiq_super":    0,
+    "firm_admin":      1,
+    "admin":           1,   # legacy role name
+    "senior_attorney": 2,
+    "associate":       3,
+    "user":            3,   # legacy role name
+    "paralegal":       4,
+    "client_viewer":   5,
+    "billing_contact": 6,
+}
+
+SCOPED_ROLES = {"paralegal", "client_viewer"}
 
 
 # ── DB Setup ───────────────────────────────────────────────────────────────────
@@ -71,18 +88,106 @@ def verify_password(password: str, hashed: str) -> bool:
     return bcrypt.checkpw(password.encode(), hashed.encode())
 
 
+# ── Permissions helper ─────────────────────────────────────────────────────────
+
+def build_permissions_for_user(user_id: int, firm_id: str = "default") -> dict:
+    """
+    Builds the permission snapshot for the Vue frontend.
+    Looks up role_assignments + module_permissions tables (from roles migration).
+    Falls back gracefully if those tables don't exist yet.
+    """
+    conn = get_conn()
+    try:
+        row = conn.execute("""
+            SELECT r.name AS role_name, r.tier, r.default_open
+            FROM role_assignments ra
+            JOIN roles r ON r.id = ra.role_id
+            WHERE ra.user_id = ? AND ra.firm_id = ?
+        """, (user_id, firm_id)).fetchone()
+
+        if not row:
+            # No role assignment yet — fall back to legacy role from users table
+            user_row  = conn.execute(
+                "SELECT role FROM users WHERE id=?", (user_id,)
+            ).fetchone()
+            legacy    = user_row["role"] if user_row else "user"
+            role_name = "firm_admin" if legacy == "admin" else "associate"
+            tier      = ROLE_TIER_MAP.get(role_name, 3)
+            modules   = {}
+        else:
+            role_name = row["role_name"]
+            tier      = row["tier"]
+
+            module_rows = conn.execute("""
+                SELECT mp.module, mp.can_read, mp.can_write,
+                       mp.can_delete, mp.can_export, mp.can_admin
+                FROM module_permissions mp
+                WHERE mp.role_id = (
+                    SELECT role_id FROM role_assignments
+                    WHERE user_id = ? AND firm_id = ?
+                )
+            """, (user_id, firm_id)).fetchall()
+
+            modules = {
+                r["module"]: {
+                    "read":   r["can_read"],
+                    "write":  r["can_write"],
+                    "delete": r["can_delete"],
+                    "export": r["can_export"],
+                    "admin":  r["can_admin"],
+                }
+                for r in module_rows
+            }
+
+        return {
+            "role":      role_name,
+            "tier":      tier,
+            "is_scoped": role_name in SCOPED_ROLES,
+            "modules":   modules,
+        }
+
+    except Exception:
+        # Roles tables not yet migrated — return safe open default
+        return {
+            "role":      "associate",
+            "tier":      3,
+            "is_scoped": False,
+            "modules":   {},
+        }
+    finally:
+        conn.close()
+
+
 # ── JWT helpers ────────────────────────────────────────────────────────────────
 
-def create_token(user_id: int, username: str, role: str) -> str:
+def create_token(user_id: int, username: str, role: str, firm_id: str = "default") -> str:
     expire = datetime.now(timezone.utc) + timedelta(hours=EXPIRE_HOURS)
+    # guest_trial users get a private namespace — they can never collide with real firms
+    if role == "guest_trial":
+        firm_id = f"trial_{user_id}"
     payload = {
         "sub":      str(user_id),
         "username": username,
         "role":     role,
+        "firm_id":  firm_id,
         "exp":      expire,
         "iat":      datetime.now(timezone.utc),
     }
     return jwt.encode(payload, SECRET_KEY, algorithm=ALGORITHM)
+
+
+def get_current_firm_id(credentials: HTTPAuthorizationCredentials = Depends(bearer)) -> str:
+    """
+    FastAPI dependency — extracts firm_id from JWT.
+    Inject into any endpoint that must be tenant-scoped:
+
+        @router.get("/cases/search")
+        def search(firm_id: str = Depends(get_current_firm_id)): ...
+    """
+    if not credentials:
+        raise HTTPException(401, "Authentication required")
+    payload = decode_token(credentials.credentials)
+    return payload.get("firm_id", "default")
 
 
 def decode_token(token: str) -> dict:
@@ -101,7 +206,7 @@ def get_current_user(credentials: HTTPAuthorizationCredentials = Depends(bearer)
 
     conn = get_conn()
     user = conn.execute(
-        "SELECT id, username, email, role, active, created_at, last_login FROM users WHERE id=?",
+        "SELECT id, username, email, role, firm_id, active, created_at, last_login FROM users WHERE id=?",
         (user_id,)
     ).fetchone()
     conn.close()
@@ -116,7 +221,7 @@ def get_current_user(credentials: HTTPAuthorizationCredentials = Depends(bearer)
 
 def require_admin(current_user: dict = Depends(get_current_user)) -> dict:
     """Dependency — require admin role."""
-    if current_user.get("role") != "admin":
+    if current_user.get("role") not in ("admin", "firm_admin", "paraiq_super"):
         raise HTTPException(403, "Admin access required")
     return current_user
 
@@ -124,6 +229,7 @@ def require_admin(current_user: dict = Depends(get_current_user)) -> dict:
 # ── Pydantic models ────────────────────────────────────────────────────────────
 
 class RegisterBody(BaseModel):
+    firm_id:  str = "default"
     username: str
     email:    str
     password: str
@@ -132,6 +238,7 @@ class RegisterBody(BaseModel):
 class LoginBody(BaseModel):
     username: str
     password: str
+    # firm_id now derived from DB — not accepted from client
 
 class ChangePasswordBody(BaseModel):
     current_password: str
@@ -153,7 +260,6 @@ def register(body: RegisterBody):
     hashed = hash_password(body.password)
     conn   = get_conn()
 
-    # Check for duplicates
     existing = conn.execute(
         "SELECT id FROM users WHERE username=? OR email=?",
         (body.username, body.email)
@@ -163,12 +269,13 @@ def register(body: RegisterBody):
         raise HTTPException(409, "Username or email already registered")
 
     cur = conn.execute("""
-        INSERT INTO users (username, email, password_hash, role, created_at)
-        VALUES (?,?,?,?,?)
+        INSERT INTO users (username, email, password_hash, role, created_at, firm_id)
+        VALUES (?,?,?,?,?,?)
     """, (
         body.username, body.email, hashed,
         body.role if body.role in ("user", "admin") else "user",
-        datetime.now(timezone.utc).isoformat()
+        datetime.now(timezone.utc).isoformat(),
+        getattr(body, 'firm_id', 'default')
     ))
     user_id = cur.lastrowid
     conn.commit()
@@ -177,18 +284,18 @@ def register(body: RegisterBody):
     token = create_token(user_id, body.username, "user")
 
     return {
-        "success":  True,
-        "message":  f"Account created for '{body.username}'",
-        "user_id":  user_id,
-        "username": body.username,
-        "token":    token,
+        "success":          True,
+        "message":          f"Account created for '{body.username}'",
+        "user_id":          user_id,
+        "username":         body.username,
+        "token":            token,
         "expires_in_hours": EXPIRE_HOURS,
     }
 
 
 @router.post("/login")
 def login(body: LoginBody):
-    """Authenticate and receive a JWT token."""
+    """Authenticate and receive a JWT token + permission snapshot."""
     conn = get_conn()
     user = conn.execute(
         "SELECT * FROM users WHERE username=? AND active=1",
@@ -199,7 +306,6 @@ def login(body: LoginBody):
         conn.close()
         raise HTTPException(401, "Invalid username or password")
 
-    # Update last login
     conn.execute(
         "UPDATE users SET last_login=? WHERE id=?",
         (datetime.now(timezone.utc).isoformat(), user["id"])
@@ -207,15 +313,24 @@ def login(body: LoginBody):
     conn.commit()
     conn.close()
 
-    token = create_token(user["id"], user["username"], user["role"])
+    firm_id     = user["firm_id"] if user["firm_id"] else "default"
+    token       = create_token(user["id"], user["username"], user["role"], firm_id)
+    permissions = build_permissions_for_user(user["id"], firm_id)
 
     return {
-        "success":  True,
-        "token":    token,
-        "token_type": "bearer",
-        "username": user["username"],
-        "role":     user["role"],
+        # Original fields — unchanged
+        "success":          True,
+        "token":            token,
+        "token_type":       "bearer",
+        "username":         user["username"],
         "expires_in_hours": EXPIRE_HOURS,
+        # New fields for Vue frontend
+        "user_id":          user["id"],
+        "email":            user["email"],
+        "role":             permissions["role"],
+        "tier":             permissions["tier"],
+        "firm_id":          firm_id,
+        "permissions":      permissions,
     }
 
 
@@ -223,8 +338,8 @@ def login(body: LoginBody):
 def get_me(current_user: dict = Depends(get_current_user)):
     """Get current authenticated user info."""
     return {
-        "success":    True,
-        "user":       {
+        "success": True,
+        "user": {
             "id":         current_user["id"],
             "username":   current_user["username"],
             "email":      current_user["email"],
@@ -235,17 +350,29 @@ def get_me(current_user: dict = Depends(get_current_user)):
     }
 
 
+@router.get("/me/permissions")
+def get_my_permissions(current_user: dict = Depends(get_current_user)):
+    """
+    Returns the full permission snapshot for the current user.
+    Called by the Vue frontend on app mount when token already exists
+    (e.g. after a page refresh) and permissions need to be re-hydrated.
+    """
+    permissions = build_permissions_for_user(current_user["id"])
+    return permissions
+
+
 @router.post("/refresh")
 def refresh_token(current_user: dict = Depends(get_current_user)):
     """Issue a fresh token for the current user."""
     token = create_token(
         current_user["id"],
         current_user["username"],
-        current_user["role"]
+        current_user["role"],
+        current_user.get("firm_id", "default"),
     )
     return {
-        "success": True,
-        "token":   token,
+        "success":          True,
+        "token":            token,
         "expires_in_hours": EXPIRE_HOURS,
     }
 
@@ -290,3 +417,64 @@ def list_users(current_user: dict = Depends(require_admin)):
         "count":   len(rows),
         "users":   [dict(r) for r in rows],
     }
+
+
+# ── User Management Routes (Firm Admin) ────────────────────────────────────────
+
+class UpdateRoleBody(BaseModel):
+    role: str
+
+@router.put("/users/{user_id}/active")
+def toggle_user_active(user_id: int, current_user: dict = Depends(require_admin)):
+    """Toggle a user's active status."""
+    conn = get_conn()
+    user = conn.execute("SELECT active FROM users WHERE id=?", (user_id,)).fetchone()
+    if not user:
+        conn.close()
+        raise HTTPException(404, "User not found")
+    new_status = 0 if user["active"] else 1
+    conn.execute("UPDATE users SET active=? WHERE id=?", (new_status, user_id))
+    conn.commit()
+    conn.close()
+    return {"success": True, "active": new_status}
+
+
+@router.put("/users/{user_id}/role")
+def update_user_role(user_id: int, body: UpdateRoleBody,
+                     current_user: dict = Depends(require_admin)):
+    """Update a user's role in both users table and role_assignments."""
+    if body.role not in ROLE_TIER_MAP:
+        raise HTTPException(400, f"Invalid role: {body.role}")
+    conn = get_conn()
+    user = conn.execute("SELECT id FROM users WHERE id=?", (user_id,)).fetchone()
+    if not user:
+        conn.close()
+        raise HTTPException(404, "User not found")
+    # Update legacy role column
+    conn.execute("UPDATE users SET role=? WHERE id=?", (body.role, user_id))
+    # Upsert role_assignments
+    try:
+        role_row = conn.execute(
+            "SELECT id FROM roles WHERE name=?", (body.role,)
+        ).fetchone()
+        if role_row:
+            existing = conn.execute(
+                "SELECT id FROM role_assignments WHERE user_id=? AND firm_id='default'",
+                (user_id,)
+            ).fetchone()
+            if existing:
+                conn.execute(
+                    "UPDATE role_assignments SET role_id=? WHERE user_id=? AND firm_id='default'",
+                    (role_row["id"], user_id)
+                )
+            else:
+                conn.execute(
+                    "INSERT INTO role_assignments (user_id, role_id, firm_id, assigned_at) VALUES (?,?,?,?)",
+                    (user_id, role_row["id"], "default",
+                     datetime.now(timezone.utc).isoformat())
+                )
+    except Exception:
+        pass  # roles tables may not be fully migrated
+    conn.commit()
+    conn.close()
+    return {"success": True, "role": body.role, "tier": ROLE_TIER_MAP.get(body.role, 3)}

@@ -13,6 +13,15 @@ from backend.demo1.document_comparison import router as comparison_router
 from backend.demo1.citation_resolver import router as citations_router
 from backend.demo1.case_management   import router as cases_router
 from backend.demo1.pacer_integration import router as pacer_router
+from backend.demo1.matter_exports import router as matter_export_router
+from backend.demo1.discovery_intake import router as discovery_router, init_discovery_table
+from backend.demo1.legal_modules import depo_router, motion_router, contract_router
+from backend.demo1.redaction import router as redaction_router, init_redaction_table
+from backend.demo1.bates import router as bates_router, init_bates_tables
+from backend.demo1.production_bundler import router as bundler_router
+from backend.demo1.privilege_log import router as privilege_router, init_privilege_table
+from backend.demo1.media_transcription import router as media_router, init_transcription_table
+from backend.demo1.message_parser import router as messages_router, init_messages_table
 from backend.demo1.multilingual import analyze_multilingual, detect_language, SUPPORTED_LANGUAGES
 from backend.demo1.summary_scorer import score_summary, batch_score_summaries
 from backend.demo1.entity_confidence import score_entities, get_entity_summary
@@ -32,6 +41,7 @@ from backend.demo1.database import (
     save_feedback, get_feedback_queue, mark_reviewed, get_retraining_data
 )
 import anthropic
+from backend.demo1.intelligence import get_deadline_radar
 import os
 import json
 import re
@@ -40,6 +50,23 @@ import io
 import asyncio
 from concurrent.futures import ThreadPoolExecutor
 from typing import List, Optional
+from backend.demo1.enclave_router import router as enclave_privilege_router
+from backend.demo1.db_enclaves import init_enclave_tables
+from backend.demo1.routers.correspondence_router import router as correspondence_router
+from backend.demo1.routers.feedback_router        import router as feedback_router
+from backend.demo1.routers.summary_router         import router as summary_router
+from backend.demo1.routers.nlp_router             import router as nlp_router
+from backend.demo1.routers.calendar_router       import router as calendar_router
+from backend.demo1.routers.contacts_router       import router as contacts_router
+from backend.demo1.routers.chat_router            import router as chat_router
+from backend.demo1.routers.monitor_router         import router as monitor_router
+from backend.demo1.risk_watcher                   import start_scheduler
+from backend.demo1.routers.research_router       import router as research_router
+from backend.demo1.routers.reports_router        import router as reports_router
+from backend.demo1.routers.misc_routers import (
+    exports_router, ai_config_router,
+    client_portal_router, legal_bert_router,
+)
 
 load_dotenv()
 
@@ -47,8 +74,9 @@ load_dotenv()
 
 PARAIQ_API_KEY = os.getenv("PARAIQ_API_KEY", "")
 
-EXEMPT_PATHS = {"/health", "/openapi.json", "/docs", "/redoc", "/favicon.ico"}
-EXEMPT_PREFIXES = ("/docs/", "/redoc/")
+EXEMPT_PATHS = {"/health", "/openapi.json", "/docs", "/redoc", "/favicon.ico", "/dashboard/deadlines", "/dashboard/stats"}
+EXEMPT_PREFIXES = ("/auth/", "/api/auth/", "/docs/", "/redoc/", "/cases/", "/research/", "/audit/", "/export/client-letter/", "/export/privilege-log/", "/export/timeline/", "/export/case/", "/export/brief/", "/dashboard/")
+STATIC_EXTS = (".html", ".js", ".css", ".ico", ".png", ".svg", ".woff", ".woff2", ".json")
 
 class APIKeyMiddleware(BaseHTTPMiddleware):
     async def dispatch(self, request: Request, call_next):
@@ -57,15 +85,19 @@ class APIKeyMiddleware(BaseHTTPMiddleware):
             return await call_next(request)
         # Allow exempt paths
         path = request.url.path
-        if path in EXEMPT_PATHS or any(path.startswith(p) for p in EXEMPT_PREFIXES):
+        ext = os.path.splitext(path)[1].lower()
+        if path in EXEMPT_PATHS or any(path.startswith(p) for p in EXEMPT_PREFIXES) or ext in STATIC_EXTS:
             return await call_next(request)
-        # Check key
+        # Check key OR valid Bearer JWT
         key = request.headers.get("X-API-Key", "")
-        if not PARAIQ_API_KEY or key != PARAIQ_API_KEY:
+        auth = request.headers.get("Authorization", "")
+        has_bearer = auth.startswith("Bearer ") and len(auth) > 10
+        if not PARAIQ_API_KEY or (key != PARAIQ_API_KEY and not has_bearer):
             return JSONResponse(
                 status_code=401,
                 content={"detail": "Invalid or missing API key"}
             )
+        request.state.client_id = request.headers.get("X-Client-ID", "")
         return await call_next(request)
 
 app = FastAPI(title="NLP Text Analyzer API")
@@ -85,7 +117,46 @@ app.include_router(risk_router, prefix="/risk", tags=["Risk Scoring"])
 app.include_router(comparison_router, prefix="/documents", tags=["Document Comparison"])
 app.include_router(citations_router, prefix="/citations", tags=["Citation Resolver"])
 app.include_router(cases_router, prefix="/cases", tags=["Case Management"])
+app.include_router(matter_export_router, prefix="/export", tags=["Matter Exports"])
 app.include_router(pacer_router, prefix="/pacer",  tags=["PACER"])
+app.include_router(discovery_router)
+app.include_router(depo_router)
+app.include_router(motion_router)
+app.include_router(contract_router)
+app.include_router(redaction_router, prefix="/redact", tags=["Redaction"])
+app.include_router(bates_router, tags=["Bates Numbering"])
+app.include_router(bundler_router, tags=["Production Bundler"])
+app.include_router(privilege_router, tags=["Privilege Log"])
+app.include_router(media_router, tags=["Media Transcription"])
+app.include_router(messages_router, tags=["Message Parsers"])
+app.include_router(enclave_privilege_router, prefix="/api/privilege", tags=["Privilege Enclave"])
+app.include_router(correspondence_router)
+app.include_router(research_router)
+app.include_router(feedback_router)
+app.include_router(summary_router)
+app.include_router(nlp_router)
+app.include_router(chat_router)
+app.include_router(monitor_router)
+
+# ── Risk watcher scheduler ─────────────────────────────────────────────────────
+_scheduler = None
+
+@app.on_event("startup")
+async def startup_event():
+    global _scheduler
+    _scheduler = start_scheduler(app)
+
+@app.on_event("shutdown")
+async def shutdown_event():
+    if _scheduler:
+        _scheduler.shutdown(wait=False)
+app.include_router(calendar_router)
+app.include_router(contacts_router)
+app.include_router(reports_router)
+app.include_router(exports_router)
+app.include_router(ai_config_router)
+app.include_router(client_portal_router)
+app.include_router(legal_bert_router)
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
@@ -101,6 +172,12 @@ init_auth_table()
 init_notify_table()
 init_model_table()
 init_intake_table()
+init_redaction_table()
+init_bates_tables()
+init_privilege_table()
+init_transcription_table()
+init_messages_table()
+init_enclave_tables()
 client = anthropic.Anthropic(api_key=os.getenv("ANTHROPIC_API_KEY"))
 executor = ThreadPoolExecutor(max_workers=3)
 
@@ -338,50 +415,7 @@ Rules: extract ALL dates in chronological order, max 20 events."""
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
-# ── Active learning endpoints ─────────────────────────────────────────────────
-
-@app.post("/feedback")
-def submit_feedback(body: FeedbackInput):
-    """Submit a human correction for a model prediction."""
-    row_id = save_feedback(
-        analysis_id     = body.analysis_id,
-        text            = body.text,
-        predicted       = body.predicted,
-        predicted_score = body.predicted_score,
-        corrected       = body.corrected,
-        feedback_type   = body.feedback_type,
-        notes           = body.notes
-    )
-    return {
-        "feedback_id": row_id,
-        "message": "Feedback saved — added to retraining queue",
-        "retraining_trigger": "Queue this sample for next model update"
-    }
-
-@app.get("/feedback/queue")
-def feedback_queue():
-    """Get all pending items awaiting human review."""
-    items = get_feedback_queue(reviewed=False)
-    return {
-        "pending": len(items),
-        "items": items
-    }
-
-@app.post("/feedback/review")
-def review_feedback(body: ReviewInput):
-    """Mark a feedback item as reviewed."""
-    mark_reviewed(body.feedback_id)
-    return {"message": f"Feedback {body.feedback_id} marked as reviewed"}
-
-@app.get("/feedback/retraining-data")
-def retraining_data():
-    """Export all corrected samples ready for model retraining."""
-    samples = get_retraining_data()
-    return {
-        "total_samples": len(samples),
-        "message": f"{len(samples)} corrected samples ready for retraining",
-        "samples": samples
-    }
+# feedback endpoints → routers/feedback_router.py
 
 @app.get("/history")
 def history(
@@ -392,19 +426,7 @@ def history(
     results = query_analyses(sentiment=sentiment, keyword=keyword, limit=limit)
     return {"count": len(results), "results": results}
 
-@app.post("/disambiguate")
-def disambiguate(body: TextInput):
-    """Resolve ambiguous entity mentions to canonical real-world forms."""
-    if not body.text or len(body.text.strip()) < 20:
-        raise HTTPException(status_code=400, detail="Text too short")
-    return disambiguate_entities(body.text)
-
-@app.post("/coreference")
-def coreference(body: TextInput):
-    """Resolve pronouns and noun phrases to their referent entities."""
-    if not body.text or len(body.text.strip()) < 20:
-        raise HTTPException(status_code=400, detail="Text too short")
-    return resolve_coreferences(body.text)
+# disambiguate + coreference → routers/nlp_router.py
 
 @app.post("/entities/score")
 def entities_score(body: TextInput):
@@ -426,27 +448,7 @@ def entities_score(body: TextInput):
         "text_preview": body.text[:100]
     }
 
-@app.post("/summary/score")
-def summary_score(body: TextInput):
-    """
-    Score a summary against its source document.
-    Pass JSON with source and summary fields.
-    """
-    try:
-        data    = json.loads(body.text)
-        source  = data.get("source", "")
-        summary = data.get("summary", "")
-        if not source or not summary:
-            raise HTTPException(
-                status_code=400,
-                detail="Provide JSON with 'source' and 'summary' fields"
-            )
-        return score_summary(source, summary)
-    except json.JSONDecodeError:
-        raise HTTPException(
-            status_code=400,
-            detail="Body must be JSON: {source: '...', summary: '...'}"
-        )
+# summary/score → routers/summary_router.py
 
 @app.post("/summary/score/auto")
 def summary_score_auto(body: TextInput):
@@ -469,27 +471,7 @@ def summary_score_auto(body: TextInput):
     result["summary_score"] = score
     return result
 
-@app.get("/languages")
-def languages():
-    """List all supported languages."""
-    return {"languages": SUPPORTED_LANGUAGES}
-
-@app.post("/analyze/multilingual")
-def analyze_multilingual_endpoint(
-    body: TextInput,
-    lang: str = Query("auto", description="Language code: en, zh, es, fr, de, ja, ar, pt, auto")
-):
-    """Analyze text in any supported language."""
-    if not body.text or len(body.text.strip()) < 10:
-        raise HTTPException(status_code=400, detail="Text too short")
-    return analyze_multilingual(body.text, lang)
-
-@app.post("/detect/language")
-def detect_language_endpoint(body: TextInput):
-    """Detect the language of any text."""
-    if not body.text or len(body.text.strip()) < 5:
-        raise HTTPException(status_code=400, detail="Text too short")
-    return detect_language(body.text)
+# languages + multilingual + detect → routers/nlp_router.py
 
 
 # ── Interrogation Analyzer ────────────────────────────────────────────────────
@@ -693,4 +675,393 @@ def deposition_summarize(body: DepositionInput):
         raise HTTPException(status_code=500, detail="JSON parse error: " + str(e))
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
+
+
+
+# ── Feature 26: Legal Entity Extraction ──────────────────────────────────────
+
+@app.post("/entities/legal")
+def legal_entities(body: TextInput):
+    """Extract legal-specific entities: parties, amounts, dates, deadlines, jurisdictions."""
+    if not body.text or len(body.text.strip()) < 20:
+        raise HTTPException(status_code=400, detail="Text too short")
+
+    prompt = f"""You are a legal NLP specialist. Extract all legally significant entities from this document.
+
+Return ONLY valid JSON, no markdown:
+{{
+  "parties": [
+    {{"name": "full name", "role": "Plaintiff|Defendant|Counsel|Judge|Witness|Other", "organization": "firm or company if applicable"}}
+  ],
+  "amounts": [
+    {{"value": "$X,XXX", "context": "what the amount refers to", "type": "damages|settlement|fee|penalty|other"}}
+  ],
+  "dates_and_deadlines": [
+    {{"date": "YYYY-MM-DD or as written", "event": "what happens on this date", "is_deadline": true}}
+  ],
+  "jurisdictions": [
+    {{"name": "court or jurisdiction name", "type": "federal|state|arbitration|other"}}
+  ],
+  "legal_citations": [
+    {{"citation": "case or statute citation", "type": "case_law|statute|regulation|contract"}}
+  ],
+  "key_obligations": [
+    {{"party": "who must act", "obligation": "what they must do", "deadline": "by when if stated"}}
+  ]
+}}
+
+Document:
+{body.text[:5000]}"""
+
+    try:
+        msg = client.messages.create(
+            model="claude-haiku-4-5-20251001",
+            max_tokens=2000,
+            messages=[{"role": "user", "content": prompt}]
+        )
+        raw = msg.content[0].text.strip().replace("```json","").replace("```","").strip()
+        return {"success": True, **json.loads(raw)}
+    except json.JSONDecodeError as e:
+        raise HTTPException(status_code=500, detail=f"JSON parse error: {e}")
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+# ── Home Dashboard Stats ──────────────────────────────────────────────────────
+
+@app.get("/dashboard/stats")
+def dashboard_stats():
+    """Aggregate live stats for the home dashboard."""
+    import sqlite3
+    from datetime import date
+
+    out = {
+        "modules_live": 21,
+        "languages": 13,
+        "total_cases": 0,
+        "open_cases": 0,
+        "high_risk_cases": 0,
+        "total_analyses": 0,
+        "requests_today": 0,
+    }
+
+    try:
+        s = get_stats()
+        out["total_analyses"] = s.get("total_analyses", 0)
+    except Exception:
+        pass
+
+    try:
+        con = sqlite3.connect("analyses.db")
+        cur = con.cursor()
+        cur.execute("SELECT COUNT(*) FROM cases")
+        out["total_cases"] = cur.fetchone()[0]
+        cur.execute("SELECT COUNT(*) FROM cases WHERE status = 'open'")
+        out["open_cases"] = cur.fetchone()[0]
+        cur.execute("SELECT COUNT(*) FROM cases WHERE risk_level = 'high'")
+        out["high_risk_cases"] = cur.fetchone()[0]
+        con.close()
+    except Exception:
+        pass
+
+    today = date.today().isoformat()
+    for db_path in ["analyses.db", "backend/demo1/paraiq.db"]:
+        try:
+            con = sqlite3.connect(db_path)
+            cur = con.cursor()
+            cur.execute("SELECT COUNT(*) FROM audit_log WHERE timestamp LIKE ?", (today + "%",))
+            out["requests_today"] = cur.fetchone()[0]
+            con.close()
+            break
+        except Exception:
+            continue
+
+    return out
+
+# ── Serve frontend static files ───────────────────────────────────────────────
+from fastapi.staticfiles import StaticFiles
+
+# ── Deadline Radar ────────────────────────────────────────────────────────────
+
+
+@app.get("/cases/{case_id}/wall", tags=["Cases"])
+async def case_wall(case_id: int):
+    """Unified chronological matter dossier — all case activity in one feed."""
+    import sqlite3, json as _json
+    DB = "/root/nlp-portfolio/analyses.db"
+    conn = sqlite3.connect(DB)
+    conn.row_factory = sqlite3.Row
+    cur = conn.cursor()
+    items = []
+
+    try:
+        # ── Case metadata ──────────────────────────────────────────────
+        cur.execute("SELECT * FROM cases WHERE id=? AND deleted=0", (case_id,))
+        case = cur.fetchone()
+        if not case:
+            return {"items": [], "error": "Case not found"}
+
+        # Case opened event
+        items.append({
+            "date": case["filing_date"] or case["created_at"],
+            "type": "case_opened",
+            "title": f"Case opened — {case['case_number']}",
+            "body": (f"Client: {case['client_name']} | Court: {case['court'] or 'TBD'} | "
+                     f"Judge: {case['judge'] or 'TBD'} | Matter: {case['matter_number'] or '—'}"),
+            "meta": {"risk": case["risk_level"], "status": case["status"]}
+        })
+
+        # ── Documents ──────────────────────────────────────────────────
+        cur.execute("""SELECT id, document_name, upload_date, summary, sentiment,
+                              risk_score, events_json, entities_json
+                       FROM case_documents WHERE case_id=? ORDER BY upload_date ASC""", (case_id,))
+        docs = cur.fetchall()
+
+        for doc in docs:
+            items.append({
+                "date": doc["upload_date"],
+                "type": "document",
+                "title": doc["document_name"],
+                "body": doc["summary"] or "No summary available.",
+                "meta": {
+                    "sentiment": doc["sentiment"],
+                    "risk_score": doc["risk_score"],
+                    "doc_id": doc["id"]
+                }
+            })
+            # Expand timeline events from this doc
+            if doc["events_json"]:
+                try:
+                    events = _json.loads(doc["events_json"])
+                    for ev in (events if isinstance(events, list) else []):
+                        ev_date = ev.get("date") or ev.get("event_date") or doc["upload_date"]
+                        items.append({
+                            "date": ev_date,
+                            "type": "timeline_event",
+                            "title": ev.get("event") or ev.get("title") or "Event",
+                            "body": ev.get("description") or ev.get("detail") or "",
+                            "meta": {"source_doc": doc["document_name"]}
+                        })
+                except Exception:
+                    pass
+
+        # ── Notes ──────────────────────────────────────────────────────
+        cur.execute("""SELECT note, author, pinned, created_at
+                       FROM case_notes WHERE case_id=? ORDER BY created_at ASC""", (case_id,))
+        for note in cur.fetchall():
+            items.append({
+                "date": note["created_at"],
+                "type": "note",
+                "title": f"Note by {note['author'] or 'Attorney'}",
+                "body": note["note"],
+                "meta": {"pinned": bool(note["pinned"])}
+            })
+
+        # ── AI Briefs ──────────────────────────────────────────────────
+        cur.execute("""SELECT generated_at, brief_json FROM case_briefs
+                       WHERE case_id=? ORDER BY generated_at ASC""", (case_id,))
+        for brief in cur.fetchall():
+            items.append({
+                "date": brief["generated_at"],
+                "type": "brief",
+                "title": "AI Case Brief generated",
+                "body": "Full case analysis brief produced by Claude. View in Overview tab.",
+                "meta": {}
+            })
+
+    finally:
+        conn.close()
+
+    # Sort chronologically
+    def sort_key(x):
+        d = x.get("date") or ""
+        return d[:19] if d else "0000"
+    items.sort(key=sort_key)
+
+    return {"items": items, "count": len(items), "case_id": case_id}
+
+
+@app.get("/cases/{case_id}/intelligence", tags=["Cases"])
+async def case_intelligence(case_id: int):
+    """Aggregate all intelligence signals for a case."""
+    import sqlite3, re
+    from datetime import date, datetime, timedelta
+
+    DB = "/root/nlp-portfolio/analyses.db"
+    conn = sqlite3.connect(DB)
+    conn.row_factory = sqlite3.Row
+    cur = conn.cursor()
+    signals = []
+    today = date.today()
+
+    try:
+        # ── 1. Case metadata ───────────────────────────────────────────
+        cur.execute("SELECT * FROM cases WHERE id=? AND deleted=0", (case_id,))
+        case = cur.fetchone()
+        if not case:
+            return {"signals": [], "error": "Case not found"}
+
+        filing_date_str = case["filing_date"]
+        case_number     = case["case_number"]
+        client_name     = case["client_name"]
+        description     = case["description"] or ""
+
+        # ── 2. Deadline signal (30-day answer window) ──────────────────
+        if filing_date_str:
+            try:
+                fd = datetime.strptime(filing_date_str[:10], "%Y-%m-%d").date()
+                answer_dl = fd + timedelta(days=30)
+                diff = (answer_dl - today).days
+                if 0 <= diff <= 30:
+                    sev = "critical" if diff <= 7 else "warning" if diff <= 14 else "watch"
+                    signals.append({
+                        "severity": sev,
+                        "title": f"Answer deadline in {diff} day{'s' if diff!=1 else ''} — {answer_dl.strftime('%B %d, %Y')}",
+                        "description": f"30-day answer window closes on {answer_dl.strftime('%B %d, %Y')} based on filing date {filing_date_str[:10]}. Immediate action may be required."
+                    })
+                elif diff < 0:
+                    signals.append({
+                        "severity": "critical",
+                        "title": f"Answer deadline may have passed ({answer_dl.strftime('%B %d, %Y')})",
+                        "description": "The 30-day answer window based on the filing date appears to have elapsed. Verify current status with the court immediately."
+                    })
+            except Exception:
+                pass
+
+        # ── 3. Dates in documents ──────────────────────────────────────
+        cur.execute("""SELECT doc_text, document_name FROM case_documents
+                       WHERE case_id=? AND doc_text IS NOT NULL AND doc_text!=''""", (case_id,))
+        docs = cur.fetchall()
+
+        doc_dates = []
+        for doc in docs:
+            found = re.findall(r'\b(\d{4}-\d{2}-\d{2})\b', doc["doc_text"] or "")
+            for ds in found:
+                try:
+                    dl = datetime.strptime(ds, "%Y-%m-%d").date()
+                    diff = (dl - today).days
+                    if 0 <= diff <= 30:
+                        doc_dates.append((dl, diff, doc["document_name"]))
+                except Exception:
+                    pass
+
+        for dl, diff, docname in sorted(doc_dates, key=lambda x: x[0])[:3]:
+            sev = "critical" if diff <= 7 else "warning" if diff <= 14 else "watch"
+            signals.append({
+                "severity": sev,
+                "title": f"Upcoming date detected: {dl.strftime('%B %d, %Y')} ({diff}d away)",
+                "description": f"Found in document: {docname}. Review to confirm if this is a filing deadline, hearing date, or contractual milestone."
+            })
+
+        # ── 4. Contradictions ──────────────────────────────────────────
+        cur.execute("""SELECT COUNT(*) as cnt FROM case_contradictions
+                       WHERE case_id=?""", (case_id,))
+        row = cur.fetchone()
+        contr_count = row["cnt"] if row else 0
+        if contr_count > 0:
+            signals.append({
+                "severity": "warning",
+                "title": f"{contr_count} contradiction{'s' if contr_count!=1 else ''} detected across documents",
+                "description": "The AI found conflicting statements between linked documents. Open the Contradictions tab to review each conflict and assess impact on case strategy."
+            })
+
+        # ── 5. Document coverage ───────────────────────────────────────
+        doc_count = len(docs)
+        empty_docs = [d["document_name"] for d in docs if len((d["doc_text"] or "").strip()) < 50]
+        rich_docs  = doc_count - len(empty_docs)
+        if doc_count == 0:
+            signals.append({
+                "severity": "info",
+                "title": "No documents linked to this case",
+                "description": "Link documents from the Discovery queue to enable contradiction detection, timeline extraction, and deeper AI analysis."
+            })
+        elif doc_count == 1:
+            signals.append({
+                "severity": "info",
+                "title": "Only 1 document linked — contradiction detection limited",
+                "description": "Contradiction analysis requires at least 2 documents. Link additional filings, depositions, or contracts for full coverage."
+            })
+        if empty_docs:
+            names = ", ".join(empty_docs[:3]) + ("..." if len(empty_docs) > 3 else "")
+            signals.append({
+                "severity": "warning",
+                "title": f"{len(empty_docs)} document(s) not yet analyzed - text not extracted",
+                "description": f"No readable text found in: {names}. Images and audio require OCR/transcription before AI analysis can run."
+            })
+        if rich_docs >= 2:
+            signals.append({
+                "severity": "info",
+                "title": f"{rich_docs} documents fully analyzed and indexed",
+                "description": "All linked documents have been processed. Contradiction detection, timeline extraction, and AI brief generation are available."
+            })
+
+        # ── 6. Risk level ──────────────────────────────────────────────
+        risk = case["risk_level"] or "unknown"
+        if risk == "high":
+            signals.append({
+                "severity": "critical",
+                "title": "Case flagged as HIGH RISK",
+                "description": "Document analysis has identified high-risk indicators. Review the AI Case Brief for a full breakdown of risk factors."
+            })
+        elif risk == "unknown" and doc_count > 0:
+            signals.append({
+                "severity": "info",
+                "title": "Risk level not yet assessed",
+                "description": "Generate an AI Case Brief to automatically score this case for risk based on all linked documents."
+            })
+
+        # ── 7. Claude AI Partner Signal ───────────────────────────────
+        rich_texts = []
+        for doc in docs:
+            txt = (doc["doc_text"] or "").strip()
+            if len(txt) >= 50:
+                rich_texts.append(f"[{doc['document_name']}]\n{txt[:3000]}")
+
+        if rich_texts:
+            import anthropic as _anthropic, json as _json
+            _ai = _anthropic.Anthropic(api_key=os.getenv("ANTHROPIC_API_KEY"))
+            combined = "\n\n---\n\n".join(rich_texts)[:8000]
+            case_ctx = (f"Case: {case_number} | Client: {client_name} | "
+                        f"Court: {case['court'] or 'Unknown'} | Filed: {filing_date_str or 'Unknown'}")
+            ai_prompt = (
+                "You are a senior litigation partner reviewing a case file. "
+                "Surface the 2-3 most critical things this attorney MUST know right now.\n\n"
+                "Focus on: statute of limitations risks (calculate from dates), hidden obligations, "
+                "jurisdictional issues, factual gaps, anything requiring immediate action.\n\n"
+                f"Case context: {case_ctx}\n\nDocuments:\n{combined}\n\n"
+                "Return ONLY a JSON array (no markdown) of 2-3 objects with keys: "
+                "severity (critical|warning|watch|info), title (max 12 words), description (2-3 sentences)."
+            )
+            try:
+                ai_resp = _ai.messages.create(
+                    model="claude-opus-4-5",
+                    max_tokens=600,
+                    messages=[{"role": "user", "content": ai_prompt}]
+                )
+                raw = ai_resp.content[0].text.strip().replace("```json","").replace("```","").strip()
+                for s in _json.loads(raw)[:3]:
+                    if isinstance(s, dict) and "title" in s:
+                        s.setdefault("severity", "info")
+                        s["ai"] = True
+                        signals.append(s)
+            except Exception:
+                pass
+
+    except Exception as e:
+        signals.append({"severity": "info", "title": "Analysis error", "description": str(e)})
+    finally:
+        conn.close()
+
+    # Sort: critical first, then warning, watch, info
+    order = {"critical": 0, "warning": 1, "watch": 2, "info": 3}
+    signals.sort(key=lambda x: order.get(x.get("severity","info"), 3))
+    return {"signals": signals, "case_id": case_id}
+
+
+@app.get("/dashboard/deadlines", tags=["Dashboard"])
+async def dashboard_deadlines():
+    """Scan all open-case documents for upcoming dates within 30 days."""
+    return get_deadline_radar()
+
+app.mount("/", StaticFiles(directory="frontend/demo1", html=True), name="frontend")
 

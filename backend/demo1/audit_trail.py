@@ -78,11 +78,12 @@ class AuditMiddleware(BaseHTTPMiddleware):
 
     # Skip noisy internal endpoints
     SKIP_PATHS = {"/docs", "/openapi.json", "/redoc", "/favicon.ico", "/health"}
+    SKIP_PREFIXES = ("/export/",)
 
     async def dispatch(self, request: Request, call_next):
         path = request.url.path
 
-        if path in self.SKIP_PATHS:
+        if path in self.SKIP_PATHS or any(path.startswith(p) for p in self.SKIP_PREFIXES):
             return await call_next(request)
 
         start      = time.perf_counter()
@@ -226,3 +227,102 @@ def clear_audit_logs():
     conn.commit()
     conn.close()
     return {"success": True, "message": "Audit log cleared"}
+
+
+# ── Feature 15: Chain of Custody (Discovery) ──────────────────────────────────
+
+DISCOVERY_PREFIXES = ("/discovery/", "/bates/", "/production/")
+
+ACTION_LABELS = {
+    ("POST", "/discovery/intake"):          "Files uploaded to intake queue",
+    ("DELETE", "/discovery/queue"):         "File removed from queue",
+    ("POST", "/discovery/process/ocr"):     "OCR processing triggered",
+    ("POST", "/discovery/process/zip"):     "ZIP extraction triggered",
+    ("POST", "/discovery/assign"):          "Files assigned to case",
+    ("POST", "/discovery/extract-dates"):   "Date extraction run",
+    ("GET",  "/discovery/duplicates"):      "Duplicate scan performed",
+    ("POST", "/bates/configure"):           "Bates production set configured",
+    ("POST", "/bates/stamp"):               "Bates stamping executed",
+    ("DELETE", "/bates/log"):               "Bates log cleared",
+    ("GET",  "/production/bundle"):         "Production ZIP downloaded",
+    ("GET",  "/production/catalog"):        "Production catalog viewed",
+}
+
+def label_action(method: str, endpoint: str) -> str:
+    for (m, e), label in ACTION_LABELS.items():
+        if m == method and endpoint.startswith(e):
+            return label
+    return f"{method} {endpoint}"
+
+import csv as _csv, io as _io
+
+@router.get("/discovery/chain")
+def get_chain_of_custody(
+    limit: int = 200,
+    case_filter: str = None
+):
+    """Tamper-evident chain of custody — all discovery actions in order."""
+    conn = get_conn()
+    rows = conn.execute("""
+        SELECT * FROM audit_log
+        WHERE (endpoint LIKE '/discovery/%'
+            OR endpoint LIKE '/bates/%'
+            OR endpoint LIKE '/production/%')
+        ORDER BY id ASC
+        LIMIT ?
+    """, (limit,)).fetchall()
+    conn.close()
+
+    entries = []
+    for r in rows:
+        entries.append({
+            "seq":           r["id"],
+            "timestamp":     r["timestamp"],
+            "action":        label_action(r["method"], r["endpoint"]),
+            "method":        r["method"],
+            "endpoint":      r["endpoint"],
+            "status":        r["status_code"],
+            "response_ms":   round(r["response_time_ms"] or 0, 1),
+            "client_ip":     (r["client_ip"] or "")[:20],
+            "ok":            200 <= (r["status_code"] or 0) < 300,
+        })
+
+    return {
+        "total":   len(entries),
+        "entries": entries,
+    }
+
+@router.get("/discovery/chain/export")
+def export_chain_csv():
+    """Download chain of custody as a CSV file."""
+    conn = get_conn()
+    rows = conn.execute("""
+        SELECT * FROM audit_log
+        WHERE (endpoint LIKE '/discovery/%'
+            OR endpoint LIKE '/bates/%'
+            OR endpoint LIKE '/production/%')
+        ORDER BY id ASC
+    """).fetchall()
+    conn.close()
+
+    buf = _io.StringIO()
+    w = _csv.writer(buf)
+    w.writerow(["Seq","Timestamp","Action","Method","Endpoint",
+                "Status","Response ms","Client IP"])
+    for r in rows:
+        w.writerow([
+            r["id"], r["timestamp"],
+            label_action(r["method"], r["endpoint"]),
+            r["method"], r["endpoint"],
+            r["status_code"], round(r["response_time_ms"] or 0, 1),
+            (r["client_ip"] or "")[:20],
+        ])
+
+    buf.seek(0)
+    from fastapi.responses import StreamingResponse as SR
+    return SR(
+        _io.BytesIO(buf.getvalue().encode()),
+        media_type="text/csv",
+        headers={"Content-Disposition":
+                 "attachment; filename=chain_of_custody.csv"}
+    )

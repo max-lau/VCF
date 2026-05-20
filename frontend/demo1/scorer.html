@@ -1,6 +1,7 @@
 <!DOCTYPE html>
 <html lang="en">
-<head>
+<head><script src="paraiq-config.js"></script>
+<script src="paraiq-auth.js?v=3"></script>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>Summarization Quality Scorer</title>
@@ -296,10 +297,10 @@ function renderScore(d, container) {
           <div style="font-size:20px;font-weight:700;text-transform:uppercase;color:inherit;margin-bottom:4px">${d.verdict||'—'}</div>
           <div style="font-size:13px;color:#64748b">BERTScore-equivalent evaluation</div>
           <div style="display:flex;gap:8px;margin-top:8px;flex-wrap:wrap">
-            <span style="font-size:12px;font-weight:600;padding:3px 10px;border-radius:20px;background:#f1f5f9;color:#374151">
+            <span style="font-size:12px;font-weight:600;padding:3px 10px;border-radius:20px;background:#f1f5f9;color:#cbd5e1">
               Hallucination risk: <span style="color:${hallCol}">${Math.round(hallRisk*100)}%</span>
             </span>
-            <span style="font-size:12px;font-weight:600;padding:3px 10px;border-radius:20px;background:#f1f5f9;color:#374151">
+            <span style="font-size:12px;font-weight:600;padding:3px 10px;border-radius:20px;background:#f1f5f9;color:#cbd5e1">
               Compression: ${Math.round((d.compression_ratio||0)*100)}%
             </span>
           </div>
@@ -410,7 +411,7 @@ async function runAuto() {
     document.getElementById('autoResults').innerHTML = `
       <div class="card">
         <div class="card-title">Generated summary</div>
-        <div style="font-size:14px;line-height:1.8;color:#374151;background:#f8fafc;padding:12px;border-radius:8px;border-left:4px solid #6366f1">${d.summary||'—'}</div>
+        <div style="font-size:14px;line-height:1.8;color:#cbd5e1;background:#f8fafc;padding:12px;border-radius:8px;border-left:4px solid #6366f1">${d.summary||'—'}</div>
       </div>`;
 
     renderScore(score, 'autoResults');
@@ -431,9 +432,9 @@ function showErr(id, msg) {
   d.style.display = 'block';
 }
 </script>
-  <script src="paraiq-sidebar.js"></script>
+  <script src="paraiq-sidebar-v3.js"></script>
   <script src="paraiq-persist.js"></script>
-  <script src="paraiq-export.js"></script>
+  <script src="paraiq-export.js?v=8"></script>
 
   <script>
   document.addEventListener("DOMContentLoaded", function() {

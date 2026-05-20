@@ -27,7 +27,12 @@ import json
 import re
 from datetime import datetime, timezone
 from typing import List, Optional
-from fastapi import APIRouter, HTTPException, Query
+from fastapi import Depends, APIRouter, HTTPException, Query
+from backend.demo1.auth import get_current_firm_id, get_current_user
+from backend.demo1.intelligence import (
+    run_case_contradiction_scan, get_case_contradictions,
+    mark_reviewed, generate_case_brief,
+)
 from pydantic import BaseModel
 
 router  = APIRouter()
@@ -260,9 +265,10 @@ async def case_stats():
     conn  = get_db()
     stats = {}
     rows  = conn.execute(
-        "SELECT status, COUNT(*) cnt FROM cases WHERE deleted=0 GROUP BY status"
+        f"SELECT status, COUNT(*) cnt FROM cases WHERE deleted=0 AND (firm_id='default' OR firm_id IS NULL) GROUP BY status"
     ).fetchall()
     stats["by_status"] = {r["status"]: r["cnt"] for r in rows}
+    stats["total_cases"] = sum(stats["by_status"].values())
     rows = conn.execute(
         "SELECT risk_level, COUNT(*) cnt FROM cases WHERE deleted=0 GROUP BY risk_level"
     ).fetchall()
@@ -285,28 +291,74 @@ async def case_stats():
 
 @router.get("/search")
 async def search_cases(
-    q:       str           = Query(...),
+    q:       Optional[str] = Query(None),
+    _jwt_auth: str = Depends(get_current_firm_id),  # validates token
+    current_user: dict = Depends(get_current_user),
+    status:  Optional[str] = Query(None),
     case_id: Optional[int] = Query(None),
-    limit:   int           = Query(20, le=50),
+    limit:   int           = Query(50, le=100),
 ):
     conn = get_db()
+
+    # No query — return all cases with optional status filter
+    if not q or not q.strip():
+        firm_id = current_user.get('firm_id', 'default')
+        extra = f"WHERE deleted=0 AND (firm_id='{firm_id}' OR firm_id IS NULL)"
+        params = []
+        if status:
+            extra += " AND status=?"
+            params.append(status)
+        extra += " ORDER BY created_at DESC LIMIT ?"
+        params.append(limit)
+        rows = conn.execute(
+            f"SELECT id, case_number, client_name, matter_number, court, "
+            f"filing_date, status, risk_level, created_at,"
+            f"(SELECT COUNT(*) FROM case_documents WHERE case_id=cases.id) AS doc_count FROM cases {extra}",
+            params
+        ).fetchall()
+        conn.close()
+        return {"query": "", "cases": [row_to_dict(r) for r in rows],
+                "results": [row_to_dict(r) for r in rows], "count": len(rows)}
+
+    # FTS search — wrap in double quotes to handle hyphens and special chars
+    safe_q = '"'+ q.strip().replace('"', ' ') + '"'
     base = """
         SELECT cf.rowid, cf.case_id, cf.document_name,
                snippet(case_fts,2,'<mark>','</mark>','…',20) AS snippet,
-               c.case_number, c.client_name
+               c.case_number, c.client_name, c.status,
+               c.matter_number, c.court, c.filing_date,
+               c.risk_level, c.id, c.created_at
         FROM   case_fts cf JOIN cases c ON c.id=cf.case_id
-        WHERE  case_fts MATCH ? {extra}
+        WHERE  case_fts MATCH ? AND (c.firm_id=? OR c.firm_id IS NULL)
         ORDER BY rank LIMIT ?
     """
-    if case_id:
+    try:
+        if case_id:
+            rows = conn.execute(
+                base.format(extra="AND cf.case_id=?"),
+                (safe_q, case_id, limit)).fetchall()
+        else:
+            extra = ""
+            params = [safe_q]
+            if status:
+                extra = "AND c.status=?"
+                params.append(status)
+            params.append(limit)
+            rows = conn.execute(
+                base.format(extra=extra), params).fetchall()
+    except Exception:
+        # FTS failed — fallback to LIKE search
         rows = conn.execute(
-            base.format(extra="AND cf.case_id=?"), (q, case_id, limit)).fetchall()
-    else:
-        rows = conn.execute(
-            base.format(extra=""), (q, limit)).fetchall()
+            """SELECT id, case_number, client_name, matter_number, court,
+                      filing_date, status, doc_count, risk_level, created_at
+               FROM cases WHERE deleted=0
+               AND (case_number LIKE ? OR client_name LIKE ? OR matter_number LIKE ?)
+               ORDER BY created_at DESC LIMIT ?""",
+            (f"%{q}%", f"%{q}%", f"%{q}%", limit)
+        ).fetchall()
     conn.close()
-    return {"query": q, "results": [row_to_dict(r) for r in rows],
-            "count": len(rows)}
+    results = [row_to_dict(r) for r in rows]
+    return {"query": q, "cases": results, "results": results, "count": len(results)}
 
 
 @router.get("/{case_id}")
@@ -367,7 +419,7 @@ async def add_document(case_id: int, body: AddDocumentBody):
             (case_id,)).fetchone():
         conn.close()
         raise HTTPException(404, "Case not found")
-    conn.execute("""
+    cur = conn.execute("""
         INSERT INTO case_documents
           (case_id, document_name, source, doc_text, sentiment, risk_score,
            events_json, entities_json, summary, language, pacer_doc_id, pacer_seq_no)
@@ -383,8 +435,19 @@ async def add_document(case_id: int, body: AddDocumentBody):
     new_risk = compute_case_risk([row_to_dict(d) for d in docs])
     conn.execute("UPDATE cases SET risk_level=?, updated_at=? WHERE id=?",
                  (new_risk, ts_now(), case_id))
-    conn.commit(); conn.close()
+    conn.commit()
+    _new_doc_id = cur.lastrowid
+    conn.close()
+    # Fire contradiction scan in background — non-blocking
+    if body.doc_text:
+        import threading as _th
+        _th.Thread(
+            target=run_case_contradiction_scan,
+            args=(case_id, _new_doc_id),
+            daemon=True
+        ).start()
     return {"success": True, "case_id": case_id,
+            "document_id": _new_doc_id,
             "document_name": body.document_name, "new_risk_level": new_risk}
 
 
@@ -457,3 +520,126 @@ async def list_notes(case_id: int):
 
 # Auto-init on import
 init_case_db()
+
+
+# ── AI Timeline Extraction ────────────────────────────────────────────────────
+@router.post("/{case_id}/timeline/extract")
+async def extract_timeline_ai(case_id: int):
+    """Call Claude to extract timeline events from all linked case documents."""
+    conn = get_db()
+    docs = [row_to_dict(r) for r in conn.execute(
+        "SELECT document_name, doc_text FROM case_documents WHERE case_id=? AND doc_text IS NOT NULL",
+        (case_id,)).fetchall()]
+    conn.close()
+
+    texts = []
+    for doc in docs:
+        text = (doc.get("doc_text") or "").strip()
+        if len(text) > 4 and not text.startswith("Intake route:"):
+            texts.append("[Document: " + doc["document_name"] + "]\n" + text)
+
+    if not texts:
+        return {"case_id": case_id, "event_count": 0, "timeline": [],
+                "message": "No text content found — transcribe or analyze documents first"}
+
+    combined = "\n\n".join(texts)[:8000]
+
+    import anthropic as _ant, os as _os, json as _json, re as _re
+    _client = _ant.Anthropic(api_key=_os.getenv("ANTHROPIC_API_KEY"))
+
+    prompt = (
+        "Extract a chronological timeline from these legal case documents.\n"
+        "Return ONLY valid JSON, no markdown, no backticks:\n"
+        '{"events": [{"date": "date as written", "date_normalized": "YYYY-MM-DD",'
+        '"event": "description", "parties": ["people"], "significance": "high|medium|low",'
+        '"source_doc": "document name"}]}\n\n'
+        "Documents:\n" + combined
+    )
+
+    try:
+        msg = _client.messages.create(
+            model="claude-haiku-4-5-20251001",
+            max_tokens=2000,
+            messages=[{"role": "user", "content": prompt}]
+        )
+        raw = msg.content[0].text.strip()
+        raw = _re.sub(r'^```json\s*', '', raw)
+        raw = _re.sub(r'\s*```$', '', raw)
+        parsed = _json.loads(raw)
+        events = parsed.get("events", [])
+
+        conn = get_db()
+        for ev in events:
+            src_doc = ev.get("source_doc", "")
+            if src_doc:
+                existing = conn.execute(
+                    "SELECT id, events_json FROM case_documents WHERE case_id=? AND document_name=?",
+                    (case_id, src_doc)).fetchone()
+                if existing:
+                    try:
+                        prev = _json.loads(existing["events_json"] or "[]")
+                    except Exception:
+                        prev = []
+                    prev.append(ev)
+                    conn.execute(
+                        "UPDATE case_documents SET events_json=? WHERE id=?",
+                        (_json.dumps(prev), existing["id"]))
+        conn.commit()
+        conn.close()
+
+        # Auto-score risk from combined doc text and update case
+        try:
+            from backend.demo1.risk_scorer import score_text as _score_txt
+            _risk   = _score_txt(combined[:3000])
+            _level  = _risk.get("level", "unknown")
+            _score  = _risk.get("score", 0)
+            conn2   = get_db()
+            conn2.execute(
+                "UPDATE cases SET risk_level=? WHERE id=?",
+                (_level, case_id)
+            )
+            conn2.commit()
+            conn2.close()
+        except Exception as _re:
+            _level = "unknown"
+            _score = 0
+
+        return {"case_id": case_id, "event_count": len(events),
+                "timeline": events, "docs_scanned": len(texts),
+                "risk_level": _level, "risk_score": round(_score, 1)}
+    except Exception as e:
+        raise HTTPException(500, "AI extraction failed: " + str(e))
+
+
+# ═══════════════════════════════════════════════════════════════════════════
+# INTELLIGENCE ENGINE ENDPOINTS
+# ═══════════════════════════════════════════════════════════════════════════
+
+@router.get("/{case_id}/contradictions")
+async def list_contradictions(case_id: int):
+    """Return all contradictions detected for this case."""
+    items = get_case_contradictions(case_id)
+    return {
+        "case_id":       case_id,
+        "count":         len(items),
+        "unreviewed":    sum(1 for i in items if not i["reviewed"]),
+        "contradictions": items,
+    }
+
+
+@router.patch("/{case_id}/contradictions/{c_id}/review")
+async def review_contradiction(case_id: int, c_id: int):
+    """Mark a specific contradiction as reviewed."""
+    mark_reviewed(c_id)
+    return {"success": True}
+
+
+@router.post("/{case_id}/brief")
+async def case_brief(case_id: int):
+    """Generate an AI case brief (2-page legal memo) for this case."""
+    try:
+        brief = generate_case_brief(case_id)
+        return {"success": True, "case_id": case_id, "brief": brief}
+    except Exception as exc:
+        raise HTTPException(status_code=500,
+                            detail=f"Brief generation failed: {str(exc)}")

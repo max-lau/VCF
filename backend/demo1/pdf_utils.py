@@ -143,14 +143,19 @@ def make_data_table(headers: list, rows: list, col_widths: list = None) -> Table
     headers: list of column labels.
     rows: list of row value lists.
     """
-    all_rows = [headers] + rows
+    from reportlab.lib.styles import ParagraphStyle as _PS
+    hdr_st  = _PS("dth", fontName="Helvetica-Bold", fontSize=8, textColor=colors.white, leading=10)
+    cell_st = _PS("dtc", fontName="Helvetica", fontSize=8, textColor=colors.HexColor("#1f2937"), leading=10)
+    hdr_row      = [Paragraph(str(h), hdr_st)  for h in headers]
+    wrapped_rows = [[Paragraph(str(v), cell_st) for v in row] for row in rows]
+    all_rows = [hdr_row] + wrapped_rows
     # Auto-distribute width if not specified
     if not col_widths:
         n = len(headers)
         total = 6.3  # usable inches (letter - margins)
         col_widths = [round(total / n, 2) * inch] * n
 
-    tbl = Table(all_rows, colWidths=col_widths)
+    tbl = Table(all_rows, colWidths=col_widths, repeatRows=1)
     tbl.setStyle(TableStyle([
         ("BACKGROUND",    (0, 0), (-1, 0), DARK),
         ("TEXTCOLOR",     (0, 0), (-1, 0), colors.white),

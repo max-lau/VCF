@@ -1,6 +1,7 @@
 <!DOCTYPE html>
 <html lang="en">
-<head>
+<head><script src="paraiq-config.js"></script>
+<script src="paraiq-auth.js?v=3"></script>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>Redaction Review — NLP Legal Analyzer</title>
@@ -152,7 +153,7 @@
       </div>
       <div style="display:flex;align-items:center;gap:6px;margin-top:14px">
         <input type="checkbox" id="useClaude" checked style="accent-color:#7c3aed">
-        <label for="useClaude" style="font-size:13px;color:#374151">Claude contextual detection</label>
+        <label for="useClaude" style="font-size:13px;color:#cbd5e1">Claude contextual detection</label>
       </div>
       <button class="btn primary" style="margin-top:14px" onclick="runReview()">Analyze for Review</button>
       <button class="btn outline" style="margin-top:14px" onclick="loadExample()">Load Example</button>
@@ -645,14 +646,14 @@ function getCatClass(cat) {
     EMAIL:'background:#fef3c7;color:#92400e',
     MEDICAL:'background:#d1fae5;color:#065f46',
   };
-  return colors[cat] || 'background:#f3f4f6;color:#374151';
+  return colors[cat] || 'background:#f3f4f6;color:#cbd5e1';
 }
 
 function escHtml(str) {
   return String(str||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
 }
 </script>
-  <script src="paraiq-sidebar.js"></script>
+  <script src="paraiq-sidebar-v3.js"></script>
   <script src="paraiq-persist.js"></script>
   <script src="paraiq-export.js"></script>
 

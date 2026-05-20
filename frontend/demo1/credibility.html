@@ -1,6 +1,7 @@
 <!DOCTYPE html>
 <html lang="en">
-<head>
+<head><script src="paraiq-config.js"></script>
+<script src="paraiq-auth.js?v=3"></script>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>ParaIQ — Witness Credibility Scorer</title>
@@ -8,10 +9,10 @@
     *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
 
     :root {
-      --bg:        #0f172a;
+      --bg: #0f172a;
       --surface:   #1e293b;
       --surface2:  #263347;
-      --border:    #334155;
+      --border: #334155;
       --purple:    #7c3aed;
       --purple-lt: #a78bfa;
       --purple-dk: #5b21b6;
@@ -19,8 +20,8 @@
       --green:     #10b981;
       --amber:     #f59e0b;
       --red:       #ef4444;
-      --text:      #f1f5f9;
-      --muted:     #94a3b8;
+      --text: #e2e8f0;
+      --muted: #64748b;
     }
 
     body { font-family: 'Segoe UI', system-ui, sans-serif; background: var(--bg); color: var(--text); min-height: 100vh; }
@@ -28,7 +29,7 @@
     /* NAV */
 
     /* PAGE */
-    .page { max-width: 1100px; margin: 0 auto; padding: 28px 20px 60px; }
+    .page { margin-left: 220px; max-width: 1100px; margin: 0 auto; padding: 28px 20px 60px; }
     .page-title { font-size: 22px; font-weight: 700; margin-bottom: 4px; }
     .page-sub { font-size: 13px; color: var(--muted); margin-bottom: 16px; }
 
@@ -251,6 +252,7 @@ The scorer will analyze:
 <script>
   // ParaIQ API authentication key
   const PARAIQ_KEY = 'pk-84d8657019538fb44aeee9a6a58b2342c5b819c4cceecb3996570d9e980afa40';
+  const API = 'https://nlp.para-iq.com';
 /* ── EXAMPLES ── */
 function loadExample(type) {
   if (type === 'high') {
@@ -314,7 +316,7 @@ async function scoreWitness() {
   document.getElementById('results').classList.remove('visible');
 
   try {
-    const resp = await fetch('https://nlp.para-iq.com/credibility/score', {
+    const resp = await fetch(`${API}/credibility/score`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', 'X-API-Key': PARAIQ_KEY },
       body: JSON.stringify({
@@ -489,7 +491,7 @@ window.addEventListener('load', () => {
   }
 });
 </script>
-  <script src="paraiq-sidebar.js"></script>
+  <script src="paraiq-sidebar-v3.js"></script>
   <script src="paraiq-persist.js"></script>
   <script src="paraiq-export.js"></script>
 

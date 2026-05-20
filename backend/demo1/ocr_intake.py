@@ -357,3 +357,111 @@ def supported_languages():
     }
 
 
+
+
+# ── Audio Transcription (OpenAI Whisper) ──────────────────────────────────────
+
+@router.post("/audio")
+async def transcribe_audio(
+    file: UploadFile = File(...),
+    lang: str = "auto",
+    module: str = "intake",
+    redact: bool = False,
+    redact_style: str = "label"
+):
+    """
+    Transcribe audio/video file using OpenAI Whisper.
+    Returns transcript, detected language, duration, word count, recording_id.
+    """
+    import openai, uuid, tempfile, time
+
+    openai_key = os.getenv("OPENAI_API_KEY", "")
+    if not openai_key:
+        raise HTTPException(status_code=500, detail="OpenAI API key not configured")
+
+    client_oai = openai.OpenAI(api_key=openai_key)
+
+    # Save upload to temp file (Whisper needs a real file path)
+    suffix = os.path.splitext(file.filename or "audio.webm")[1] or ".webm"
+    with tempfile.NamedTemporaryFile(delete=False, suffix=suffix) as tmp:
+        tmp.write(await file.read())
+        tmp_path = tmp.name
+
+    try:
+        t_start = time.time()
+
+        # Call Whisper
+        whisper_kwargs = {"model": "whisper-1", "response_format": "verbose_json"}
+        if lang and lang != "auto":
+            whisper_kwargs["language"] = lang
+
+        with open(tmp_path, "rb") as audio_f:
+            result = client_oai.audio.transcriptions.create(
+                file=audio_f,
+                **whisper_kwargs
+            )
+
+        duration  = round(getattr(result, "duration", time.time() - t_start), 2)
+        transcript = result.text or ""
+        detected   = getattr(result, "language", lang if lang != "auto" else "unknown")
+        word_count = len(transcript.split())
+        rec_id     = str(uuid.uuid4())[:8]
+
+        response = {
+            "transcript":        transcript,
+            "detected_language": detected,
+            "duration_seconds":  duration,
+            "word_count":        word_count,
+            "recording_id":      rec_id,
+        }
+
+        # Optional inline redaction via Claude
+        if redact and transcript:
+            try:
+                claude = anthropic.Anthropic(api_key=os.getenv("ANTHROPIC_API_KEY"))
+                styles = {
+                    "label":  "Replace PII with [CATEGORY] labels like [NAME], [DOB], [PHONE].",
+                    "redact": "Replace PII with █████ blocks.",
+                    "tag":    "Wrap PII in <redacted category=\'TYPE\'>original</redacted> tags.",
+                }
+                style_prompt = styles.get(redact_style, styles["label"])
+                msg = claude.messages.create(
+                    model="claude-haiku-4-5-20251001",
+                    max_tokens=2048,
+                    messages=[{
+                        "role": "user",
+                        "content": (
+                            f"You are a legal document redactor. {style_prompt}\n"
+                            f"Identify and redact all PII including names, dates of birth, "
+                            f"phone numbers, addresses, SSNs, medical record numbers, "
+                            f"insurance IDs, and financial account numbers.\n\n"
+                            f"Text to redact:\n{transcript}\n\n"
+                            "Return JSON only: "
+                            "{redacted_transcript, findings: [{text, category, score}], "
+                            "total_redactions, confidence_score}"
+                        )
+                    }]
+                )
+                import json as _json
+                raw = msg.content[0].text.strip()
+                raw = re.sub(r"^```json|^```|```$", "", raw, flags=re.MULTILINE).strip()
+                rd = _json.loads(raw)
+                rd["original_transcript"] = transcript
+                rd["applied"] = True
+                response["redaction"] = rd
+            except Exception as e:
+                response["redaction"] = {"applied": False, "error": str(e)}
+
+        return response
+
+    except openai.AuthenticationError:
+        raise HTTPException(status_code=500, detail="Invalid or missing OpenAI API key")
+    except openai.BadRequestError as e:
+        raise HTTPException(status_code=400, detail=f"Whisper error: {str(e)}")
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Transcription failed: {str(e)}")
+    finally:
+        try:
+            os.unlink(tmp_path)
+        except Exception:
+            pass

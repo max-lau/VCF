@@ -1,6 +1,7 @@
 <!DOCTYPE html>
 <html lang="en">
-<head>
+<head><script src="paraiq-config.js"></script>
+<script src="paraiq-auth.js?v=3"></script>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>Legal Model — NLP Legal Analyzer</title>
@@ -125,7 +126,7 @@
 
   async function loadModelInfo() {
     try {
-      const r = await fetch(`${API}/model/info`);
+      const r = await fetch(`${API}/model/info`, { headers: { 'X-API-Key': PARAIQ_KEY } });
       const d = await r.json();
       const el = document.getElementById('modelStatus');
       if (d.ready) {
@@ -153,10 +154,10 @@
     btn.disabled = true; btn.textContent = 'Training...';
     document.getElementById('trainingProgress').style.display = 'block';
 
-    await fetch(`${API}/model/train`, { method: 'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify({epochs:3}) });
+    await fetch(`${API}/model/train`, { method: 'POST', headers: {'Content-Type':'application/json','X-API-Key':PARAIQ_KEY}, body: JSON.stringify({epochs:3}) });
 
     const poll = setInterval(async () => {
-      const r = await fetch(`${API}/model/status`);
+      const r = await fetch(`${API}/model/status`, { headers: { 'X-API-Key': PARAIQ_KEY } });
       const d = await r.json();
       document.getElementById('progressMsg').textContent = d.message || 'Training...';
       document.getElementById('progressBar').style.width = (d.progress || 0) + '%';
@@ -175,7 +176,7 @@
     btn.disabled = true; btn.textContent = 'Classifying...';
     try {
       const r = await fetch(`${API}/model/predict`, {
-        method: 'POST', headers: {'Content-Type':'application/json'},
+        method: 'POST', headers: {'Content-Type':'application/json','X-API-Key':PARAIQ_KEY},
         body: JSON.stringify({ text, label: 'Input' })
       });
       const d = await r.json();
@@ -199,12 +200,12 @@
 
   async function runExamples() {
     try {
-      const r = await fetch(`${API}/model/examples`);
+      const r = await fetch(`${API}/model/examples`, { headers: { 'X-API-Key': PARAIQ_KEY } });
       const d = await r.json();
       const examples = d.examples || [];
       document.getElementById('examplesList').innerHTML = examples.map(e => `
         <div style="padding:10px 0;border-bottom:1px solid #f3f4f6;">
-          <div style="font-size:12px;color:#374151;margin-bottom:6px;">${e.text}</div>
+          <div style="font-size:12px;color:#cbd5e1;margin-bottom:6px;">${e.text}</div>
           <span class="label-pill ${pillClass(e.label)}">${e.label||'—'}</span>
           <span style="font-size:11px;color:#9ca3af;margin-left:8px;">${((e.confidence||0)*100).toFixed(1)}% confidence</span>
         </div>`).join('');
@@ -214,7 +215,7 @@
 
   loadModelInfo();
 </script>
-  <script src="paraiq-sidebar.js"></script>
+  <script src="paraiq-sidebar-v3.js"></script>
   <script src="paraiq-persist.js"></script>
 </body>
 </html>

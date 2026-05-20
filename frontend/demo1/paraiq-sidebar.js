@@ -4,6 +4,50 @@
 ═══════════════════════════════════════════════════════════ */
 (function () {
 
+  /* ── Auth guard ─────────────────────────────────────── */
+  var currentFile = window.location.pathname.split('/').pop() || 'home.html';
+  if (currentFile === 'index.html') currentFile = 'home.html';
+
+  var PUBLIC_PAGES = ['login.html'];
+
+  function getTokenPayload(token) {
+    try {
+      var b64 = token.split('.')[1].replace(/-/g, '+').replace(/_/g, '/');
+      return JSON.parse(atob(b64));
+    } catch(e) { return null; }
+  }
+
+  function getToken() {
+    try { return localStorage.getItem('paraiq_token'); } catch(e) { return null; }
+  }
+
+  function getUsername() {
+    try { return localStorage.getItem('paraiq_user') || 'User'; } catch(e) { return 'User'; }
+  }
+
+  function logout() {
+    try {
+      localStorage.removeItem('paraiq_token');
+      localStorage.removeItem('paraiq_user');
+    } catch(e) {}
+    window.location.href = 'login.html';
+  }
+
+  // Run auth check immediately (before DOM render)
+  if (PUBLIC_PAGES.indexOf(currentFile) === -1) {
+    var token = getToken();
+    var authed = false;
+    if (token) {
+      var payload = getTokenPayload(token);
+      if (payload && payload.exp && payload.exp * 1000 > Date.now()) {
+        authed = true;
+      }
+    }
+    if (!authed) {
+      window.location.replace('login.html');
+    }
+  }
+
   /* ── Nav structure ───────────────────────────────────── */
   var GROUPS = [
     {
@@ -44,19 +88,14 @@
     {
       label: 'Processing',
       items: [
-        { href: 'intake.html',           label: 'Intake',         icon: '📷' },
-        { href: 'redaction.html',        label: 'Redaction',      icon: '✏️'  },
-        { href: 'redaction_review.html', label: 'Redact Review',  icon: '👁️'  },
-        { href: 'multilingual.html',     label: 'Multilingual',   icon: '🌐' },
-        { href: 'model.html',            label: 'Model',          icon: '🤖' },
+        { href: 'intake.html',           label: 'Intake',        icon: '📷' },
+        { href: 'redaction.html',        label: 'Redaction',     icon: '✏️'  },
+        { href: 'redaction_review.html', label: 'Redact Review', icon: '👁️'  },
+        { href: 'multilingual.html',     label: 'Multilingual',  icon: '🌐' },
+        { href: 'model.html',            label: 'Model',         icon: '🤖' },
       ]
     },
   ];
-
-  /* ── Detect active page ─────────────────────────────── */
-  var currentFile = window.location.pathname.split('/').pop() || 'home.html';
-  // index.html → treat as home.html for active state
-  if (currentFile === 'index.html') currentFile = 'home.html';
 
   /* ── Build sidebar HTML ─────────────────────────────── */
   function buildNav() {
@@ -97,7 +136,9 @@
 
   /* ── Mount ──────────────────────────────────────────── */
   function mount() {
-    /* Sidebar element */
+    var username = getUsername();
+    var initials = username.slice(0,2).toUpperCase();
+
     var sidebar = document.createElement('div');
     sidebar.id = 'paraiq-sidebar';
     sidebar.innerHTML =
@@ -107,10 +148,20 @@
       '</div>' +
       '<nav class="sb-nav">' + buildNav() + '</nav>' +
       '<div class="sb-footer">' +
-        '<a href="https://nlp.para-iq.com/docs" target="_blank">API Docs →</a>' +
+        '<div class="sb-user">' +
+          '<div class="sb-avatar">' + initials + '</div>' +
+          '<div class="sb-user-info">' +
+            '<div class="sb-user-name">' + username + '</div>' +
+            '<div class="sb-user-role">Attorney</div>' +
+          '</div>' +
+          '<button class="sb-logout" title="Sign out" onclick="(function(){' +
+            'try{localStorage.removeItem(\'paraiq_token\');localStorage.removeItem(\'paraiq_user\');}catch(e){}' +
+            'window.location.href=\'login.html\';' +
+          '})()">⏻</button>' +
+        '</div>' +
+        '<a href="https://nlp.para-iq.com/docs" target="_blank" style="display:block;margin-top:8px;font-size:11px;color:#475569;text-decoration:none;text-align:center;">API Docs →</a>' +
       '</div>';
 
-    /* Toggle button */
     var toggle = document.createElement('button');
     toggle.id = 'sb-toggle';
     toggle.title = 'Toggle navigation';
@@ -121,14 +172,12 @@
       setOpen(!document.body.classList.contains('sb-open'), toggle);
     });
 
-    /* Close sidebar on mobile when a link is clicked */
     sidebar.addEventListener('click', function (e) {
       if (e.target.classList.contains('sb-link') && window.innerWidth < 769) {
         setOpen(false, toggle);
       }
     });
 
-    /* Close on backdrop click (mobile) */
     document.addEventListener('click', function (e) {
       if (window.innerWidth < 769 &&
           document.body.classList.contains('sb-open') &&
@@ -138,11 +187,9 @@
       }
     });
 
-    /* Insert before everything else in body */
     document.body.insertBefore(sidebar, document.body.firstChild);
     document.body.insertBefore(toggle, document.body.firstChild);
 
-    /* Restore state from localStorage */
     var isMobile = window.innerWidth < 769;
     var stored = null;
     try { stored = localStorage.getItem(STORAGE_KEY); } catch (e) {}

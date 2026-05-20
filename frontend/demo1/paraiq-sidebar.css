@@ -182,3 +182,142 @@ body.sb-open #sb-toggle {
     z-index: 190;
   }
 }
+
+/* ── User badge (auth) ──────────────────────────────── */
+.sb-user {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 10px;
+  background: rgba(255,255,255,0.04);
+  border-radius: 8px;
+  margin-bottom: 4px;
+}
+.sb-avatar {
+  width: 30px;
+  height: 30px;
+  border-radius: 50%;
+  background: #7c3aed;
+  color: #fff;
+  font-size: 11px;
+  font-weight: 700;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+}
+.sb-user-info { flex: 1; min-width: 0; }
+.sb-user-name {
+  font-size: 12px;
+  font-weight: 600;
+  color: #e2e8f0;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.sb-user-role { font-size: 10px; color: #475569; }
+.sb-logout {
+  background: none;
+  border: none;
+  color: #475569;
+  font-size: 14px;
+  cursor: pointer;
+  padding: 4px;
+  border-radius: 4px;
+  line-height: 1;
+  flex-shrink: 0;
+}
+.sb-logout:hover { color: #ef4444; background: rgba(239,68,68,0.1); }
+
+/* ── Feature 32: Mobile page optimisation ──────────────────────────────────── */
+@media (max-width: 768px) {
+  /* Page padding */
+  .page { padding: 1rem 1rem !important; }
+
+  /* Page titles */
+  .page-title { font-size: 18px !important; }
+
+  /* Stats rows — 2 columns on mobile */
+  .stats-row { grid-template-columns: 1fr 1fr !important; display: grid !important; }
+
+  /* Route/tab cards — 2 col */
+  .route-cards { grid-template-columns: 1fr 1fr !important; }
+  .tab-bar { gap: 4px !important; }
+  .tab { padding: 6px 12px !important; font-size: 12px !important; }
+
+  /* Case row — stack vertically */
+  .case-row { flex-direction: column !important; }
+  .case-row input { width: 100% !important; }
+
+  /* Tables — horizontal scroll */
+  .cases-table, .bates-table, .coc-table, .priv-table,
+  .history-table, .users-table, .segments-table {
+    display: block !important;
+    overflow-x: auto !important;
+    -webkit-overflow-scrolling: touch;
+  }
+
+  /* Detail panel meta — stack */
+  .detail-meta { flex-direction: column !important; gap: 4px !important; }
+  .detail-header { flex-direction: column !important; gap: 10px !important; }
+  .detail-tabs { overflow-x: auto !important; }
+  .detail-tab { white-space: nowrap !important; padding: 8px 12px !important; font-size: 12px !important; }
+
+  /* Bates config grid — single col */
+  .bates-config-grid { grid-template-columns: 1fr 1fr !important; }
+  .bates-actions { flex-wrap: wrap !important; gap: 8px !important; }
+
+  /* Info grid — single col */
+  .info-grid { grid-template-columns: 1fr !important; }
+
+  /* Modal — full width */
+  .modal { margin: 1rem !important; max-width: calc(100vw - 2rem) !important; }
+  .modal-grid { grid-template-columns: 1fr !important; }
+  .modal-field.full { grid-column: 1 !important; }
+
+  /* Entity grid — single col */
+  .entity-grid { grid-template-columns: 1fr !important; }
+
+  /* Plan cards — single col */
+  .plan-cards { grid-template-columns: 1fr !important; }
+
+  /* Invite form — single col */
+  .invite-grid { grid-template-columns: 1fr !important; }
+
+  /* Toolbar — wrap */
+  .toolbar { flex-wrap: wrap !important; }
+  .search-input { min-width: 100% !important; }
+
+  /* Upload zones — smaller padding */
+  .upload-zone { padding: 1.5rem 1rem !important; }
+  .upload-icon { font-size: 32px !important; }
+
+  /* SMS bubbles — full width */
+  .sms-bubble { max-width: 90% !important; }
+  .chat-msg   { max-width: 90% !important; }
+
+  /* Result meta — stack */
+  .result-meta { flex-direction: column !important; gap: 4px !important; }
+
+  /* Privilege clause meta — wrap */
+  .clause-meta { flex-wrap: wrap !important; }
+
+  /* Buttons — allow wrapping */
+  .bates-actions, .priv-toolbar, .coc-toolbar { flex-wrap: wrap !important; }
+
+  /* Link form row — stack */
+  .link-row { flex-direction: column !important; }
+  .link-select { min-width: 100% !important; }
+
+  /* Form rows — stack */
+  .form-row { flex-direction: column !important; }
+}
+
+@media (max-width: 480px) {
+  /* Extra small — single col everything */
+  .route-cards { grid-template-columns: 1fr !important; }
+  .stats-row   { grid-template-columns: 1fr 1fr !important; }
+  .bates-config-grid { grid-template-columns: 1fr !important; }
+  .tab { font-size: 11px !important; padding: 5px 10px !important; }
+  .btn { padding: 8px 16px !important; font-size: 13px !important; }
+}

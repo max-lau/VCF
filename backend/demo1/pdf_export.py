@@ -15,7 +15,7 @@ import sqlite3
 import json
 from datetime import datetime, timezone
 from fastapi import APIRouter, HTTPException
-from fastapi.responses import StreamingResponse
+from fastapi.responses import StreamingResponse, Response
 from pydantic import BaseModel
 from typing import Optional
 
@@ -30,7 +30,7 @@ from reportlab.platypus import (
 from reportlab.lib.enums import TA_LEFT, TA_CENTER, TA_RIGHT
 
 router  = APIRouter()
-DB_PATH = "backend/demo1/analyses.db"
+DB_PATH = "/root/nlp-portfolio/analyses.db"
 
 
 # ── DB helper ──────────────────────────────────────────────────────────────────
@@ -363,6 +363,90 @@ def build_case_pdf(case: dict, documents: list) -> bytes:
     return buf.getvalue()
 
 
+
+def build_brief_pdf(brief: dict) -> bytes:
+    """Render an AI Case Brief as a professional law-firm memo PDF."""
+    buf = io.BytesIO()
+    doc = SimpleDocTemplate(buf, pagesize=LETTER,
+                            leftMargin=0.85*inch, rightMargin=0.85*inch,
+                            topMargin=0.9*inch, bottomMargin=0.9*inch)
+    styles = get_styles()
+    story  = []
+
+    case_num = brief.get("case_number", "")
+    matter   = brief.get("matter", "")
+    gen_date = brief.get("generated_at", datetime.now().strftime("%B %d, %Y"))
+    risk_sc  = brief.get("risk_score", "N/A")
+
+    # ── Confidentiality banner
+    conf_style = ParagraphStyle("conf", fontSize=8, fontName="Helvetica-Bold",
+                                textColor=colors.HexColor("#c0392b"),
+                                alignment=TA_CENTER, spaceAfter=6)
+    story.append(Paragraph(
+        "PRIVILEGED AND CONFIDENTIAL — ATTORNEY WORK PRODUCT", conf_style))
+    story.append(HRFlowable(width="100%", thickness=1,
+                             color=colors.HexColor("#c0392b")))
+    story.append(Spacer(1, 10))
+
+    # ── Header
+    story.append(Paragraph("AI Case Brief", styles["title"]))
+    story.append(Spacer(1, 8))
+    story.append(Paragraph(f"{case_num}  ·  {matter}", styles["subtitle"]))
+    story.append(Spacer(1, 6))
+    story.append(HRFlowable(width="100%", thickness=2, color=GOLD, spaceAfter=10))
+
+    # ── Meta row
+    meta_style = ParagraphStyle("meta", fontSize=8.5, fontName="Helvetica",
+                                textColor=GRAY, spaceAfter=12)
+    risk_color_hex = ("#c0392b" if isinstance(risk_sc, (int,float)) and risk_sc >= 7
+                      else "#e67e22" if isinstance(risk_sc, (int,float)) and risk_sc >= 4
+                      else "#27ae60")
+    risk_label = (f'<font color="{risk_color_hex}"><b>Risk Score: {risk_sc}/10</b></font>'
+                  if risk_sc != "N/A" else "Risk Score: N/A")
+    story.append(Paragraph(
+        f"Generated: {gen_date} &nbsp;&nbsp;|&nbsp;&nbsp; "
+        f"Prepared by: ParaIQ AI / Claude Sonnet &nbsp;&nbsp;|&nbsp;&nbsp; {risk_label}",
+        meta_style))
+    story.append(HRFlowable(width="100%", thickness=0.5, color=LGRAY))
+    story.append(Spacer(1, 12))
+
+    # ── Sections
+    sections = brief.get("sections", {})
+    section_style = ParagraphStyle("bsec", fontSize=9.5, fontName="Helvetica-Bold",
+                                   textColor=colors.HexColor("#7c3aed"),
+                                   spaceBefore=14, spaceAfter=5,
+                                   textTransform="uppercase", letterSpacing=1)
+    body_style = ParagraphStyle("bbody", fontSize=10.5, fontName="Helvetica",
+                                textColor=colors.HexColor("#1e293b"),
+                                leading=16, spaceAfter=4)
+
+    for key, sec in sections.items():
+        title   = sec.get("title", key)
+        content = sec.get("content", "")
+        if not content:
+            continue
+        block = [
+            Paragraph(title, section_style),
+            HRFlowable(width="100%", thickness=0.5,
+                       color=colors.HexColor("#e2e8f0")),
+            Spacer(1, 4),
+        ]
+        # Numbered lists → preserve line breaks
+        for line in content.split("\n"):
+            line = line.strip()
+            if line:
+                block.append(Paragraph(line, body_style))
+        story.append(KeepTogether(block))
+
+    # ── Footer
+    story.append(Spacer(1, 20))
+    story.append(HRFlowable(width="100%", thickness=0.5, color=GRAY))
+    story.append(Spacer(1, 4))
+    story.append(make_footer_note(styles))
+
+    doc.build(story)
+    return buf.getvalue()
+
 # ── Routes ─────────────────────────────────────────────────────────────────────
 
 class AnalysisExportBody(BaseModel):
@@ -418,7 +502,7 @@ def export_case_pdf(case_id: int):
         raise HTTPException(404, f"Case {case_id} not found")
 
     docs = conn.execute(
-        "SELECT * FROM case_documents WHERE case_id=? ORDER BY created_at DESC",
+        "SELECT * FROM case_documents WHERE case_id=? ORDER BY upload_date DESC",
         (case_id,)
     ).fetchall()
     conn.close()
@@ -503,3 +587,25 @@ def export_intake_pdf(body: IntakeExportBody):
     )
 
 
+
+@router.get("/brief/{case_id}")
+def export_brief_pdf(case_id: int):
+    """Export the most recent AI Case Brief for a case as a PDF."""
+    import sqlite3 as _sq
+    conn = _sq.connect("analyses.db")
+    conn.row_factory = _sq.Row
+    row  = conn.execute(
+        "SELECT brief_json FROM case_briefs WHERE case_id=? ORDER BY generated_at DESC LIMIT 1",
+        (case_id,)
+    ).fetchone()
+    if not row:
+        raise HTTPException(404, "No brief found — generate one first from the case detail page")
+    brief = json.loads(row["brief_json"])
+    conn.close()
+    pdf   = build_brief_pdf(brief)
+    fname = f"ParaIQ_Brief_{brief.get('case_number','case').replace('/','-').replace(' ','_')}.pdf"
+    return Response(
+        content=pdf,
+        media_type="application/pdf",
+        headers={"Content-Disposition": f'attachment; filename="{fname}"'}
+    )

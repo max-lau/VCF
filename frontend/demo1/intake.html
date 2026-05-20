@@ -1,6 +1,7 @@
 <!DOCTYPE html>
 <html lang="en">
-<head>
+<head><script src="paraiq-config.js"></script>
+<script src="paraiq-auth.js?v=3"></script>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>OCR Intake — NLP Legal Analyzer</title>
@@ -341,7 +342,7 @@
         currentMode === 'analyze' ? 'Running OCR + NLP pipeline...' :
         currentMode === 'scan' ? 'Extracting text via OCR...' : 'Parsing intake form...';
 
-      const resp = await fetch(`${API}${endpoint}`, { method: 'POST', body: formData });
+      const resp = await fetch(`${API}${endpoint}`, { method: 'POST', body: formData, headers: { 'X-API-Key': PARAIQ_KEY } });
       const d = await resp.json();
 
       if (!d.success) {
@@ -415,7 +416,7 @@
         const facts = fields.key_facts || [];
         document.getElementById('keyFacts').innerHTML = facts.length
           ? `<div style="font-size:11px;font-weight:700;color:#94a3b8;text-transform:uppercase;letter-spacing:0.1em;margin-bottom:8px;">Key Facts</div>` +
-            facts.map(f => `<div style="font-size:12px;color:#374151;padding:6px 0;border-bottom:1px solid #f3f4f6;">• ${f}</div>`).join('')
+            facts.map(f => `<div style="font-size:12px;color:#cbd5e1;padding:6px 0;border-bottom:1px solid #f3f4f6;">• ${f}</div>`).join('')
           : '';
 
         formCard.style.display = 'block';
@@ -460,7 +461,7 @@
 
   async function loadHistory() {
     try {
-      const r = await fetch(`${API}/intake/history`);
+      const r = await fetch(`${API}/intake/history`, { headers: { 'X-API-Key': PARAIQ_KEY } });
       const d = await r.json();
       const scans = d.scans || [];
       document.getElementById('historyList').innerHTML = scans.length
@@ -481,7 +482,7 @@
     }
   }
 </script>
-  <script src="paraiq-sidebar.js"></script>
+  <script src="paraiq-sidebar-v3.js"></script>
   <script src="paraiq-persist.js"></script>
   <script src="paraiq-export.js"></script>
 </body>

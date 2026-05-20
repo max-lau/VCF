@@ -1,6 +1,7 @@
 <!DOCTYPE html>
 <html lang="en">
-<head>
+<head><script src="paraiq-config.js"></script>
+<script src="paraiq-auth.js?v=3"></script>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>Redaction — NLP Legal Analyzer</title>
@@ -171,7 +172,7 @@
         </div>
         <div style="display:flex;align-items:center;gap:6px;margin-top:16px">
           <input type="checkbox" id="useClaude" checked style="accent-color:#7c3aed">
-          <label for="useClaude" style="font-size:13px;color:#374151">Claude contextual detection</label>
+          <label for="useClaude" style="font-size:13px;color:#cbd5e1">Claude contextual detection</label>
         </div>
         <button class="btn primary" style="margin-top:16px" onclick="runTextRedaction()">Redact Text</button>
         <button class="btn outline" style="margin-top:16px" onclick="clearText()">Clear</button>
@@ -261,7 +262,7 @@
         </div>
         <div style="display:flex;align-items:center;gap:6px;margin-top:16px">
           <input type="checkbox" id="pdfUseClaude" checked style="accent-color:#7c3aed">
-          <label for="pdfUseClaude" style="font-size:13px;color:#374151">Claude contextual detection</label>
+          <label for="pdfUseClaude" style="font-size:13px;color:#cbd5e1">Claude contextual detection</label>
         </div>
       </div>
     </div>
@@ -384,7 +385,7 @@ async function runTextRedaction() {
   try {
     var resp = await fetch(API + '/redact/text', {
       method: 'POST',
-      headers: {'Content-Type': 'application/json'},
+      headers: {'Content-Type': 'application/json', 'X-API-Key': PARAIQ_KEY},
       body: JSON.stringify(payload),
     });
     var data = await resp.json();
@@ -480,7 +481,7 @@ async function uploadPdf(file) {
   var url = API + '/redact/pdf?threshold=' + threshold + '&style=' + style + '&use_claude=' + useClaude;
 
   try {
-    var resp = await fetch(url, { method: 'POST', body: formData });
+    var resp = await fetch(url, { method: 'POST', body: formData, headers: { 'X-API-Key': PARAIQ_KEY } });
     var data = await resp.json();
     document.getElementById('pdfLoader').className = 'loader';
 
@@ -517,7 +518,7 @@ async function deletePdf() {
   if (!currentPdfRedactionId) return;
   if (!confirm('Permanently delete this redacted PDF? This action cannot be undone.')) return;
   try {
-    var resp = await fetch(API + '/redact/' + currentPdfRedactionId, { method: 'DELETE' });
+    var resp = await fetch(API + '/redact/' + currentPdfRedactionId, { method: 'DELETE', headers: { 'X-API-Key': PARAIQ_KEY } });
     var data = await resp.json();
     alert(data.message || 'File securely deleted.');
     currentPdfRedactionId = null;
@@ -532,7 +533,7 @@ async function loadFiles() {
   var container = document.getElementById('filesList');
   container.innerHTML = '<div style="text-align:center;color:#9ca3af;padding:1rem;font-size:13px">Loading...</div>';
   try {
-    var resp = await fetch(API + '/redact/files');
+    var resp = await fetch(API + '/redact/files', { headers: { 'X-API-Key': PARAIQ_KEY } });
     var data = await resp.json();
     if (!data.files || data.files.length === 0) {
       container.innerHTML = '<div style="text-align:center;color:#9ca3af;padding:2rem;font-size:13px">No redacted files stored.</div>';
@@ -560,7 +561,7 @@ async function loadFiles() {
 async function secureDeleteFile(id) {
   if (!confirm('Permanently delete this file? This cannot be undone.')) return;
   try {
-    var resp = await fetch(API + '/redact/' + id, { method: 'DELETE' });
+    var resp = await fetch(API + '/redact/' + id, { method: 'DELETE', headers: { 'X-API-Key': PARAIQ_KEY } });
     var data = await resp.json();
     alert(data.message || 'Deleted.');
     loadFiles();
@@ -579,7 +580,7 @@ function escHtml(str) {
 // Load files on init
 loadFiles();
 </script>
-  <script src="paraiq-sidebar.js"></script>
+  <script src="paraiq-sidebar-v3.js"></script>
   <script src="paraiq-persist.js"></script>
   <script src="paraiq-export.js"></script>
 

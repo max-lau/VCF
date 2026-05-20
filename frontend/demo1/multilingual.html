@@ -1,6 +1,7 @@
 <!DOCTYPE html>
 <html lang="en">
-<head>
+<head><script src="paraiq-config.js"></script>
+<script src="paraiq-auth.js?v=3"></script>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>Multilingual NLP Analyzer</title>
@@ -58,7 +59,7 @@
     .s-pill { padding: 5px 16px; border-radius: 20px; font-weight: 600; font-size: 14px; text-transform: capitalize; }
     .s-positive{background:#d1fae5;color:#065f46}
     .s-negative{background:#fee2e2;color:#991b1b}
-    .s-neutral {background:#f3f4f6;color:#374151}
+    .s-neutral {background:#f3f4f6;color:#cbd5e1}
     .s-mixed   {background:#fef3c7;color:#92400e}
     .bar-track { flex:1; height:8px; background:#f3f4f6; border-radius:4px; overflow:hidden; }
     .bar-fill  { height:100%; border-radius:4px; transition:width 0.7s ease; }
@@ -73,7 +74,7 @@
     .DATE,.TIME{background:#fef3c7;color:#92400e}
     .MONEY,.PERCENT{background:#dcfce7;color:#166534}
     .LAW{background:#fee2e2;color:#991b1b}
-    .OTHER{background:#f3f4f6;color:#374151}
+    .OTHER{background:#f3f4f6;color:#cbd5e1}
 
     /* Keywords */
     .kw-wrap { display: flex; flex-wrap: wrap; gap: 6px; }
@@ -199,7 +200,7 @@
       <input type="file" id="audioFileInput" accept=".mp3,.mp4,.wav,.webm,.ogg,.flac,.m4a" onchange="handleAudioFile(event)">
       <div class="redaction-toggle">
         <input type="checkbox" id="autoRedact" style="accent-color:#7c3aed">
-        <label for="autoRedact" style="font-size:13px;color:#374151;font-weight:600">Auto-redact transcript</label>
+        <label for="autoRedact" style="font-size:13px;color:#cbd5e1;font-weight:600">Auto-redact transcript</label>
         <select id="redactStyle" style="font-size:12px;padding:4px 8px;border-radius:6px;border:1px solid #ddd;margin-left:4px">
           <option value="label">[CATEGORY] labels</option>
           <option value="blackout">[REDACTED]</option>
@@ -402,7 +403,7 @@ function render(d, originalText) {
     </div>`;
 
   const toneHtml = (d.tone||[]).map(t =>
-    `<span style="font-size:13px;padding:3px 12px;border-radius:20px;background:#f3f4f6;color:#374151">${t}</span>`
+    `<span style="font-size:13px;padding:3px 12px;border-radius:20px;background:#f3f4f6;color:#cbd5e1">${t}</span>`
   ).join('');
 
   const entHtml = (d.entities||[]).map(e =>
@@ -459,7 +460,7 @@ function render(d, originalText) {
 
     <div class="card">
       <div class="card-title">Summary</div>
-      <p style="font-size:14px;line-height:1.8;color:#374151">${d.summary||'—'}</p>
+      <p style="font-size:14px;line-height:1.8;color:#cbd5e1">${d.summary||'—'}</p>
     </div>
 
     <div class="card">
@@ -554,7 +555,8 @@ function render(d, originalText) {
       if (autoRedact) audioUrl += '&redact=true&redact_style=' + redactStyle;
       var resp = await fetch(audioUrl, {
         method: 'POST',
-        body: formData
+        body: formData,
+        headers: { 'X-API-Key': PARAIQ_KEY }
       });
       document.getElementById('btnMic').className = 'btn-mic';
       document.getElementById('micLabel').textContent = 'Start Recording';
@@ -638,7 +640,7 @@ function render(d, originalText) {
   // End Audio Playback
 
 </script>
-  <script src="paraiq-sidebar.js"></script>
+  <script src="paraiq-sidebar-v3.js"></script>
   <script src="paraiq-persist.js"></script>
   <script src="paraiq-export.js"></script>
 

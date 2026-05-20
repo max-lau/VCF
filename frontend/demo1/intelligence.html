@@ -1,0 +1,259 @@
+<!DOCTYPE html>
+<html lang="en">
+<head><script src="paraiq-config.js"></script>
+<script src="paraiq-auth.js?v=3"></script>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>AI Intelligence — ParaIQ</title>
+  <style>
+    *{box-sizing:border-box;margin:0;padding:0}
+    body{font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;background:#0f172a;color:#e2e8f0}
+    .page{padding:1.5rem 2rem;max-width:1100px;margin:0 auto;margin-left:220px}
+    .page-title{font-size:22px;font-weight:700;color:#f1f5f9;margin-bottom:4px}
+    .page-sub{font-size:13px;color:#64748b;margin-bottom:1.5rem}
+    .tab-bar{display:flex;gap:6px;margin-bottom:1.5rem;flex-wrap:wrap}
+    .tab{padding:8px 18px;border-radius:8px;font-size:13px;font-weight:600;cursor:pointer;border:2px solid #e2e8f0;background:#fff;color:#64748b;transition:all 0.15s}
+    .tab:hover{border-color:#7c3aed;color:#7c3aed}
+    .tab.active{border-color:#7c3aed;background:#7c3aed;color:#fff}
+    .panel{display:none}.panel.active{display:block}
+    .card{background:#1e293b;border:1px solid #334155;border-radius:12px;padding:1.5rem;margin-bottom:1.5rem}
+    .card-title{font-size:13px;font-weight:700;color:#f1f5f9;margin-bottom:4px}
+    .card-sub{font-size:12px;color:#64748b;margin-bottom:1.25rem}
+    textarea{width:100%;min-height:160px;padding:12px 14px;border:1px solid #e2e8f0;border-radius:10px;font-size:13px;line-height:1.7;resize:vertical;background:#fff;font-family:inherit}
+    textarea:focus{outline:none;border-color:#7c3aed}
+    .btn{padding:10px 24px;border-radius:8px;font-size:14px;font-weight:600;cursor:pointer;border:none;transition:all 0.15s}
+    .btn-primary{background:#7c3aed;color:#fff}
+    .btn-primary:hover{background:#6d28d9}
+    .btn-primary:disabled{opacity:0.5;cursor:not-allowed}
+    .result-box{background:#f8fafc;border:1px solid #e2e8f0;border-radius:10px;padding:1.25rem;margin-top:1.25rem;display:none}
+    .result-box.show{display:block}
+
+    /* Privilege styles */
+    .risk-banner{border-radius:8px;padding:10px 16px;font-size:13px;font-weight:700;margin-bottom:1rem}
+    .risk-high{background:#fee2e2;color:#991b1b;border:1px solid #fecaca}
+    .risk-medium{background:#fef3c7;color:#92400e;border:1px solid #fde68a}
+    .risk-low{background:#d1fae5;color:#065f46;border:1px solid #a7f3d0}
+    .risk-none{background:#f3f4f6;color:#6b7280;border:1px solid #e5e7eb}
+    .clause-card{background:#1e293b;border:1px solid #334155;border-radius:8px;padding:12px 14px;margin-bottom:10px}
+    .clause-text{font-size:13px;font-style:italic;color:#cbd5e1;border-left:3px solid #7c3aed;padding-left:10px;margin-bottom:8px;line-height:1.6}
+    .clause-meta{display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin-bottom:6px}
+    .clause-reason{font-size:12px;color:#64748b;line-height:1.5}
+    .badge{padding:2px 9px;border-radius:8px;font-size:10px;font-weight:700}
+    .badge-ac{background:#ede9fe;color:#5b21b6}
+    .badge-wp{background:#dbeafe;color:#1e40af}
+    .badge-both{background:#fef3c7;color:#92400e}
+    .badge-ci{background:#d1fae5;color:#065f46}
+    .badge-high{background:#fee2e2;color:#991b1b}
+    .badge-medium{background:#fef3c7;color:#92400e}
+    .badge-low{background:#d1fae5;color:#065f46}
+    .rec-withhold{background:#fee2e2;color:#991b1b;padding:2px 9px;border-radius:8px;font-size:10px;font-weight:700}
+    .rec-redact{background:#fef3c7;color:#92400e;padding:2px 9px;border-radius:8px;font-size:10px;font-weight:700}
+    .rec-produce{background:#d1fae5;color:#065f46;padding:2px 9px;border-radius:8px;font-size:10px;font-weight:700}
+    .rec-caution{background:#f3f4f6;color:#6b7280;padding:2px 9px;border-radius:8px;font-size:10px;font-weight:700}
+
+    /* Entity styles */
+    .entity-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(300px,1fr));gap:14px}
+    .entity-section{background:#1e293b;border:1px solid #334155;border-radius:10px;overflow:hidden}
+    .entity-section-title{padding:10px 14px;background:#f8fafc;border-bottom:1px solid #e2e8f0;font-size:11px;font-weight:700;color:#64748b;text-transform:uppercase;letter-spacing:.5px;display:flex;align-items:center;gap:6px}
+    .entity-item{padding:8px 14px;border-bottom:1px solid #f8fafc;font-size:12px}
+    .entity-item:last-child{border-bottom:none}
+    .entity-name{font-weight:600;color:#0f172a}
+    .entity-detail{color:#64748b;margin-top:2px;line-height:1.4}
+    .entity-tag{font-size:10px;font-weight:700;padding:1px 7px;border-radius:6px;background:#ede9fe;color:#5b21b6;margin-left:6px}
+    .entity-empty{padding:12px 14px;color:#94a3b8;font-size:12px;font-style:italic}
+    .deadline-item{border-left:3px solid #ef4444}
+    .deadline-item .entity-name{color:#991b1b}
+
+    .toast{position:fixed;bottom:24px;right:24px;background:#0f172a;color:#fff;padding:12px 20px;border-radius:10px;font-size:13px;font-weight:600;opacity:0;transition:opacity 0.3s;pointer-events:none;z-index:999}
+    .toast.show{opacity:1}
+  </style>
+  <link rel="stylesheet" href="paraiq-sidebar.css">
+</head>
+<body>
+<div class="page">
+  <div class="page-title">AI Intelligence Layer</div>
+  <div class="page-sub">Privilege flagging and legal entity extraction powered by Claude</div>
+
+  <div class="tab-bar">
+    <div class="tab active" onclick="switchTab('privilege',this)">🔐 Privilege Flagging</div>
+    <div class="tab" onclick="switchTab('entities',this)">🏷 Legal Entity Extraction</div>
+  </div>
+
+  <!-- ── Privilege Flagging (Feature 25) ── -->
+  <div class="panel active" id="panel-privilege">
+    <div class="card">
+      <div class="card-title">🔐 Privilege Flagging AI</div>
+      <div class="card-sub">Paste document text — Claude identifies attorney-client privilege and work product clauses with withholding recommendations</div>
+      <textarea id="privText" placeholder="Paste document text here…&#10;&#10;Example: Counsel advised the client that settlement terms were unfavorable based on confidential due diligence. The memorandum prepared by outside counsel reflects our litigation strategy…"></textarea>
+      <div style="margin-top:10px;display:flex;gap:10px;align-items:center">
+        <button class="btn btn-primary" onclick="runPrivilegeFlag()" id="privBtn">🔐 Analyze for Privilege</button>
+        <span style="font-size:12px;color:#94a3b8">Powered by Claude Haiku</span>
+      </div>
+      <div class="result-box" id="privResult">
+        <div id="privRiskBanner"></div>
+        <div style="font-size:12px;color:#64748b;margin-bottom:12px" id="privSummary"></div>
+        <div style="display:flex;gap:16px;margin-bottom:12px;font-size:12px">
+          <span id="privStats"></span>
+        </div>
+        <div id="privClauses"></div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ── Legal Entity Extraction (Feature 26) ── -->
+  <div class="panel" id="panel-entities">
+    <div class="card">
+      <div class="card-title">🏷 Legal Entity Extraction</div>
+      <div class="card-sub">Paste document text — Claude extracts parties, amounts, deadlines, jurisdictions, citations, and obligations as structured data</div>
+      <textarea id="entText" placeholder="Paste document text here…&#10;&#10;Example: Plaintiff John Smith v. Defendant Acme Corp, filed in SDNY on March 1 2026. Damages sought: $2.5M. Response due April 15 2026. Counsel: Jane Doe, Sullivan & Cromwell…"></textarea>
+      <div style="margin-top:10px;display:flex;gap:10px;align-items:center">
+        <button class="btn btn-primary" onclick="runEntityExtract()" id="entBtn">🏷 Extract Legal Entities</button>
+        <span style="font-size:12px;color:#94a3b8">Powered by Claude Haiku</span>
+      </div>
+      <div class="result-box" id="entResult">
+        <div class="entity-grid" id="entGrid"></div>
+      </div>
+    </div>
+  </div>
+</div>
+<div class="toast" id="toast"></div>
+
+<script>
+const API = "https://nlp.para-iq.com";
+const KEY = "pk-84d8657019538fb44aeee9a6a58b2342c5b819c4cceecb3996570d9e980afa40";
+const H   = {"X-API-Key": KEY, "Content-Type": "application/json"};
+
+function toast(msg, ms=3500){
+  const el=document.getElementById("toast");
+  el.textContent=msg; el.classList.add("show");
+  setTimeout(()=>el.classList.remove("show"), ms);
+}
+
+function switchTab(name, el){
+  document.querySelectorAll(".tab").forEach(t=>t.classList.remove("active"));
+  document.querySelectorAll(".panel").forEach(p=>p.classList.remove("active"));
+  el.classList.add("active");
+  document.getElementById("panel-"+name).classList.add("active");
+}
+
+function recClass(r){
+  if(!r) return "rec-produce";
+  const rl=r.toLowerCase();
+  if(rl.includes("withhold")) return "rec-withhold";
+  if(rl.includes("redact"))   return "rec-redact";
+  if(rl.includes("caution"))  return "rec-caution";
+  return "rec-produce";
+}
+
+function privTypeClass(t){
+  if(!t) return "badge-ac";
+  if(t.includes("Work Product")) return "badge-wp";
+  if(t.includes("Both"))         return "badge-both";
+  if(t.includes("Common"))       return "badge-ci";
+  return "badge-ac";
+}
+
+// ── Feature 25: Privilege Flagging ───────────────────────────────────────────
+async function runPrivilegeFlag(){
+  const text=document.getElementById("privText").value.trim();
+  if(text.length<20){ toast("Enter at least 20 characters of document text"); return; }
+  const btn=document.getElementById("privBtn");
+  btn.disabled=true; btn.textContent="⏳ Analyzing…";
+  try{
+    const r=await fetch(API+"/privilege/flag",{
+      method:"POST", headers:H,
+      body:JSON.stringify({text})
+    });
+    const d=await r.json();
+    if(!d.success){ toast("Analysis failed: "+(d.detail||"")); return; }
+
+    const risk=d.overall_risk||"none";
+    document.getElementById("privRiskBanner").innerHTML=
+      `<div class="risk-banner risk-${risk}">
+        Overall Risk: ${risk.toUpperCase()}
+        ${risk==="high"?" — Recommend privilege review before production":""}
+        ${risk==="none"?" — No privilege markers detected":""}
+      </div>`;
+    document.getElementById("privSummary").textContent=d.summary||"";
+    document.getElementById("privStats").innerHTML=
+      `<strong>${d.total_flagged||0}</strong> clause${d.total_flagged!==1?"s":""} flagged &nbsp;·&nbsp;
+       <strong style="color:#991b1b">${d.withhold_count||0}</strong> withhold &nbsp;·&nbsp;
+       <strong style="color:#92400e">${d.redact_count||0}</strong> redact`;
+
+    const clauses=d.flagged_clauses||[];
+    document.getElementById("privClauses").innerHTML=clauses.length?
+      clauses.map(c=>`
+        <div class="clause-card">
+          <div class="clause-text">"${c.text}"</div>
+          <div class="clause-meta">
+            <span class="badge ${privTypeClass(c.privilege_type)}">${c.privilege_type}</span>
+            <span class="badge badge-${c.confidence||"medium"}">Confidence: ${c.confidence}</span>
+            <span class="${recClass(c.recommendation)}">${c.recommendation}</span>
+          </div>
+          <div class="clause-reason">⚖️ ${c.reason}</div>
+        </div>`).join(""):
+      "<div style='color:#94a3b8;font-size:13px;text-align:center;padding:1rem'>No privileged clauses detected</div>";
+
+    document.getElementById("privResult").classList.add("show");
+    toast(`✅ Analysis complete — ${d.total_flagged} clause${d.total_flagged!==1?"s":""} flagged`);
+  }catch(e){ toast("Error: "+e.message); }
+  finally{ btn.disabled=false; btn.textContent="🔐 Analyze for Privilege"; }
+}
+
+// ── Feature 26: Legal Entity Extraction ──────────────────────────────────────
+async function runEntityExtract(){
+  const text=document.getElementById("entText").value.trim();
+  if(text.length<20){ toast("Enter at least 20 characters of document text"); return; }
+  const btn=document.getElementById("entBtn");
+  btn.disabled=true; btn.textContent="⏳ Extracting…";
+  try{
+    const r=await fetch(API+"/entities/legal",{
+      method:"POST", headers:H,
+      body:JSON.stringify({text})
+    });
+    const d=await r.json();
+    if(!d.success){ toast("Extraction failed: "+(d.detail||"")); return; }
+
+    const sections=[
+      {key:"parties", icon:"👤", title:"Parties",
+       render:p=>`<div class="entity-name">${p.name}<span class="entity-tag">${p.role}</span></div>
+                  ${p.organization?`<div class="entity-detail">${p.organization}</div>`:""}`},
+      {key:"amounts", icon:"💰", title:"Dollar Amounts",
+       render:a=>`<div class="entity-name">${a.value}</div>
+                  <div class="entity-detail">${a.context} <em>(${a.type})</em></div>`},
+      {key:"dates_and_deadlines", icon:"📅", title:"Dates & Deadlines",
+       render:d=>`<div class="entity-name ${d.is_deadline?"":"" }">${d.date}${d.is_deadline?' <span style="color:#ef4444;font-size:10px;font-weight:700">⚠ DEADLINE</span>':""}</div>
+                  <div class="entity-detail">${d.event}</div>`,
+       extraClass: d=>d.is_deadline?"deadline-item":""},
+      {key:"jurisdictions", icon:"🏛", title:"Courts & Jurisdictions",
+       render:j=>`<div class="entity-name">${j.name}</div>
+                  <div class="entity-detail">${j.type}</div>`},
+      {key:"legal_citations", icon:"📖", title:"Legal Citations",
+       render:c=>`<div class="entity-name">${c.citation}</div>
+                  <div class="entity-detail">${c.type}</div>`},
+      {key:"key_obligations", icon:"✅", title:"Key Obligations",
+       render:o=>`<div class="entity-name">${o.party}</div>
+                  <div class="entity-detail">${o.obligation}${o.deadline?" · <strong>By: "+o.deadline+"</strong>":""}</div>`},
+    ];
+
+    document.getElementById("entGrid").innerHTML=sections.map(s=>{
+      const items=d[s.key]||[];
+      return `<div class="entity-section">
+        <div class="entity-section-title">${s.icon} ${s.title} <span style="margin-left:auto;font-weight:400;color:#94a3b8">${items.length}</span></div>
+        ${items.length?
+          items.map(it=>`<div class="entity-item ${typeof s.extraClass==='function'?s.extraClass(it):""}">${s.render(it)}</div>`).join(""):
+          `<div class="entity-empty">None detected</div>`}
+      </div>`;
+    }).join("");
+
+    document.getElementById("entResult").classList.add("show");
+    const total=[d.parties,d.amounts,d.dates_and_deadlines,d.jurisdictions,d.legal_citations,d.key_obligations].reduce((a,arr)=>a+(arr?.length||0),0);
+    toast(`✅ ${total} legal entities extracted`);
+  }catch(e){ toast("Error: "+e.message); }
+  finally{ btn.disabled=false; btn.textContent="🏷 Extract Legal Entities"; }
+}
+</script>
+<script src="paraiq-sidebar-v3.js"></script>
+<script src="paraiq-persist.js"></script>
+</body>
+</html>

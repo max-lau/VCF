@@ -1,13 +1,14 @@
 <!DOCTYPE html>
 <html lang="en">
-<head>
+<head><script src="paraiq-config.js"></script>
+<script src="paraiq-auth.js?v=3"></script>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>Audit Trail — NLP Legal Analyzer</title>
   <style>
     * { box-sizing: border-box; margin: 0; padding: 0; }
-    body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; background: #f1f5f9; color: #1a1a1a; }
-    .page { padding: 1.5rem 2rem; max-width: 1000px; margin: 0 auto; }
+    body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; background: #0f172a; color: #e2e8f0; }
+    .page { margin-left: 220px; padding: 1.5rem 2rem; max-width: 1000px; margin: 0 auto; }
     .page-title { font-size: 22px; font-weight: 700; color: #0f172a; margin-bottom: 4px; }
     .page-sub { font-size: 13px; color: #64748b; margin-bottom: 1.5rem; }
     .kpi-row { display: grid; grid-template-columns: repeat(auto-fit, minmax(140px, 1fr)); gap: 10px; margin-bottom: 1.5rem; }
@@ -92,7 +93,7 @@
 
   async function loadStats() {
     try {
-      const r = await fetch(`${API}/audit/stats`);
+      const r = await fetch(`${API}/audit/stats`, { headers: { 'X-API-Key': PARAIQ_KEY } });
       const d = await r.json();
       document.getElementById('kpiTotal').textContent = d.total_requests?.toLocaleString() || 0;
       const s200 = (d.by_status_code||[]).find(s => s.status_code === 200);
@@ -125,7 +126,7 @@
     if (method)   url += `&method=${method}`;
     if (status)   url += `&status=${status}`;
     try {
-      const r = await fetch(url);
+      const r = await fetch(url, { headers: { 'X-API-Key': PARAIQ_KEY } });
       const d = await r.json();
       document.getElementById('logsBody').innerHTML = (d.logs||[]).map(l => `
         <tr>
@@ -141,16 +142,16 @@
 
   async function clearLogs() {
     if (!confirm('Clear all audit logs?')) return;
-    await fetch(`${API}/audit/logs/clear`, { method: 'DELETE' });
+    await fetch(`${API}/audit/logs/clear`, { method: 'DELETE', headers: { 'X-API-Key': PARAIQ_KEY } });
     loadStats(); loadLogs();
   }
 
   loadStats(); loadLogs();
   setInterval(() => { loadStats(); loadLogs(); }, 30000);
 </script>
-  <script src="paraiq-sidebar.js"></script>
+  <script src="paraiq-sidebar-v3.js"></script>
   <script src="paraiq-persist.js"></script>
-  <script src="paraiq-export.js"></script>
+  <script src="paraiq-export.js?v=5"></script>
 
   <script>
   document.addEventListener("DOMContentLoaded", function() {

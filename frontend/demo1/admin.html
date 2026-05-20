@@ -1,0 +1,347 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<script src="paraiq-config.js"></script>
+<script src="paraiq-auth.js?v=3"></script>
+<script>ParaIQ.requireRole("admin");</script>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Admin — ParaIQ</title>
+  <style>
+    *{box-sizing:border-box;margin:0;padding:0}
+    body{font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;background:#0f172a;color:#e2e8f0}
+    .page{padding:1.5rem 2rem;max-width:1100px;margin:0 auto;margin-left:220px}
+    .page-title{font-size:22px;font-weight:700;color:#f1f5f9;margin-bottom:4px}
+    .page-sub{font-size:13px;color:#64748b;margin-bottom:1.5rem}
+
+    .stats-row{display:flex;gap:12px;margin-bottom:1.5rem;flex-wrap:wrap}
+    .stat-card{background:#1e293b;border:1px solid #334155;border-radius:10px;padding:12px 16px;flex:1;min-width:110px}
+    .stat-n{font-size:24px;font-weight:700;color:#7c3aed}
+    .stat-l{font-size:11px;color:#94a3b8;margin-top:2px}
+
+    .card{background:#1e293b;border:1px solid #334155;border-radius:12px;overflow:hidden;margin-bottom:1.5rem}
+    .card-header{padding:1rem 1.25rem;border-bottom:1px solid #f1f5f9;display:flex;align-items:center;justify-content:space-between}
+    .card-title{font-size:13px;font-weight:700;color:#0f172a}
+    .btn{padding:9px 20px;border-radius:8px;font-size:13px;font-weight:600;cursor:pointer;border:none;transition:all 0.15s}
+    .btn-primary{background:#7c3aed;color:#fff}
+    .btn-primary:hover{background:#6d28d9}
+    .btn-sm{padding:5px 12px;font-size:11px;border-radius:6px;border:1px solid #e2e8f0;background:#f8fafc;color:#cbd5e1;cursor:pointer;font-weight:600}
+    .btn-sm:hover{background:#f1f5f9}
+    .btn-danger{background:#fee2e2;color:#991b1b;border:1px solid #fecaca}
+    .btn-success{background:#d1fae5;color:#065f46;border:1px solid #a7f3d0}
+
+    .users-table{width:100%;border-collapse:collapse;font-size:13px}
+    .users-table th{background:#f8fafc;padding:9px 14px;text-align:left;font-size:11px;font-weight:700;color:#64748b;text-transform:uppercase;letter-spacing:.5px;border-bottom:1px solid #334155}
+    .users-table td{padding:10px 14px;border-bottom:1px solid #f8fafc;vertical-align:middle}
+    .users-table tr:last-child td{border-bottom:none}
+    .users-table tr:hover td{background:#fafafa}
+
+    .role-badge{padding:3px 10px;border-radius:10px;font-size:10px;font-weight:700;text-transform:uppercase}
+    .role-admin{background:#fee2e2;color:#991b1b}
+    .role-manager{background:#fef3c7;color:#92400e}
+    .role-user{background:#f3f4f6;color:#6b7280}
+    .plan-badge{padding:3px 10px;border-radius:10px;font-size:10px;font-weight:700;text-transform:uppercase}
+    .plan-enterprise{background:#ede9fe;color:#5b21b6}
+    .plan-pro{background:#dbeafe;color:#1e40af}
+    .plan-free{background:#f3f4f6;color:#6b7280}
+    .active-dot{width:8px;height:8px;border-radius:50%;display:inline-block;margin-right:6px}
+    .dot-active{background:#22c55e}
+    .dot-suspended{background:#ef4444}
+
+    .inline-select{padding:4px 8px;border-radius:6px;border:1px solid #e2e8f0;font-size:11px;background:#fff;cursor:pointer}
+    .inline-select:focus{outline:none;border-color:#7c3aed}
+
+    .invite-form{padding:1.25rem}
+    .invite-grid{display:grid;grid-template-columns:1fr 1fr 140px 140px auto;gap:10px;align-items:end}
+    .invite-field label{font-size:11px;font-weight:600;color:#64748b;display:block;margin-bottom:4px;text-transform:uppercase;letter-spacing:.5px}
+    .invite-field input,.invite-field select{width:100%;padding:8px 12px;border-radius:8px;border:1px solid #334155;font-size:13px;background:#1e293b;color:#e2e8f0}
+    .invite-field input:focus,.invite-field select:focus{outline:none;border-color:#7c3aed}
+
+    .plan-cards{display:grid;grid-template-columns:repeat(3,1fr);gap:14px;padding:1.25rem}
+    .plan-card{border:2px solid #e2e8f0;border-radius:12px;padding:1.25rem;text-align:center;transition:all 0.15s}
+    .plan-card.featured{border-color:#7c3aed;background:#faf5ff}
+    .plan-name{font-size:15px;font-weight:700;color:#f1f5f9;margin-bottom:4px}
+    .plan-price{font-size:28px;font-weight:700;color:#7c3aed;margin-bottom:8px}
+    .plan-price span{font-size:13px;font-weight:400;color:#94a3b8}
+    .plan-features{list-style:none;text-align:left;margin-bottom:1rem;font-size:12px;color:#cbd5e1}
+    .plan-features li{padding:3px 0;display:flex;align-items:center;gap:6px}
+    .plan-features li::before{content:"✓";color:#7c3aed;font-weight:700}
+
+    .no-access{padding:3rem;text-align:center;color:#94a3b8;font-size:14px}
+
+    .toast{position:fixed;bottom:24px;right:24px;background:#0f172a;color:#fff;padding:12px 20px;border-radius:10px;font-size:13px;font-weight:600;opacity:0;transition:opacity 0.3s;pointer-events:none;z-index:999}
+    .toast.show{opacity:1}
+  </style>
+  <link rel="stylesheet" href="paraiq-sidebar.css">
+</head>
+<body>
+<div class="page">
+  <div class="page-title">Admin Console</div>
+  <div class="page-sub">User management, roles, and subscription plans</div>
+
+  <div id="noAccessMsg" style="display:none">
+    <div class="no-access">🔒 Admin access required. Log in as an admin to view this page.</div>
+  </div>
+
+  <div id="adminContent">
+    <div class="stats-row">
+      <div class="stat-card"><div class="stat-n" id="statTotal">—</div><div class="stat-l">Total Users</div></div>
+      <div class="stat-card"><div class="stat-n" id="statActive">—</div><div class="stat-l">Active</div></div>
+      <div class="stat-card"><div class="stat-n" id="statAdmins">—</div><div class="stat-l">Admins</div></div>
+      <div class="stat-card"><div class="stat-n" id="statPro">—</div><div class="stat-l">Pro / Enterprise</div></div>
+    </div>
+
+    <!-- ── User table ── -->
+    <div class="card">
+      <div class="card-header">
+        <div class="card-title">👥 Users</div>
+        <button class="btn-sm" onclick="loadUsers()">↻ Refresh</button>
+      </div>
+      <table class="users-table">
+        <thead><tr>
+          <th>User</th><th>Email</th><th>Role</th><th>Plan</th>
+          <th>Status</th><th>Last Login</th><th>Actions</th>
+        </tr></thead>
+        <tbody id="usersTbody"><tr><td colspan="7" style="text-align:center;padding:2rem;color:#94a3b8">Loading…</td></tr></tbody>
+      </table>
+    </div>
+
+    <!-- ── Invite / create user ── -->
+    <div class="card">
+      <div class="card-header"><div class="card-title">➕ Create New User</div></div>
+      <div class="invite-form">
+        <div class="invite-grid">
+          <div class="invite-field">
+            <label>Username</label>
+            <input type="text" id="newUsername" placeholder="jsmith">
+          </div>
+          <div class="invite-field">
+            <label>Email</label>
+            <input type="email" id="newEmail" placeholder="j.smith@firm.com">
+          </div>
+          <div class="invite-field">
+            <label>Role</label>
+            <select id="newRole">
+              <option value="user">User</option>
+              <option value="manager">Manager</option>
+              <option value="admin">Admin</option>
+            </select>
+          </div>
+          <div class="invite-field">
+            <label>Plan</label>
+            <select id="newPlan">
+              <option value="free">Free</option>
+              <option value="pro">Pro</option>
+              <option value="enterprise">Enterprise</option>
+            </select>
+          </div>
+          <div class="invite-field">
+            <label>Password</label>
+            <input type="password" id="newPassword" placeholder="Temporary password">
+          </div>
+        </div>
+        <div style="margin-top:12px">
+          <button class="btn btn-primary" onclick="createUser()" id="createUserBtn">Create User</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- ── Subscription plans ── -->
+    <div class="card">
+      <div class="card-header"><div class="card-title">💳 Subscription Plans</div></div>
+      <div class="plan-cards">
+        <div class="plan-card">
+          <div class="plan-name">Free</div>
+          <div class="plan-price">$0<span>/mo</span></div>
+          <ul class="plan-features">
+            <li>NLP analysis (20/day)</li>
+            <li>Discovery intake</li>
+            <li>Basic case management</li>
+            <li>5 GB storage</li>
+          </ul>
+        </div>
+        <div class="plan-card featured">
+          <div class="plan-name">Pro</div>
+          <div class="plan-price">$49<span>/mo</span></div>
+          <ul class="plan-features">
+            <li>Unlimited NLP analysis</li>
+            <li>Bates stamping & production</li>
+            <li>Audio/video transcription</li>
+            <li>Privilege flagging AI</li>
+            <li>50 GB storage</li>
+          </ul>
+        </div>
+        <div class="plan-card">
+          <div class="plan-name">Enterprise</div>
+          <div class="plan-price">$199<span>/mo</span></div>
+          <ul class="plan-features">
+            <li>Everything in Pro</li>
+            <li>Multi-user management</li>
+            <li>PACER integration</li>
+            <li>Custom entity training</li>
+            <li>500 GB storage</li>
+            <li>Priority support</li>
+          </ul>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+<div class="toast" id="toast"></div>
+
+<script>
+const API = "https://nlp.para-iq.com";
+const KEY = "pk-84d8657019538fb44aeee9a6a58b2342c5b819c4cceecb3996570d9e980afa40";
+
+function toast(msg, ms=3500){
+  const el=document.getElementById("toast");
+  el.textContent=msg; el.classList.add("show");
+  setTimeout(()=>el.classList.remove("show"), ms);
+}
+
+function getToken(){
+  return localStorage.getItem("paraiq_token") || localStorage.getItem("token") || "";
+}
+
+function authHeaders(){
+  const tok=getToken();
+  return {
+    "X-API-Key": KEY,
+    "Content-Type": "application/json",
+    ...(tok?{"Authorization":"Bearer "+tok}:{})
+  };
+}
+
+function roleClass(r){ return "role-"+(r||"user"); }
+function planClass(p){ return "plan-"+(p||"free"); }
+
+async function loadUsers(){
+  try{
+    const r=await fetch(API+"/auth/users",{headers:authHeaders()});
+    if(r.status===401||r.status===403){
+      document.getElementById("adminContent").style.display="none";
+      document.getElementById("noAccessMsg").style.display="block";
+      return;
+    }
+    const d=await r.json();
+    const users=d.users||d||[];
+    document.getElementById("statTotal").textContent  = users.length;
+    document.getElementById("statActive").textContent = users.filter(u=>u.active).length;
+    document.getElementById("statAdmins").textContent = users.filter(u=>u.role==="admin").length;
+    document.getElementById("statPro").textContent    = users.filter(u=>u.plan==="pro"||u.plan==="enterprise").length;
+
+    document.getElementById("usersTbody").innerHTML=users.length?
+      users.map(u=>`
+        <tr id="user-row-${u.id}">
+          <td><strong>${u.username}</strong></td>
+          <td style="color:#64748b">${u.email||"—"}</td>
+          <td>
+            <select class="inline-select" onchange="updateRole(${u.id},this.value)">
+              ${["user","manager","admin"].map(r=>`<option value="${r}" ${u.role===r?"selected":""}>${r}</option>`).join("")}
+            </select>
+          </td>
+          <td>
+            <select class="inline-select" onchange="updatePlan(${u.id},this.value)">
+              ${["free","pro","enterprise"].map(p=>`<option value="${p}" ${(u.plan||"free")===p?"selected":""}>${p}</option>`).join("")}
+            </select>
+          </td>
+          <td>
+            <span class="active-dot ${u.active?"dot-active":"dot-suspended"}"></span>
+            ${u.active?"Active":"Suspended"}
+          </td>
+          <td style="color:#94a3b8;font-size:12px">${(u.last_login||"Never").slice(0,16)}</td>
+          <td style="display:flex;gap:6px">
+            <button class="btn-sm ${u.active?"btn-danger":"btn-success"}"
+              onclick="toggleActive(${u.id},${u.active?0:1})">
+              ${u.active?"Suspend":"Activate"}
+            </button>
+            <button class="btn-sm btn-danger" onclick="deleteUser(${u.id},'${u.username}')">Delete</button>
+          </td>
+        </tr>`).join(""):
+      '<tr><td colspan="7" style="text-align:center;padding:2rem;color:#94a3b8">No users found</td></tr>';
+  }catch(e){
+    toast("Failed to load users — are you logged in as admin?");
+  }
+}
+
+async function updateRole(userId, role){
+  try{
+    await fetch(API+"/auth/users/"+userId+"/role",{
+      method:"PUT", headers:authHeaders(),
+      body:JSON.stringify({role})
+    });
+    toast("✅ Role updated to "+role);
+  }catch(e){ toast("Failed to update role"); }
+}
+
+async function updatePlan(userId, plan){
+  try{
+    await fetch(API+"/auth/users/"+userId+"/plan",{
+      method:"PUT", headers:authHeaders(),
+      body:JSON.stringify({plan})
+    });
+    toast("✅ Plan updated to "+plan);
+  }catch(e){ toast("Failed to update plan"); }
+}
+
+async function toggleActive(userId, active){
+  try{
+    await fetch(API+"/auth/users/"+userId+"/active",{
+      method:"PUT", headers:authHeaders(),
+      body:JSON.stringify({active})
+    });
+    toast(active?"✅ User activated":"User suspended");
+    loadUsers();
+  }catch(e){ toast("Failed to update status"); }
+}
+
+async function deleteUser(userId, username){
+  if(!confirm(`Delete user "${username}"? This cannot be undone.`)) return;
+  try{
+    await fetch(API+"/auth/users/"+userId,{method:"DELETE",headers:authHeaders()});
+    document.getElementById("user-row-"+userId)?.remove();
+    toast("User deleted");
+    loadUsers();
+  }catch(e){ toast("Failed to delete user"); }
+}
+
+async function createUser(){
+  const username=document.getElementById("newUsername").value.trim();
+  const email   =document.getElementById("newEmail").value.trim();
+  const password=document.getElementById("newPassword").value;
+  const role    =document.getElementById("newRole").value;
+  const plan    =document.getElementById("newPlan").value;
+  if(!username||!password){ toast("Username and password are required"); return; }
+
+  const btn=document.getElementById("createUserBtn");
+  btn.disabled=true; btn.textContent="Creating…";
+  try{
+    const r=await fetch(API+"/auth/register",{
+      method:"POST", headers:authHeaders(),
+      body:JSON.stringify({username, email, password, role})
+    });
+    const d=await r.json();
+    if(d.id||d.username){
+      // Set plan if not free
+      if(plan!=="free" && d.id){
+        await fetch(API+"/auth/users/"+d.id+"/plan",{
+          method:"PUT", headers:authHeaders(),
+          body:JSON.stringify({plan})
+        });
+      }
+      toast("✅ User created — "+username);
+      document.getElementById("newUsername").value="";
+      document.getElementById("newEmail").value="";
+      document.getElementById("newPassword").value="";
+      loadUsers();
+    } else { toast("Failed: "+(d.detail||JSON.stringify(d))); }
+  }catch(e){ toast("Error: "+e.message); }
+  finally{ btn.disabled=false; btn.textContent="Create User"; }
+}
+
+loadUsers();
+</script>
+<script src="paraiq-sidebar-v3.js"></script>
+<script src="paraiq-persist.js"></script>
+</body>
+</html>

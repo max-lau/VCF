@@ -1,0 +1,905 @@
+<!DOCTYPE html>
+<html lang="en">
+<head><script src="paraiq-config.js"></script>
+<script src="paraiq-auth.js?v=3"></script>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Discovery Intake — ParaIQ</title>
+  <style>
+    *{box-sizing:border-box;margin:0;padding:0}
+    body{font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;background:#0f172a;color:#e2e8f0}
+    .page{padding:1.5rem 2rem;max-width:1100px;margin:0 auto;margin-left:220px}
+    .page-title{font-size:22px;font-weight:700;color:#f1f5f9;margin-bottom:4px}
+    .page-sub{font-size:13px;color:#64748b;margin-bottom:1.5rem}
+    .route-cards{display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:12px;margin-bottom:1.5rem}
+    .route-card{background:#1e293b;border:2px solid #334155;border-radius:12px;padding:1.25rem;text-align:center;cursor:pointer;transition:all 0.2s}
+    .route-card:hover{border-color:#7c3aed;transform:translateY(-2px)}
+    .route-card.active{border-color:#7c3aed;background:#1e1b4b}
+    .route-icon{font-size:32px;margin-bottom:8px}
+    .route-label{font-size:13px;font-weight:700;color:#f1f5f9;margin-bottom:4px}
+    .route-desc{font-size:11px;color:#64748b;line-height:1.4}
+    .upload-zone{border:2px dashed #334155;border-radius:12px;background:#1e293b;padding:3rem 2rem;text-align:center;cursor:pointer;transition:all 0.2s;position:relative;margin-bottom:1.5rem}
+    .upload-zone:hover,.upload-zone.drag-over{border-color:#7c3aed;background:#1e1b4b}
+    .upload-zone input{position:absolute;inset:0;opacity:0;cursor:pointer;width:100%;height:100%}
+    .upload-icon{font-size:48px;margin-bottom:12px}
+    .upload-title{font-size:16px;font-weight:700;color:#f1f5f9;margin-bottom:4px}
+    .upload-sub{font-size:13px;color:#64748b}
+    .upload-formats{font-size:11px;color:#94a3b8;margin-top:8px}
+    .case-row{display:flex;gap:10px;margin-bottom:1.5rem;align-items:flex-end}
+    .case-row label{font-size:12px;font-weight:600;color:#64748b;display:block;margin-bottom:4px}
+    .case-row input{padding:9px 14px;border-radius:8px;border:1px solid #334155;font-size:13px;background:#1e293b;color:#e2e8f0;flex:1}
+    .btn{padding:10px 24px;border-radius:8px;font-size:14px;font-weight:600;cursor:pointer;border:none;transition:all 0.15s}
+    .btn-primary{background:#7c3aed;color:#fff}
+    .btn-primary:hover{background:#6d28d9}
+    .btn-primary:disabled{opacity:0.5;cursor:not-allowed}
+    .btn-sm{padding:6px 14px;font-size:12px;border-radius:6px;border:1px solid #e2e8f0;background:#f8fafc;color:#cbd5e1;cursor:pointer}
+    .btn-sm:hover{background:#f1f5f9}
+    .btn-danger{background:#fee2e2;color:#991b1b;border:none}
+    .btn-danger:hover{background:#fecaca}
+    .queue-section{background:#1e293b;border:1px solid #334155;border-radius:12px;overflow:hidden;margin-bottom:1.5rem}
+    .queue-header{padding:1rem 1.25rem;border-bottom:1px solid #f1f5f9;display:flex;align-items:center;justify-content:space-between}
+    .queue-title{font-size:13px;font-weight:700;color:#f1f5f9}
+    .queue-count{font-size:11px;color:#94a3b8}
+    .queue-empty{padding:2rem;text-align:center;color:#94a3b8;font-size:13px}
+    .file-row{display:flex;align-items:center;gap:12px;padding:12px 1.25rem;border-bottom:1px solid #f8fafc;transition:background 0.1s}
+    .file-row:hover{background:#fafafa}
+    .file-row:last-child{border-bottom:none}
+    .file-icon{font-size:20px;flex-shrink:0;width:28px;text-align:center}
+    .file-info{flex:1;min-width:0}
+    .file-name{font-size:13px;font-weight:600;color:#0f172a;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+    .file-meta{font-size:11px;color:#94a3b8;margin-top:2px}
+    .route-badge{padding:2px 10px;border-radius:10px;font-size:10px;font-weight:700;text-transform:uppercase;flex-shrink:0}
+    .route-ocr{background:#ede9fe;color:#5b21b6}
+    .route-digital{background:#dbeafe;color:#1e40af}
+    .route-zip{background:#fef3c7;color:#92400e}
+    .route-audio{background:#d1fae5;color:#065f46}
+    .route-unknown{background:#f3f4f6;color:#6b7280}
+    .zip-contents{background:#f8fafc;border-radius:6px;padding:8px 12px;margin-top:6px;font-size:11px;color:#64748b;max-height:80px;overflow-y:auto}
+    .stats-row{display:flex;gap:12px;margin-bottom:1.5rem;flex-wrap:wrap}
+    .stat-card{background:#1e293b;border:1px solid #334155;border-radius:10px;padding:12px 16px;flex:1;min-width:120px}
+    .stat-n{font-size:24px;font-weight:700;color:#7c3aed}
+    .stat-l{font-size:11px;color:#94a3b8;margin-top:2px}
+    .toast{position:fixed;bottom:24px;right:24px;background:#0f172a;color:#fff;padding:12px 20px;border-radius:10px;font-size:13px;font-weight:600;opacity:0;transition:opacity 0.3s;pointer-events:none;z-index:999}
+    .toast.show{opacity:1}
+
+    /* ── Dedup panel ────────────────────────────────────────── */
+    .dedup-panel{background:#1e293b;border:1px solid #334155;border-radius:12px;overflow:hidden;margin-bottom:1.5rem;display:none}
+    .dedup-panel.open{display:block}
+    .dedup-panel-header{padding:1rem 1.25rem;border-bottom:1px solid #f1f5f9;display:flex;align-items:center;justify-content:space-between}
+    .dedup-panel-title{font-size:13px;font-weight:700;color:#0f172a}
+    .dedup-group{border-bottom:1px solid #f1f5f9;padding:1rem 1.25rem}
+    .dedup-group:last-child{border-bottom:none}
+    .dedup-group-hash{font-family:monospace;font-size:11px;color:#94a3b8;margin-bottom:8px}
+    .dedup-file-row{display:flex;align-items:center;gap:10px;padding:6px 0}
+    .dedup-keep-badge{background:#dcfce7;color:#166534;font-size:10px;font-weight:700;padding:2px 8px;border-radius:8px;flex-shrink:0}
+    .dedup-dupe-badge{background:#fee2e2;color:#991b1b;font-size:10px;font-weight:700;padding:2px 8px;border-radius:8px;flex-shrink:0}
+    .dedup-file-name{flex:1;font-size:12px;font-weight:600;color:#0f172a}
+    .dedup-file-meta{font-size:11px;color:#94a3b8}
+    .dedup-empty{padding:2rem;text-align:center;color:#94a3b8;font-size:13px}
+    .dedup-summary{background:#fef3c7;border:1px solid #fde68a;border-radius:8px;padding:10px 16px;font-size:13px;color:#92400e;font-weight:600;margin:0 1.25rem 1rem}
+
+    /* ── Privilege log panel ───────────────────────────────────── */
+    .priv-panel{background:#1e293b;border:1px solid #334155;border-radius:12px;overflow:hidden;margin-bottom:1.5rem}
+    .priv-header{padding:1rem 1.25rem;border-bottom:1px solid #f1f5f9;display:flex;align-items:center;justify-content:space-between;cursor:pointer;user-select:none}
+    .priv-header-left{display:flex;align-items:center;gap:10px}
+    .priv-title{font-size:13px;font-weight:700;color:#0f172a}
+    .priv-badge{background:#fef3c7;color:#92400e;font-size:10px;font-weight:700;padding:2px 8px;border-radius:8px}
+    .priv-toggle{font-size:12px;color:#94a3b8;transition:transform 0.2s}
+    .priv-toggle.open{transform:rotate(180deg)}
+    .priv-body{padding:1.25rem;display:none}
+    .priv-body.open{display:block}
+    .priv-toolbar{display:flex;gap:10px;margin-bottom:1rem;align-items:center;flex-wrap:wrap}
+    .priv-case-input{padding:7px 12px;border-radius:8px;border:1px solid #e2e8f0;font-size:13px;flex:1;min-width:180px}
+    .priv-table{width:100%;border-collapse:collapse;font-size:12px}
+    .priv-table th{background:#f8fafc;padding:7px 10px;text-align:left;font-weight:600;color:#64748b;border-bottom:1px solid #334155}
+    .priv-table td{padding:7px 10px;border-bottom:1px solid #f8fafc;vertical-align:top}
+    .priv-table tr:last-child td{border-bottom:none}
+    .priv-table tr:hover td{background:#fafafa}
+    .priv-type{font-size:10px;font-weight:700;padding:2px 8px;border-radius:8px;white-space:nowrap}
+    .priv-ac{background:#ede9fe;color:#5b21b6}
+    .priv-wp{background:#dbeafe;color:#1e40af}
+    .priv-both{background:#fef3c7;color:#92400e}
+    .priv-ci{background:#d1fae5;color:#065f46}
+    .priv-empty{padding:2rem;text-align:center;color:#94a3b8;font-size:13px}
+    .priv-select-hint{font-size:11px;color:#64748b;background:#f8fafc;border:1px solid #e2e8f0;border-radius:8px;padding:8px 12px;margin-bottom:1rem}
+
+    /* ── Chain of custody panel ────────────────────────────── */
+    .coc-panel{background:#1e293b;border:1px solid #334155;border-radius:12px;overflow:hidden;margin-bottom:1.5rem}
+    .coc-header{padding:1rem 1.25rem;border-bottom:1px solid #f1f5f9;display:flex;align-items:center;justify-content:space-between;cursor:pointer;user-select:none}
+    .coc-header-left{display:flex;align-items:center;gap:10px}
+    .coc-title{font-size:13px;font-weight:700;color:#0f172a}
+    .coc-badge{background:#dbeafe;color:#1e40af;font-size:10px;font-weight:700;padding:2px 8px;border-radius:8px}
+    .coc-toggle{font-size:12px;color:#94a3b8;transition:transform 0.2s}
+    .coc-toggle.open{transform:rotate(180deg)}
+    .coc-body{padding:1.25rem;display:none}
+    .coc-body.open{display:block}
+    .coc-toolbar{display:flex;gap:10px;margin-bottom:1rem;align-items:center}
+    .coc-count{font-size:12px;color:#94a3b8;margin-left:auto}
+    .coc-table{width:100%;border-collapse:collapse;font-size:12px}
+    .coc-table th{background:#f8fafc;padding:7px 10px;text-align:left;font-weight:600;color:#64748b;border-bottom:1px solid #e2e8f0;white-space:nowrap}
+    .coc-table td{padding:7px 10px;border-bottom:1px solid #f8fafc;vertical-align:top}
+    .coc-table tr:last-child td{border-bottom:none}
+    .coc-table tr:hover td{background:#fafafa}
+    .coc-ok{color:#166534;font-weight:700}
+    .coc-fail{color:#991b1b;font-weight:700}
+
+    .pipeline{display:flex;align-items:center;gap:0;margin-top:6px;flex-wrap:wrap}
+    .pip-step{font-size:9px;font-weight:700;text-transform:uppercase;padding:2px 8px;color:#475569;position:relative}
+    .pip-step.done{color:#22c55e}
+    .pip-step.active{color:#a78bfa;background:rgba(124,58,237,.15);border-radius:4px}
+    .pip-step::after{content:"→";margin-left:4px;color:#334155;font-weight:400}
+    .pip-step:last-child::after{content:""}
+    .coc-action{color:#0f172a;font-weight:500}
+    .coc-ts{color:#94a3b8;font-size:11px;white-space:nowrap}
+    .coc-seq{font-family:monospace;color:#94a3b8;font-size:11px}
+    .coc-empty{padding:2rem;text-align:center;color:#94a3b8;font-size:13px}
+
+    /* ── Bates panel ─────────────────────────────────────── */
+    .bates-panel{background:#1e293b;border:1px solid #334155;border-radius:12px;overflow:hidden;margin-bottom:1.5rem}
+    .bates-header{padding:1rem 1.25rem;border-bottom:1px solid #f1f5f9;display:flex;align-items:center;justify-content:space-between;cursor:pointer;user-select:none}
+    .bates-header-left{display:flex;align-items:center;gap:10px}
+    .bates-title{font-size:13px;font-weight:700;color:#0f172a}
+    .bates-badge{background:#ede9fe;color:#5b21b6;font-size:10px;font-weight:700;padding:2px 8px;border-radius:8px}
+    .bates-toggle{font-size:12px;color:#94a3b8;transition:transform 0.2s}
+    .bates-toggle.open{transform:rotate(180deg)}
+    .bates-body{padding:1.25rem;display:none}
+    .bates-body.open{display:block}
+    .bates-config-grid{display:grid;grid-template-columns:1fr 1fr 100px 100px;gap:12px;margin-bottom:1rem}
+    .bates-field label{font-size:11px;font-weight:600;color:#64748b;display:block;margin-bottom:4px;text-transform:uppercase;letter-spacing:.5px}
+    .bates-field input,.bates-field select{width:100%;padding:8px 12px;border-radius:8px;border:1px solid #334155;font-size:13px;background:#1e293b;color:#e2e8f0;color:#0f172a}
+    .bates-field input:focus,.bates-field select:focus{outline:none;border-color:#7c3aed}
+    .bates-actions{display:flex;align-items:center;gap:12px;margin-bottom:1rem;flex-wrap:wrap}
+    .bates-sample{font-family:monospace;font-size:13px;font-weight:700;color:#5b21b6;background:#ede9fe;padding:6px 14px;border-radius:8px;display:none}
+    .bates-manifest{margin-top:1rem}
+    .bates-manifest-title{font-size:12px;font-weight:700;color:#64748b;text-transform:uppercase;letter-spacing:.5px;margin-bottom:8px}
+    .bates-table{width:100%;border-collapse:collapse;font-size:12px}
+    .bates-table th{background:#f8fafc;padding:8px 12px;text-align:left;font-weight:600;color:#64748b;border-bottom:1px solid #334155}
+    .bates-table td{padding:8px 12px;border-bottom:1px solid #f8fafc;color:#e2e8f0}
+    .bates-table tr:last-child td{border-bottom:none}
+    .bates-table tr:hover td{background:#fafafa}
+    .bates-num{font-family:monospace;font-weight:700;color:#5b21b6}
+    .bates-range-banner{background:#f0fdf4;border:1px solid #bbf7d0;border-radius:8px;padding:10px 16px;font-size:13px;color:#166534;font-weight:600;margin-bottom:1rem;display:none}
+    .bates-empty{padding:1.5rem;text-align:center;color:#94a3b8;font-size:13px}
+    .bates-err{background:#fee2e2;color:#991b1b;border-radius:6px;padding:8px 12px;font-size:12px;margin-top:8px;display:none}
+  </style>
+  <link rel="stylesheet" href="paraiq-sidebar.css">
+</head>
+<body>
+
+<div class="page">
+  <div class="page-title">Discovery Intake</div>
+  <div class="page-sub">Upload documents — auto-routed to OCR, digital processing, or ZIP extraction pipeline</div>
+
+  <div class="stats-row" id="statsRow">
+    <div class="stat-card"><div class="stat-n" id="statTotal">—</div><div class="stat-l">Total Files</div></div>
+    <div class="stat-card"><div class="stat-n" id="statOcr">—</div><div class="stat-l">OCR Queue</div></div>
+    <div class="stat-card"><div class="stat-n" id="statDigital">—</div><div class="stat-l">Digital Files</div></div>
+    <div class="stat-card"><div class="stat-n" id="statZip">—</div><div class="stat-l">ZIP Archives</div></div>
+    <div class="stat-card"><div class="stat-n" id="statAudio">—</div><div class="stat-l">Audio Files</div></div>
+  </div>
+
+  <div class="route-cards">
+    <div class="route-card active" id="card-all" onclick="filterQueue(null,this)">
+      <div class="route-icon">📂</div>
+      <div class="route-label">All Files</div>
+      <div class="route-desc">View entire intake queue across all routes</div>
+    </div>
+    <div class="route-card" id="card-ocr" onclick="filterQueue('ocr',this)">
+      <div class="route-icon">📷</div>
+      <div class="route-label">Paper / OCR</div>
+      <div class="route-desc">Scanned images, photos of documents</div>
+    </div>
+    <div class="route-card" id="card-digital" onclick="filterQueue('digital',this)">
+      <div class="route-icon">📄</div>
+      <div class="route-label">Digital Files</div>
+      <div class="route-desc">PDF, DOCX, TXT — ready for analysis</div>
+    </div>
+    <div class="route-card" id="card-zip" onclick="filterQueue('zip',this)">
+      <div class="route-icon">🗜️</div>
+      <div class="route-label">ZIP Archives</div>
+      <div class="route-desc">Compressed batches for extraction</div>
+    </div>
+    <div class="route-card" id="card-audio" onclick="filterQueue('audio',this)">
+      <div class="route-icon">🎙️</div>
+      <div class="route-label">Audio / Video</div>
+      <div class="route-desc">Recordings for transcription</div>
+    </div>
+  </div>
+
+  <div class="case-row">
+    <div style="flex:1">
+      <label>Case Number (optional)</label>
+      <input type="text" id="caseNumber" placeholder="e.g. 2026-CV-00142">
+    </div>
+    <button class="btn btn-primary" id="uploadBtn" onclick="triggerUpload()">Upload Files</button>
+    <input type="file" id="fileInput" multiple accept="*/*" style="display:none" onchange="handleFiles(this.files)">
+  </div>
+
+  <div class="upload-zone" id="dropZone">
+    <div class="upload-icon">⬆️</div>
+    <div class="upload-title">Drop files here or click to browse</div>
+    <div class="upload-sub">Any file type accepted — auto-routed to correct pipeline</div>
+    <div class="upload-formats">Images · PDF · DOCX · ZIP · MP3 · WAV · MP4 · TXT</div>
+  </div>
+
+  <div class="queue-section">
+    <div class="queue-header">
+      <div class="queue-title">Intake Queue</div>
+      <div style="display:flex;align-items:center;gap:10px">
+        <div class="queue-count" id="queueCount">Loading...</div>
+        <button class="btn-sm" onclick="checkDuplicates()" id="dedupBtn">🔍 Check Duplicates</button>
+      </div>
+    </div>
+    <div id="queueList"><div class="queue-empty">Loading queue...</div></div>
+  </div>
+
+  <!-- ── Feature 11: Hash-based Deduplication ───────────────────────────── -->
+  <div class="dedup-panel" id="dedupPanel">
+    <div class="dedup-panel-header">
+      <div class="dedup-panel-title">🔍 Duplicate Files Detected</div>
+      <button class="btn-sm" onclick="document.getElementById('dedupPanel').classList.remove('open')">✕ Close</button>
+    </div>
+    <div id="dedupSummary"></div>
+    <div id="dedupList"></div>
+  </div>
+  <!-- ── /Dedup ─────────────────────────────────────────────────────────── -->
+
+  <!-- ── Feature 10: Bates Numbering ──────────────────────────────────────── -->
+  <div class="bates-panel">
+    <div class="bates-header" onclick="toggleBates()">
+      <div class="bates-header-left">
+        <span style="font-size:18px">🔢</span>
+        <span class="bates-title">Bates Numbering</span>
+        <span class="bates-badge">Production</span>
+      </div>
+      <span class="bates-toggle" id="batesToggle">▼</span>
+    </div>
+    <div class="bates-body" id="batesBody">
+
+      <div class="bates-config-grid">
+        <div class="bates-field">
+          <label>Production Set ID</label>
+          <input type="text" id="batesSetId" placeholder="e.g. PROD001">
+        </div>
+        <div class="bates-field">
+          <label>Prefix</label>
+          <input type="text" id="batesPrefix" placeholder="e.g. SMITH" maxlength="12">
+        </div>
+        <div class="bates-field">
+          <label>Start #</label>
+          <input type="number" id="batesStart" value="1" min="1">
+        </div>
+        <div class="bates-field">
+          <label>Padding</label>
+          <select id="batesPadding">
+            <option value="4">4 — 0001</option>
+            <option value="5">5 — 00001</option>
+            <option value="6" selected>6 — 000001</option>
+            <option value="7">7 — 0000001</option>
+            <option value="8">8 — 00000001</option>
+          </select>
+        </div>
+      </div>
+
+      <div class="bates-config-grid" style="grid-template-columns:1fr;margin-bottom:1rem">
+        <div class="bates-field">
+          <label>Case Number (stamp all PDFs in this case)</label>
+          <input type="text" id="batesCaseNum" placeholder="Leave blank to stamp selected files only">
+        </div>
+      </div>
+
+      <div class="bates-actions">
+        <button class="btn btn-primary" onclick="configureBates()" id="batesConfigBtn">Configure Set</button>
+        <button class="btn" style="background:#0f172a;color:#fff" onclick="stampBates()" id="batesStampBtn" disabled>⚡ Stamp Production Set</button>
+        <div class="bates-sample" id="batesSample">—</div>
+        <button class="btn-sm" onclick="loadBatesLog()" style="margin-left:auto">↻ Refresh Log</button>
+        <button class="btn-sm" onclick="downloadProductionZip()" id="downloadZipBtn"
+          style="background:#0f172a;color:#fff;border-color:#0f172a">⬇ Download ZIP</button>
+      </div>
+
+      <div class="bates-err" id="batesErr"></div>
+      <div class="bates-range-banner" id="batesRangeBanner"></div>
+
+      <div class="bates-manifest">
+        <div class="bates-manifest-title">Bates Manifest</div>
+        <div id="batesManifest">
+          <div class="bates-empty">Configure a production set and stamp documents to see the manifest.</div>
+        </div>
+      </div>
+
+    </div>
+  </div>
+  <!-- ── /Bates ──────────────────────────────────────────────────────────── -->
+
+  <!-- ── Feature 13: Privilege Log ──────────────────────────────────────── -->
+  <div class="priv-panel">
+    <div class="priv-header" onclick="togglePriv()">
+      <div class="priv-header-left">
+        <span style="font-size:18px">⚖️</span>
+        <span class="priv-title">Privilege Log</span>
+        <span class="priv-badge">Withheld Docs</span>
+      </div>
+      <span class="priv-toggle" id="privToggle">▼</span>
+    </div>
+    <div class="priv-body" id="privBody">
+
+      <div class="priv-select-hint">
+        💡 Select files to withhold by checking them in the queue below, or enter a case number
+        and click <strong>Generate with AI</strong> to auto-populate entries for all queued files.
+      </div>
+
+      <div class="priv-toolbar">
+        <input type="text" class="priv-case-input" id="privCaseNum"
+          placeholder="Case number (e.g. 2026-CV-00142)">
+        <button class="btn-sm" onclick="loadPrivLog()">↻ Load Log</button>
+        <button class="btn-sm" style="background:#7c3aed;color:#fff;border-color:#7c3aed"
+          onclick="generatePrivLog()" id="privGenBtn">✨ Generate with AI</button>
+        <button class="btn-sm" style="background:#0f172a;color:#fff;border-color:#0f172a"
+          onclick="exportPrivLog()" id="privExportBtn">⬇ Export CSV</button>
+        <span id="privCount" style="font-size:12px;color:#94a3b8;margin-left:auto"></span>
+      </div>
+
+      <div id="privLog">
+        <div class="priv-empty">Enter a case number and click Load Log or Generate with AI.</div>
+      </div>
+
+    </div>
+  </div>
+  <!-- ── /Privilege Log ────────────────────────────────────────────────────── -->
+
+  <!-- ── Feature 15: Chain of Custody ────────────────────────────────────── -->
+  <div class="coc-panel">
+    <div class="coc-header" onclick="toggleCoc()">
+      <div class="coc-header-left">
+        <span style="font-size:18px">🔗</span>
+        <span class="coc-title">Chain of Custody</span>
+        <span class="coc-badge">Audit Trail</span>
+      </div>
+      <span class="coc-toggle" id="cocToggle">▼</span>
+    </div>
+    <div class="coc-body" id="cocBody">
+      <div class="coc-toolbar">
+        <button class="btn-sm" onclick="loadCoc()">↻ Refresh</button>
+        <button class="btn-sm" onclick="exportCoc()"
+          style="background:#0f172a;color:#fff;border-color:#0f172a">⬇ Export CSV</button>
+        <span class="coc-count" id="cocCount"></span>
+      </div>
+      <div id="cocList"><div class="coc-empty">Loading audit trail...</div></div>
+    </div>
+  </div>
+  <!-- ── /Chain of Custody ────────────────────────────────────────────────── -->
+
+</div>
+
+<div class="toast" id="toast"></div>
+
+<script>
+const API = "https://nlp.para-iq.com";
+const KEY = "pk-84d8657019538fb44aeee9a6a58b2342c5b819c4cceecb3996570d9e980afa40";
+const H   = {"X-API-Key": KEY, "Content-Type": "application/json"};
+const HF  = {"X-API-Key": KEY};   // for FormData (no Content-Type)
+let activeRoute = null;
+
+// ── Utilities ─────────────────────────────────────────────────────────────────
+
+function toast(msg, ms=3000){
+  const el=document.getElementById("toast");
+  el.textContent=msg; el.classList.add("show");
+  setTimeout(()=>el.classList.remove("show"), ms);
+}
+
+function routeIcon(r){
+  return {ocr:"📷",digital:"📄",zip:"🗜️",audio:"🎙️",unknown:"❓"}[r]||"📁";
+}
+
+function fmtSize(b){
+  if(b>1048576) return (b/1048576).toFixed(1)+" MB";
+  if(b>1024)    return (b/1024).toFixed(0)+" KB";
+  return b+" B";
+}
+
+// ── Stats ─────────────────────────────────────────────────────────────────────
+
+async function loadStats(){
+  try{
+    const r=await fetch(API+"/discovery/stats",{headers:HF});
+    const d=await r.json();
+    document.getElementById("statTotal").textContent  = d.total||0;
+    document.getElementById("statOcr").textContent    = d.by_route?.ocr||0;
+    document.getElementById("statDigital").textContent= d.by_route?.digital||0;
+    document.getElementById("statZip").textContent    = d.by_route?.zip||0;
+    document.getElementById("statAudio").textContent  = d.by_route?.audio||0;
+  }catch(e){}
+}
+
+// ── Queue ─────────────────────────────────────────────────────────────────────
+
+
+function pipelineSteps(route, status) {
+  const allSteps = {
+    ocr:     ["queued","processed","text_extracted","analyzed","redacted","produced"],
+    digital: ["queued","bates_stamped","text_extracted","analyzed","redacted","produced"],
+    audio:   ["queued","transcribed","text_extracted","analyzed","produced"],
+    zip:     ["queued","extracted","produced"],
+  };
+  const steps = allSteps[route] || ["queued","produced"];
+  const idx = steps.indexOf(status);
+  return steps.map((s,i) => {
+    const cls = i < idx ? "done" : i === idx ? "active" : "";
+    return `<span class="pip-step ${cls}">${s.replace("_"," ")}</span>`;
+  }).join("");
+}
+
+async function extractText(id, btn) {
+  btn.disabled = true;
+  btn.textContent = "⏳ Extracting…";
+  try {
+    const r = await fetch(API + "/discovery/extract-text/" + id, {method:"POST", headers:HF});
+    const d = await r.json();
+    if (d.success) {
+      toast("✅ " + d.word_count + " words extracted from " + d.original_name);
+      loadQueue();
+    } else {
+      toast(d.message || "Extraction failed");
+      btn.disabled = false;
+      btn.textContent = "📝 Extract Text";
+    }
+  } catch(e) {
+    toast("Error: " + e.message);
+    btn.disabled = false;
+    btn.textContent = "📝 Extract Text";
+  }
+}
+
+async function loadQueue(route){
+  try{
+    const r=await fetch(API+"/discovery/queue?limit=100",{headers:HF});
+    const d=await r.json();
+    let files=d.files||[];
+    if(route) files=files.filter(f=>f.route===route);
+    document.getElementById("queueCount").textContent=files.length+" file"+(files.length!==1?"s":"");
+    if(!files.length){
+      document.getElementById("queueList").innerHTML="<div class='queue-empty'>No files in queue"+(route?" for this route":"")+"</div>";
+      return;
+    }
+    document.getElementById("queueList").innerHTML=files.map(f=>`
+      <div class="file-row" id="row-${f.id}">
+        <div class="file-icon">${routeIcon(f.route)}</div>
+        <div class="file-info">
+          <div class="file-name">${f.original_name}</div>
+          <div class="file-meta">${fmtSize(f.file_size)} · ${f.case_number||"No case"} · ${f.created_at?.slice(0,16)||""}</div>
+          <div class="pipeline">${pipelineSteps(f.route, f.status)}</div>
+          ${f.zip_contents?.length?
+            "<div class='zip-contents'>"+f.zip_contents.map(z=>"📄 "+z.name+" ("+fmtSize(z.size)+")").join("<br>")+"</div>":""
+          }
+        </div>
+        <span class="route-badge route-${f.route}">${f.route}</span>
+        ${["ocr","digital","audio"].includes(f.route)?`<button class="btn-sm" style="color:#38bdf8;border-color:#0369a1;white-space:nowrap" onclick="extractText(${f.id},this)">📝 Extract Text</button>`:""}
+        ${(f.route==="digital"||f.route==="ocr")?`<a class="btn-sm" href="redaction.html" style="text-decoration:none">🔒 Redact</a>`:""}
+        <button class="btn-sm btn-danger" onclick="removeFile(${f.id})">✕</button>
+      </div>`).join("");
+  }catch(e){
+    document.getElementById("queueList").innerHTML="<div class='queue-empty'>Failed to load queue</div>";
+  }
+}
+
+async function removeFile(id){
+  try{
+    await fetch(API+"/discovery/queue/"+id,{method:"DELETE",headers:HF});
+    document.getElementById("row-"+id)?.remove();
+    toast("File removed from queue");
+  }catch(e){ toast("Failed to remove file"); }
+}
+
+async function processOcr(id, btn){
+  btn.disabled=true; btn.textContent="Processing...";
+  try{
+    const r=await fetch(API+"/discovery/process/ocr/"+id,{method:"POST",headers:HF});
+    const d=await r.json();
+    if(d.success){
+      const info=document.getElementById("row-"+id)?.querySelector(".file-info");
+      if(info) info.innerHTML+=`<div style="margin-top:8px;background:#f0fdf4;border:1px solid #bbf7d0;border-radius:6px;padding:8px 12px;font-size:12px;color:#166534;white-space:pre-wrap;max-height:120px;overflow-y:auto">${d.text}</div>`;
+      btn.textContent="✓ Done"; btn.style.background="#dcfce7"; btn.style.color="#166534";
+    }
+  }catch(e){ btn.textContent="Error"; btn.disabled=false; }
+}
+
+function filterQueue(route, card){
+  activeRoute=route;
+  document.querySelectorAll(".route-card").forEach(c=>c.classList.remove("active"));
+  card.classList.add("active");
+  loadQueue(route);
+}
+
+function triggerUpload(){ document.getElementById("fileInput").click(); }
+
+async function handleFiles(files){
+  if(!files||!files.length) return;
+  const caseNum=document.getElementById("caseNumber").value.trim();
+  const btn=document.getElementById("uploadBtn");
+  btn.disabled=true; btn.textContent="Uploading...";
+  const fd=new FormData();
+  for(const f of files) fd.append("files",f);
+  if(caseNum) fd.append("case_number",caseNum);
+  try{
+    const r=await fetch(API+"/discovery/intake",{method:"POST",headers:HF,body:fd});
+    const d=await r.json();
+    if(d.success){
+      toast(`✅ ${d.total} file${d.total!==1?"s":""} queued — routes: ${[...new Set(d.files.map(f=>f.route))].join(", ")}`);
+      loadQueue(activeRoute); loadStats();
+    } else { toast("Upload failed"); }
+  }catch(e){ toast("Upload error: "+e.message); }
+  finally{ btn.disabled=false; btn.textContent="Upload Files"; }
+}
+
+// Drag & drop
+const dz=document.getElementById("dropZone");
+dz.addEventListener("dragover",e=>{e.preventDefault();dz.classList.add("drag-over")});
+dz.addEventListener("dragleave",()=>dz.classList.remove("drag-over"));
+dz.addEventListener("drop",e=>{e.preventDefault();dz.classList.remove("drag-over");handleFiles(e.dataTransfer.files)});
+dz.addEventListener("click",()=>triggerUpload());
+
+// ── Bates Numbering (Feature 10) ──────────────────────────────────────────────
+
+function toggleBates(){
+  const body=document.getElementById("batesBody");
+  const tog=document.getElementById("batesToggle");
+  const open=body.classList.toggle("open");
+  tog.classList.toggle("open", open);
+  if(open) loadBatesLog();
+}
+
+async function configureBates(){
+  const setId  = document.getElementById("batesSetId").value.trim();
+  const prefix = document.getElementById("batesPrefix").value.trim().toUpperCase();
+  const start  = parseInt(document.getElementById("batesStart").value)||1;
+  const padding= parseInt(document.getElementById("batesPadding").value)||6;
+  const caseNum= document.getElementById("batesCaseNum").value.trim();
+
+  if(!setId){ showBatesErr("Production Set ID is required."); return; }
+
+  const btn=document.getElementById("batesConfigBtn");
+  btn.disabled=true; btn.textContent="Saving...";
+  hideBatesErr();
+
+  try{
+    const r=await fetch(API+"/bates/configure",{
+      method:"POST", headers:H,
+      body:JSON.stringify({set_id:setId,prefix,start_num:start,padding,case_number:caseNum||null})
+    });
+    const d=await r.json();
+    if(d.success){
+      const sampleEl=document.getElementById("batesSample");
+      sampleEl.textContent="Sample: "+d.sample;
+      sampleEl.style.display="inline-block";
+      document.getElementById("batesStampBtn").disabled=false;
+      toast("✅ Bates set configured — "+d.sample);
+    } else { showBatesErr(JSON.stringify(d)); }
+  }catch(e){ showBatesErr("Error: "+e.message); }
+  finally{ btn.disabled=false; btn.textContent="Configure Set"; }
+}
+
+async function stampBates(){
+  const setId=document.getElementById("batesSetId").value.trim();
+  if(!setId){ showBatesErr("Set ID required — configure the set first."); return; }
+
+  const btn=document.getElementById("batesStampBtn");
+  btn.disabled=true; btn.textContent="⏳ Stamping...";
+  hideBatesErr();
+  document.getElementById("batesRangeBanner").style.display="none";
+
+  try{
+    const r=await fetch(API+"/bates/stamp",{
+      method:"POST", headers:H,
+      body:JSON.stringify({set_id:setId})
+    });
+    const d=await r.json();
+    if(d.success){
+      const banner=document.getElementById("batesRangeBanner");
+      if(d.range?.start){
+        banner.textContent=`✅ ${d.stamped} document${d.stamped!==1?"s":""} stamped — Bates range: ${d.range.start} – ${d.range.end}`;
+        banner.style.display="block";
+      }
+      if(d.errors>0) showBatesErr(`⚠️ ${d.errors} file(s) could not be stamped. Check server logs.`);
+      renderBatesManifest(d.documents);
+      toast(`🔢 Bates stamping complete — ${d.stamped} docs`);
+      loadQueue(activeRoute);
+    } else { showBatesErr(d.detail||"Stamp failed"); }
+  }catch(e){ showBatesErr("Error: "+e.message); }
+  finally{ btn.disabled=false; btn.textContent="⚡ Stamp Production Set"; }
+}
+
+async function loadBatesLog(){
+  const setId=document.getElementById("batesSetId").value.trim();
+  try{
+    const url=setId?API+"/bates/log?set_id="+encodeURIComponent(setId):API+"/bates/log";
+    const r=await fetch(url,{headers:H});
+    const d=await r.json();
+    renderBatesManifest(d.log||[]);
+  }catch(e){}
+}
+
+function renderBatesManifest(docs){
+  const el=document.getElementById("batesManifest");
+  if(!docs||!docs.length){
+    el.innerHTML="<div class='bates-empty'>No stamped documents yet for this set.</div>";
+    return;
+  }
+  el.innerHTML=`
+    <table class="bates-table">
+      <thead><tr>
+        <th>#</th><th>Document</th>
+        <th>Bates Start</th><th>Bates End</th><th>Pages</th><th>Stamped</th>
+      </tr></thead>
+      <tbody>${docs.map((d,i)=>`
+        <tr>
+          <td style="color:#94a3b8">${i+1}</td>
+          <td>${d.filename||d.original_name||"—"}</td>
+          <td><span class="bates-num">${d.bates_start}</span></td>
+          <td><span class="bates-num">${d.bates_end}</span></td>
+          <td style="text-align:center">${d.page_count||d.pages||1}</td>
+          <td style="color:#94a3b8">${(d.stamped_at||"").slice(0,16)}</td>
+        </tr>`).join("")}
+      </tbody>
+    </table>`;
+}
+
+function downloadProductionZip(){
+  const setId=document.getElementById("batesSetId").value.trim();
+  if(!setId){ toast("Enter a Production Set ID first"); return; }
+  const btn=document.getElementById("downloadZipBtn");
+  btn.textContent="⏳ Building..."; btn.disabled=true;
+  const url=API+"/production/bundle/"+encodeURIComponent(setId);
+  fetch(url,{headers:H})
+    .then(r=>{
+      if(!r.ok) return r.json().then(e=>{throw new Error(e.detail||"Bundle failed")});
+      const cd=r.headers.get("Content-Disposition")||"";
+      const match=cd.match(/filename=(.+)/);
+      const fname=match?match[1]:"production.zip";
+      return r.blob().then(blob=>({blob,fname}));
+    })
+    .then(({blob,fname})=>{
+      const a=document.createElement("a");
+      a.href=URL.createObjectURL(blob);
+      a.download=fname; a.click();
+      URL.revokeObjectURL(a.href);
+      toast("✅ Production ZIP downloaded — "+fname);
+    })
+    .catch(e=>toast("ZIP error: "+e.message))
+    .finally(()=>{ btn.textContent="⬇ Download ZIP"; btn.disabled=false; });
+}
+
+function showBatesErr(msg){
+  const el=document.getElementById("batesErr");
+  el.textContent=msg; el.style.display="block";
+}
+function hideBatesErr(){
+  document.getElementById("batesErr").style.display="none";
+}
+
+// ── Deduplication (Feature 11) ───────────────────────────────────────────────
+
+async function checkDuplicates(){
+  const btn=document.getElementById("dedupBtn");
+  btn.textContent="Scanning..."; btn.disabled=true;
+  try{
+    const r=await fetch(API+"/discovery/duplicates",{headers:H});
+    const d=await r.json();
+    const panel=document.getElementById("dedupPanel");
+    panel.classList.add("open");
+
+    if(d.total_groups===0){
+      document.getElementById("dedupSummary").innerHTML="";
+      document.getElementById("dedupList").innerHTML=
+        "<div class='dedup-empty'>✅ No duplicate files found — your queue is clean.</div>";
+    } else {
+      document.getElementById("dedupSummary").innerHTML=`
+        <div class="dedup-summary">
+          ⚠️ ${d.total_groups} duplicate group${d.total_groups!==1?"s":""} found —
+          ${d.total_duplicates} redundant file${d.total_duplicates!==1?"s":""} can be removed.
+        </div>`;
+      document.getElementById("dedupList").innerHTML=d.groups.map(g=>`
+        <div class="dedup-group">
+          <div class="dedup-group-hash">SHA-256: ${g.hash} · ${g.count} copies</div>
+          ${g.duplicates.map((f,i)=>`
+            <div class="dedup-file-row" id="dedup-row-${f.id}">
+              <span class="${i===0?"dedup-keep-badge":"dedup-dupe-badge"}">${i===0?"KEEP":"DUPE"}</span>
+              <div>
+                <div class="dedup-file-name">${f.original_name}</div>
+                <div class="dedup-file-meta">${f.case_number||"No case"} · ${f.created_at?.slice(0,16)||""}</div>
+              </div>
+              ${i>0?`<button class="btn-sm btn-danger" onclick="removeDupe(${f.id})">Remove</button>`:""}
+            </div>`).join("")}
+        </div>`).join("");
+    }
+  }catch(e){ toast("Dedup scan failed: "+e.message); }
+  finally{ btn.textContent="🔍 Check Duplicates"; btn.disabled=false; }
+}
+
+async function removeDupe(id){
+  try{
+    await fetch(API+"/discovery/queue/"+id,{method:"DELETE",headers:HF});
+    document.getElementById("dedup-row-"+id)?.remove();
+    toast("Duplicate removed from queue");
+    loadQueue(activeRoute); loadStats();
+  }catch(e){ toast("Failed to remove duplicate"); }
+}
+
+// ── Privilege Log (Feature 13) ───────────────────────────────────────────────
+
+function togglePriv(){
+  const body=document.getElementById("privBody");
+  const tog=document.getElementById("privToggle");
+  const open=body.classList.toggle("open");
+  tog.classList.toggle("open",open);
+}
+
+function privTypeClass(t){
+  if(!t) return "priv-ac";
+  if(t.includes("Work Product")) return "priv-wp";
+  if(t.includes("Both"))         return "priv-both";
+  if(t.includes("Common"))       return "priv-ci";
+  return "priv-ac";
+}
+
+function renderPrivLog(entries){
+  const el=document.getElementById("privLog");
+  document.getElementById("privCount").textContent=entries.length+" entr"+(entries.length!==1?"ies":"y");
+  if(!entries.length){
+    el.innerHTML="<div class='priv-empty'>No privilege log entries yet for this case.</div>";
+    return;
+  }
+  el.innerHTML=`
+    <table class="priv-table">
+      <thead><tr>
+        <th>#</th><th>Document</th><th>Date</th><th>Author</th>
+        <th>Recipients</th><th>Privilege Type</th><th>Basis</th><th></th>
+      </tr></thead>
+      <tbody>${entries.map((e,i)=>`
+        <tr id="priv-row-${e.id}">
+          <td style="color:#94a3b8">${i+1}</td>
+          <td style="font-weight:600;max-width:160px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${e.filename}">${e.filename}</td>
+          <td style="white-space:nowrap;color:#64748b">${e.doc_date||"—"}</td>
+          <td>${e.author||"—"}</td>
+          <td>${e.recipients||"—"}</td>
+          <td><span class="priv-type ${privTypeClass(e.privilege_type)}">${e.privilege_type}</span></td>
+          <td style="max-width:220px;color:#cbd5e1;font-size:11px">${e.basis}</td>
+          <td><button class="btn-sm btn-danger" onclick="deletePrivEntry(${e.id})">✕</button></td>
+        </tr>`).join("")}
+      </tbody>
+    </table>`;
+}
+
+async function loadPrivLog(){
+  const cn=document.getElementById("privCaseNum").value.trim();
+  if(!cn){ toast("Enter a case number first"); return; }
+  try{
+    const r=await fetch(API+"/privilege/log/"+encodeURIComponent(cn),{headers:H});
+    const d=await r.json();
+    renderPrivLog(d.entries||[]);
+  }catch(e){ toast("Failed to load privilege log"); }
+}
+
+async function generatePrivLog(){
+  const cn=document.getElementById("privCaseNum").value.trim();
+  if(!cn){ toast("Enter a case number first"); return; }
+  const btn=document.getElementById("privGenBtn");
+  btn.disabled=true; btn.textContent="⏳ Generating...";
+  try{
+    // Get all queued/digital files for this case
+    const qr=await fetch(API+"/discovery/queue?limit=100",{headers:HF});
+    const qd=await qr.json();
+    const ids=(qd.files||[])
+      .filter(f=>f.case_number===cn && f.status!=="withheld")
+      .map(f=>f.id);
+    if(!ids.length){ toast("No eligible files found for case "+cn); return; }
+    const r=await fetch(API+"/privilege/log/generate",{
+      method:"POST", headers:H,
+      body:JSON.stringify({case_number:cn, file_ids:ids})
+    });
+    const d=await r.json();
+    if(d.success){
+      toast(`✅ ${d.generated} privilege log entr${d.generated!==1?"ies":"y"} generated`);
+      renderPrivLog(d.entries||[]);
+      loadQueue(activeRoute);
+    } else { toast("Generation failed"); }
+  }catch(e){ toast("Error: "+e.message); }
+  finally{ btn.disabled=false; btn.textContent="✨ Generate with AI"; }
+}
+
+async function exportPrivLog(){
+  const cn=document.getElementById("privCaseNum").value.trim();
+  if(!cn){ toast("Enter a case number first"); return; }
+  fetch(API+"/privilege/log/"+encodeURIComponent(cn)+"/export",{headers:H})
+    .then(r=>{
+      if(!r.ok) throw new Error("Export failed");
+      return r.blob();
+    })
+    .then(blob=>{
+      const a=document.createElement("a");
+      a.href=URL.createObjectURL(blob);
+      a.download="Privilege_Log_"+cn+".csv";
+      a.click(); URL.revokeObjectURL(a.href);
+      toast("✅ Privilege log exported");
+    })
+    .catch(()=>toast("Export failed — load the log first"));
+}
+
+async function deletePrivEntry(id){
+  try{
+    await fetch(API+"/privilege/log/entry/"+id,{method:"DELETE",headers:H});
+    document.getElementById("priv-row-"+id)?.remove();
+    toast("Entry removed");
+  }catch(e){ toast("Failed to remove entry"); }
+}
+
+// ── Chain of Custody (Feature 15) ───────────────────────────────────────────
+
+function toggleCoc(){
+  const body=document.getElementById("cocBody");
+  const tog=document.getElementById("cocToggle");
+  const open=body.classList.toggle("open");
+  tog.classList.toggle("open", open);
+  if(open) loadCoc();
+}
+
+async function loadCoc(){
+  document.getElementById("cocList").innerHTML="<div class='coc-empty'>Loading...</div>";
+  try{
+    const r=await fetch(API+"/audit/discovery/chain?limit=200",{headers:H});
+    const d=await r.json();
+    document.getElementById("cocCount").textContent=d.total+" events";
+    if(!d.entries?.length){
+      document.getElementById("cocList").innerHTML="<div class='coc-empty'>No discovery actions recorded yet.</div>";
+      return;
+    }
+    // Show newest first
+    const entries=[...d.entries].reverse();
+    document.getElementById("cocList").innerHTML=`
+      <table class="coc-table">
+        <thead><tr>
+          <th>Seq</th><th>Timestamp</th><th>Action</th>
+          <th>Status</th><th>ms</th><th>Client IP</th>
+        </tr></thead>
+        <tbody>${entries.map(e=>`
+          <tr>
+            <td class="coc-seq">#${e.seq}</td>
+            <td class="coc-ts">${e.timestamp?.slice(0,19).replace("T"," ")}</td>
+            <td class="coc-action">${e.action}</td>
+            <td class="${e.ok?"coc-ok":"coc-fail"}">${e.status}</td>
+            <td style="color:#94a3b8">${e.response_ms}</td>
+            <td style="font-family:monospace;font-size:11px;color:#94a3b8">${e.client_ip}</td>
+          </tr>`).join("")}
+        </tbody>
+      </table>`;
+  }catch(err){
+    document.getElementById("cocList").innerHTML="<div class='coc-empty'>Failed to load audit trail.</div>";
+  }
+}
+
+function exportCoc(){
+  const a=document.createElement("a");
+  a.href=API+"/audit/discovery/chain/export";
+  a.download="chain_of_custody.csv";
+  // Need auth header — fetch and trigger download
+  fetch(API+"/audit/discovery/chain/export",{headers:H})
+    .then(r=>r.blob())
+    .then(blob=>{
+      a.href=URL.createObjectURL(blob);
+      a.click();
+      URL.revokeObjectURL(a.href);
+      toast("✅ Chain of custody exported");
+    })
+    .catch(()=>toast("Export failed"));
+}
+
+// ── Init ──────────────────────────────────────────────────────────────────────
+loadStats();
+loadQueue(null);
+setInterval(()=>{ loadStats(); loadQueue(activeRoute); }, 30000);
+</script>
+
+<script src="paraiq-sidebar-v3.js"></script>
+<script src="paraiq-persist.js"></script>
+</body>
+</html>

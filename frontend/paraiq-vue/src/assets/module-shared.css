@@ -1,0 +1,67 @@
+/* Shared styles: Depositions, Motions, Contracts
+   Import via: import '@/assets/module-shared.css' */
+
+.mod { padding: 2rem; max-width: 1100px; }
+.mod__header  { align-items: flex-start; display: flex; justify-content: space-between; margin-bottom: 1.5rem; gap: 1rem; }
+.mod__title   { font-family: var(--font-display); font-size: 1.6rem; color: var(--gold); margin: 0; }
+.mod__sub     { color: var(--text-muted); font-size: 0.85rem; margin: 0.25rem 0 0; }
+.header-actions { display: flex; gap: 0.5rem; flex-shrink: 0; align-items: flex-start; }
+
+.btn-upload { background: transparent; border: 1px solid var(--gold, #c9a84c); color: var(--gold, #c9a84c); border-radius: 6px; font-size: 0.875rem; font-weight: 600; padding: 0.55rem 1.1rem; cursor: pointer; white-space: nowrap; transition: background 0.15s; }
+.btn-upload:hover { background: rgba(201,168,76,0.1); }
+
+.stats-bar { display: flex; gap: 1rem; margin-bottom: 1.5rem; flex-wrap: wrap; }
+.stat-card  { background: var(--bg-card); border: 1px solid var(--border); border-radius: 8px; padding: 1rem 1.25rem; min-width: 90px; }
+.stat-card__val   { font-size: 1.5rem; font-weight: 700; color: var(--text-primary); }
+.stat-card__label { color: var(--text-muted); font-size: 0.75rem; margin-top: 0.2rem; text-transform: capitalize; }
+
+.form-card        { background: var(--bg-card); border: 1px solid var(--border); border-radius: 8px; margin-bottom: 1.5rem; padding: 1.5rem; }
+.form-card__title { color: var(--gold); font-family: var(--font-display); font-size: 1.1rem; margin: 0 0 1.25rem; }
+.form-grid { display: grid; gap: 0.75rem 1rem; grid-template-columns: repeat(auto-fill, minmax(220px,1fr)); margin-bottom: 1rem; }
+.form-grid label { display: flex; flex-direction: column; gap: 0.3rem; font-size: 0.78rem; color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.04em; }
+.form-err  { color: #fc8181; font-size: 0.85rem; margin-bottom: 0.75rem; }
+.form-actions { display: flex; gap: 0.75rem; justify-content: flex-end; }
+
+.filters { display: flex; gap: 0.75rem; margin-bottom: 1rem; flex-wrap: wrap; }
+
+.piq-table-wrap { border: 1px solid var(--border); border-radius: 8px; overflow-x: auto; }
+.piq-table { border-collapse: collapse; font-size: 0.875rem; width: 100%; }
+.piq-table th { background: var(--bg-card); border-bottom: 1px solid var(--border); color: var(--text-muted); font-size: 0.72rem; font-weight: 600; letter-spacing: 0.05em; padding: 0.65rem 0.9rem; text-align: left; text-transform: uppercase; }
+.piq-table td { border-bottom: 1px solid var(--border); padding: 0.7rem 0.9rem; vertical-align: middle; }
+.piq-table tr:last-child td { border-bottom: none; }
+.piq-table tr:hover td { background: rgba(255,255,255,.02); }
+.bold { font-weight: 500; color: var(--text-primary); }
+.status-pill { border-radius: 4px; font-size: 0.72rem; font-weight: 600; padding: 0.2rem 0.5rem; text-transform: capitalize; white-space: nowrap; }
+
+.action-btn { background: none; border: 1px solid var(--border); border-radius: 4px; color: var(--text-muted); cursor: pointer; font-size: 0.78rem; padding: 0.3rem 0.7rem; transition: all .2s; white-space: nowrap; }
+.action-btn:hover { border-color: var(--gold); color: var(--gold); }
+.action-btn--del:hover { border-color: #fc8181 !important; color: #fc8181 !important; }
+
+.piq-btn-gold { background: var(--gold); border: none; border-radius: 6px; color: #000; cursor: pointer; font-size: 0.875rem; font-weight: 600; padding: 0.55rem 1.1rem; transition: opacity .2s; white-space: nowrap; }
+.piq-btn-gold:hover:not(:disabled) { opacity: 0.85; }
+.piq-btn-gold:disabled { cursor: not-allowed; opacity: 0.4; }
+
+.modal-overlay { position: fixed; inset: 0; background: rgba(0,0,0,0.7); backdrop-filter: blur(4px); z-index: 1000; display: flex; align-items: center; justify-content: center; padding: 20px; }
+.picker-modal  { background: var(--surface, #111122); border: 1px solid var(--border-color, #2a2a3a); border-radius: 14px; width: 100%; max-width: 520px; max-height: 80vh; overflow-y: auto; display: flex; flex-direction: column; box-shadow: 0 24px 64px rgba(0,0,0,0.6); }
+.picker-header { display: flex; align-items: flex-start; justify-content: space-between; padding: 24px 24px 16px; border-bottom: 1px solid var(--border-color, #2a2a3a); }
+.picker-title  { font-size: 1rem; font-weight: 700; color: var(--gold, #c9a84c); margin: 0 0 4px; font-family: var(--font-display); }
+.picker-sub    { font-size: 0.78rem; color: var(--text-muted, #888); margin: 0; }
+.close-btn     { background: none; border: none; color: var(--text-muted); font-size: 16px; cursor: pointer; padding: 4px 8px; border-radius: 4px; transition: color 0.15s; }
+.close-btn:hover { color: var(--text-primary); }
+.picker-state  { padding: 2rem; text-align: center; color: var(--text-muted); font-size: 0.875rem; }
+.picker-state.err { color: #fc8181; }
+.matter-list   { padding: 12px; display: flex; flex-direction: column; gap: 6px; }
+.matter-row    { display: flex; align-items: center; justify-content: space-between; background: var(--input-bg, #0d0d1a); border: 1px solid var(--border-color, #1e1e30); border-radius: 8px; padding: 12px 16px; cursor: pointer; text-align: left; width: 100%; transition: border-color 0.15s, background 0.15s; }
+.matter-row:hover { border-color: var(--gold, #c9a84c); background: rgba(201,168,76,0.05); }
+.matter-row__name  { font-size: 0.875rem; font-weight: 600; color: var(--text-primary); margin-bottom: 2px; }
+.matter-row__meta  { font-size: 0.75rem; }
+.matter-row__arrow { color: var(--gold, #c9a84c); font-size: 1rem; flex-shrink: 0; margin-left: 12px; }
+
+.dim    { color: var(--text-muted); }
+.mono   { font-family: var(--font-mono); }
+.nowrap { white-space: nowrap; }
+.state-msg  { color: var(--text-muted); padding: 3rem; text-align: center; }
+.empty-state { padding: 4rem 2rem; text-align: center; }
+.empty-state__icon  { color: var(--gold); font-size: 2.5rem; margin-bottom: 1rem; opacity: 0.4; }
+.empty-state__title { color: var(--text-primary); font-size: 1.1rem; font-weight: 600; margin-bottom: 0.5rem; }
+.empty-state__sub   { color: var(--text-muted); font-size: 0.875rem; }

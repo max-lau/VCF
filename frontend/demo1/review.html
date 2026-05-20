@@ -1,6 +1,7 @@
 <!DOCTYPE html>
 <html lang="en">
-<head>
+<head><script src="paraiq-config.js"></script>
+<script src="paraiq-auth.js?v=3"></script>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>Active Learning — Review Queue</title>
@@ -56,7 +57,7 @@
     .s-pill { display: inline-block; padding: 3px 10px; border-radius: 20px; font-size: 13px; font-weight: 600; text-transform: capitalize; }
     .s-positive{background:#d1fae5;color:#065f46}
     .s-negative{background:#fee2e2;color:#991b1b}
-    .s-neutral {background:#f3f4f6;color:#374151}
+    .s-neutral {background:#f3f4f6;color:#cbd5e1}
     .s-mixed   {background:#fef3c7;color:#92400e}
 
     /* Correction UI */
@@ -175,14 +176,14 @@ let queueItems = [];
 
 async function loadStats() {
   try {
-    const resp = await fetch(`${API}/stats`);
+    const resp = await fetch(`${API}/stats`, { headers: { 'X-API-Key': PARAIQ_KEY } });
     const d    = await resp.json();
     document.getElementById('kpiTotal').textContent   = d.total_analyses || 0;
     document.getElementById('kpiPending').textContent = d.pending_feedback || 0;
   } catch(e) { console.error(e); }
 
   try {
-    const resp = await fetch(`${API}/feedback/retraining-data`);
+    const resp = await fetch(`${API}/feedback/retraining-data`, { headers: { 'X-API-Key': PARAIQ_KEY } });
     const d    = await resp.json();
     document.getElementById('kpiReady').textContent = d.total_samples || 0;
   } catch(e) { console.error(e); }
@@ -193,7 +194,7 @@ async function loadQueue() {
   wrap.innerHTML = '<div class="queue-empty"><div class="icon">⏳</div>Loading...</div>';
 
   try {
-    const resp = await fetch(`${API}/feedback/queue`);
+    const resp = await fetch(`${API}/feedback/queue`, { headers: { 'X-API-Key': PARAIQ_KEY } });
     const d    = await resp.json();
     queueItems = d.items || [];
 
@@ -201,7 +202,7 @@ async function loadQueue() {
       wrap.innerHTML = `
         <div class="queue-empty">
           <div class="icon">✅</div>
-          <div style="font-weight:600;color:#374151;margin-bottom:4px">Queue is clear</div>
+          <div style="font-weight:600;color:#cbd5e1;margin-bottom:4px">Queue is clear</div>
           <div>No pending reviews. Run more analyses to generate flagged items.</div>
         </div>`;
       return;
@@ -343,7 +344,7 @@ async function skipItem(itemId) {
 }
 
 async function exportRetraining() {
-  const resp = await fetch(`${API}/feedback/retraining-data`);
+  const resp = await fetch(`${API}/feedback/retraining-data`, { headers: { 'X-API-Key': PARAIQ_KEY } });
   const d    = await resp.json();
 
   const block = document.getElementById('codeBlock');
@@ -375,7 +376,7 @@ ${preview}
 loadStats();
 loadQueue();
 </script>
-  <script src="paraiq-sidebar.js"></script>
+  <script src="paraiq-sidebar-v3.js"></script>
   <script src="paraiq-persist.js"></script>
   <script src="paraiq-export.js"></script>
 

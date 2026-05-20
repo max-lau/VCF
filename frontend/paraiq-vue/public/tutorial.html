@@ -1,0 +1,295 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8"/>
+<meta name="viewport" content="width=device-width,initial-scale=1"/>
+<title>ParaIQ — How to Use the App</title>
+<style>
+:root{--gold:#c9a84c;--bg:#0e0e1a;--bg-card:#14141f;--bg-raised:#1a1a2a;--border:rgba(255,255,255,0.1);--text:#e8e6de;--muted:#888}
+*{box-sizing:border-box;margin:0;padding:0}
+body{font-family:Georgia,serif;background:#f5f3ee;color:#1a1a1a;font-size:16px;line-height:1.75}
+.cover{background:var(--bg);color:var(--text);padding:80px 48px 64px;text-align:center}
+.logo{font-family:Arial,sans-serif;font-size:42px;font-weight:200;color:var(--gold);letter-spacing:.12em;margin-bottom:12px}
+.tag{font-size:13px;color:var(--muted);text-transform:uppercase;letter-spacing:.15em;margin-bottom:40px}
+.cover h1{font-family:Arial,sans-serif;font-size:30px;font-weight:300;color:#fff;margin-bottom:10px}
+.cover p{color:var(--muted);font-size:14px;font-family:Arial,sans-serif}
+.badge{display:inline-block;margin-top:28px;background:rgba(201,168,76,.15);border:1px solid rgba(201,168,76,.3);color:var(--gold);font-size:12px;font-family:Arial,sans-serif;padding:6px 18px;border-radius:4px}
+.toc{max-width:720px;margin:0 auto;padding:40px 32px}
+.toc h2{font-family:Arial,sans-serif;font-size:12px;font-weight:600;text-transform:uppercase;letter-spacing:.1em;color:#888;margin-bottom:16px}
+.ti{display:flex;justify-content:space-between;padding:7px 0;border-bottom:1px dotted #ccc;font-size:15px}
+.ti a{color:#1a1a1a;text-decoration:none}.ti a:hover{color:#c9a84c}
+.tn{color:#aaa;font-size:13px;font-family:Arial,sans-serif}
+.sec{max-width:720px;margin:0 auto;padding:44px 32px;border-bottom:1px solid #e0ddd8}
+.sn{font-family:Arial,sans-serif;font-size:11px;font-weight:600;text-transform:uppercase;letter-spacing:.1em;color:#c9a84c;margin-bottom:5px}
+.sec h2{font-family:Arial,sans-serif;font-size:24px;font-weight:400;margin-bottom:8px}
+.lead{font-size:16px;color:#555;margin-bottom:24px;line-height:1.7}
+.step{display:flex;gap:14px;margin-bottom:18px;align-items:flex-start}
+.snum{flex-shrink:0;width:30px;height:30px;background:var(--bg);color:var(--gold);border-radius:50%;display:flex;align-items:center;justify-content:center;font-family:Arial,sans-serif;font-size:13px;font-weight:600;margin-top:2px}
+.sc{flex:1;font-size:15px}
+.sc strong{font-family:Arial,sans-serif;font-weight:600}
+.tip{background:#fdf9ed;border-left:3px solid #c9a84c;padding:11px 15px;border-radius:0 5px 5px 0;margin:14px 0;font-size:14px;color:#555}
+.tip b{color:#8a6d1a;font-family:Arial,sans-serif;font-size:11px;text-transform:uppercase;letter-spacing:.05em}
+.warn{background:#fef2f2;border-left:3px solid #e03131;padding:11px 15px;border-radius:0 5px 5px 0;margin:14px 0;font-size:14px;color:#555}
+.warn b{color:#a01010;font-family:Arial,sans-serif;font-size:11px;text-transform:uppercase;letter-spacing:.05em}
+.mock{background:var(--bg);border-radius:10px;overflow:hidden;margin:24px 0;box-shadow:0 4px 20px rgba(0,0,0,.18)}
+.mbar{background:#08080f;padding:9px 14px;display:flex;align-items:center;gap:7px}
+.dr{width:9px;height:9px;border-radius:50%;background:#e03131}
+.dy{width:9px;height:9px;border-radius:50%;background:#f59f00}
+.dg{width:9px;height:9px;border-radius:50%;background:#4caf79}
+.url{flex:1;background:rgba(255,255,255,.05);border-radius:3px;padding:3px 9px;font-size:10px;font-family:Arial,sans-serif;color:var(--muted);margin-left:6px}
+.lm{display:flex;flex-direction:column;align-items:center;padding:40px 20px}
+.ll{font-family:Arial,sans-serif;font-size:26px;font-weight:200;color:var(--gold);letter-spacing:.12em;margin-bottom:3px}
+.ls{font-size:10px;font-family:Arial,sans-serif;color:var(--muted);letter-spacing:.1em;margin-bottom:28px}
+.lc{background:var(--bg-card);border:1px solid var(--border);border-radius:7px;padding:24px 28px;width:300px}
+.ll2{font-size:10px;font-family:Arial,sans-serif;color:var(--muted);text-transform:uppercase;letter-spacing:.07em;display:block;margin-bottom:5px}
+.li{background:var(--bg-raised);border:1px solid var(--border);border-radius:4px;color:var(--text);font-family:Arial,sans-serif;font-size:13px;padding:7px 11px;width:100%;margin-bottom:12px}
+.lb{background:var(--gold);border:none;border-radius:4px;color:#000;font-family:Arial,sans-serif;font-size:13px;font-weight:700;padding:9px;width:100%;margin-top:3px}
+.dm{display:flex;height:340px}
+.sb{width:190px;background:#0a0a14;border-right:1px solid var(--border);padding:18px 0;flex-shrink:0}
+.sbl{font-family:Arial,sans-serif;font-size:17px;font-weight:200;color:var(--gold);letter-spacing:.1em;padding:0 14px 18px}
+.ni{padding:7px 14px;font-family:Arial,sans-serif;font-size:11px;color:var(--muted);display:flex;align-items:center;gap:7px}
+.ni.a{color:var(--gold);background:rgba(201,168,76,.08)}
+.dm2{flex:1;padding:18px;overflow:hidden}
+.tb{display:flex;justify-content:space-between;align-items:center;padding:0 0 14px;border-bottom:1px solid var(--border);margin-bottom:14px}
+.tt{font-family:Arial,sans-serif;font-size:13px;font-weight:300;color:var(--text)}
+.tr{display:flex;gap:7px;align-items:center;font-family:Arial,sans-serif;font-size:10px;color:var(--muted)}
+.rb{background:rgba(201,168,76,.15);color:var(--gold);font-size:9px;padding:2px 6px;border-radius:3px}
+.so{background:rgba(255,255,255,.05);border:1px solid var(--border);color:var(--muted);font-size:9px;padding:2px 7px;border-radius:3px;font-family:Arial,sans-serif}
+.sr{display:grid;grid-template-columns:repeat(4,1fr);gap:7px;margin-bottom:14px}
+.sc2{background:var(--bg-card);border:1px solid var(--border);border-radius:5px;padding:10px}
+.sv{font-family:Arial,sans-serif;font-size:20px;font-weight:300;color:var(--gold)}
+.sl{font-family:Arial,sans-serif;font-size:8px;color:var(--muted);text-transform:uppercase;letter-spacing:.05em;margin-top:2px}
+.mg{display:grid;grid-template-columns:repeat(3,1fr);gap:5px}
+.mc{background:var(--bg-card);border:1px solid var(--border);border-radius:5px;padding:7px 9px}
+.mn{font-family:Arial,sans-serif;font-size:10px;font-weight:500;color:var(--text)}
+.md{font-family:Arial,sans-serif;font-size:9px;color:var(--muted)}
+.dz{border:2px dashed rgba(201,168,76,.4);border-radius:7px;padding:36px;text-align:center;margin-bottom:14px}
+.dt{font-family:Arial,sans-serif;font-size:13px;color:var(--text);margin-bottom:3px}
+.ds{font-family:Arial,sans-serif;font-size:10px;color:var(--muted)}
+.rc{background:var(--bg-card);border:1px solid var(--border);border-radius:7px;overflow:hidden}
+.rh{padding:9px 14px;border-bottom:1px solid var(--border);display:flex;justify-content:space-between;align-items:center}
+.rl{font-family:Arial,sans-serif;font-size:9px;color:var(--muted);text-transform:uppercase;letter-spacing:.05em}
+.ep{display:flex;flex-wrap:wrap;gap:4px;margin-bottom:10px}
+.pill{font-family:Arial,sans-serif;font-size:10px;padding:3px 8px;border-radius:4px;border:1px solid}
+.pp{background:rgba(74,158,255,.16);color:#4a9eff;border-color:rgba(74,158,255,.35)}
+.op{background:rgba(179,119,255,.16);color:#b377ff;border-color:rgba(179,119,255,.35)}
+.dp{background:rgba(255,183,77,.16);color:#ffb74d;border-color:rgba(255,183,77,.35)}
+.lp{background:rgba(224,49,49,.16);color:#ff7070;border-color:rgba(224,49,49,.35)}
+.pt{width:100%;padding:14px}
+.pt table{width:100%;border-collapse:collapse;font-family:Arial,sans-serif;font-size:11px}
+.pt th{text-align:left;font-size:9px;text-transform:uppercase;letter-spacing:.05em;color:var(--muted);padding:0 7px 7px}
+.pt td{padding:6px 7px;border-bottom:1px solid var(--border);color:var(--text)}
+.pb{display:inline-block;font-size:9px;padding:2px 6px;border-radius:3px;font-weight:600}
+.pa{background:rgba(224,49,49,.15);color:#ff7070}
+.pw{background:rgba(255,183,77,.15);color:#ffb74d}
+.pn{background:rgba(136,136,136,.12);color:#888}
+.eo{display:grid;grid-template-columns:1fr 1fr;gap:9px;padding:18px}
+.ec{background:var(--bg-card);border:1px solid var(--border);border-radius:7px;padding:14px;text-align:center}
+.en{font-family:Arial,sans-serif;font-size:11px;font-weight:600;color:var(--text)}
+.ed{font-family:Arial,sans-serif;font-size:10px;color:var(--muted);margin-top:2px}
+.qr{background:var(--bg-card);border:1px solid var(--border);border-radius:7px;padding:22px 26px;color:var(--text);font-family:Arial,sans-serif;margin-top:24px}
+</style>
+</head>
+<body>
+<div class="cover">
+<div class="logo">PARA IQ</div>
+<div class="tag">AI-Powered Legal Practice Platform</div>
+<h1>How to Use ParaIQ</h1>
+<p>A complete step-by-step guide for lawyers and paralegals</p>
+<div class="badge">No technical experience required</div>
+</div>
+
+<div class="toc">
+<h2>Contents</h2>
+<div class="ti"><a href="#s1">1 &middot; What is ParaIQ?</a><span class="tn">2</span></div>
+<div class="ti"><a href="#s2">2 &middot; Logging in</a><span class="tn">3</span></div>
+<div class="ti"><a href="#s3">3 &middot; Your dashboard</a><span class="tn">4</span></div>
+<div class="ti"><a href="#s4">4 &middot; Working with matters</a><span class="tn">5</span></div>
+<div class="ti"><a href="#s5">5 &middot; Uploading documents</a><span class="tn">6</span></div>
+<div class="ti"><a href="#s6">6 &middot; Running AI analysis</a><span class="tn">7</span></div>
+<div class="ti"><a href="#s7">7 &middot; The privilege log</a><span class="tn">8</span></div>
+<div class="ti"><a href="#s8">8 &middot; Discovery</a><span class="tn">9</span></div>
+<div class="ti"><a href="#s9">9 &middot; Depositions</a><span class="tn">10</span></div>
+<div class="ti"><a href="#s10">10 &middot; Exporting your work</a><span class="tn">11</span></div>
+<div class="ti"><a href="#s11">11 &middot; Getting help</a><span class="tn">12</span></div>
+</div>
+
+<div class="sec" id="s1"><div class="sn">Section 1</div><h2>What is ParaIQ?</h2>
+<p class="lead">ParaIQ is a secure web-based platform that helps law firms manage cases, review documents, and use AI to speed up legal work &mdash; all in one place.</p>
+<p>Think of it as a digital filing cabinet, a smart document reviewer, and a case management system in one. You use it in a normal web browser &mdash; no software to install.</p>
+<br/><p><strong>What you can do:</strong></p>
+<ul style="margin:10px 0 0 20px;line-height:2.1">
+<li>Keep all case files organized by matter</li>
+<li>Have AI highlight important people, dates, and legal terms in documents</li>
+<li>Track which documents are privileged</li>
+<li>Manage discovery, depositions, motions, and contracts</li>
+<li>Export reports as PDFs or Word files</li>
+</ul>
+<div class="tip"><b>Good to know</b><br/>ParaIQ works in Chrome, Firefox, Safari, and Edge. No installation needed.</div>
+</div>
+
+<div class="sec" id="s2"><div class="sn">Section 2</div><h2>Logging in</h2>
+<p class="lead">Your administrator will email you a login address and temporary password.</p>
+<div class="mock"><div class="mbar"><div class="dr"></div><div class="dy"></div><div class="dg"></div><div class="url">app.para-iq.com</div></div>
+<div class="lm"><div class="ll">PARA IQ</div><div class="ls">Legal Intelligence Platform</div>
+<div class="lc"><label class="ll2">Email address</label><input class="li" value="jsmith@lawfirm.com" readonly/>
+<label class="ll2">Password</label><input class="li" type="password" value="pw" readonly/>
+<button class="lb">Sign in</button></div></div></div>
+<div class="step"><div class="snum">1</div><div class="sc">Open your browser and go to <strong>app.para-iq.com</strong>. You will see a dark login screen.</div></div>
+<div class="step"><div class="snum">2</div><div class="sc">Type your email address in the first box.</div></div>
+<div class="step"><div class="snum">3</div><div class="sc">Type your password. Characters appear as dots &mdash; that is normal.</div></div>
+<div class="step"><div class="snum">4</div><div class="sc">Click <strong>Sign in</strong>. You will be taken to your Dashboard.</div></div>
+<div class="warn"><b>Important</b><br/>Never share your password. Each person must have their own login.</div>
+</div>
+
+<div class="sec" id="s3"><div class="sn">Section 3</div><h2>Your dashboard</h2>
+<p class="lead">The dashboard is your home base &mdash; the first screen you see every time you log in.</p>
+<div class="mock"><div class="mbar"><div class="dr"></div><div class="dy"></div><div class="dg"></div><div class="url">app.para-iq.com/dashboard</div></div>
+<div class="dm">
+<div class="sb"><div class="sbl">PARA IQ</div>
+<div class="ni a">&#9632; Dashboard</div><div class="ni">&#9632; Matters</div>
+<div class="ni">&#9632; Documents</div><div class="ni">&#9632; Privilege Log</div>
+<div class="ni">&#9632; Discovery</div></div>
+<div class="dm2">
+<div class="tb"><div class="tt">Dashboard</div>
+<div class="tr"><span>jsmith@lawfirm.com</span><span class="rb">Associate</span><span class="so">Sign out</span></div></div>
+<div class="sr">
+<div class="sc2"><div class="sv">14</div><div class="sl">Active Matters</div></div>
+<div class="sc2"><div class="sv">8</div><div class="sl">Depositions</div></div>
+<div class="sc2"><div class="sv">23</div><div class="sl">Motions</div></div>
+<div class="sc2"><div class="sv">5</div><div class="sl">Pending Reviews</div></div>
+</div>
+<div class="mg">
+<div class="mc"><div class="mn">Matters</div><div class="md">Active cases</div></div>
+<div class="mc"><div class="mn">Documents</div><div class="md">Upload &amp; review</div></div>
+<div class="mc"><div class="mn">Privilege Log</div><div class="md">Review &amp; classify</div></div>
+</div>
+</div></div></div>
+<div class="step"><div class="snum" style="background:#1a1a2a;color:#4a9eff">A</div><div class="sc"><strong>Left sidebar</strong> &mdash; navigation menu. Click any item to open that module.</div></div>
+<div class="step"><div class="snum" style="background:#1a1a2a;color:#4caf79">B</div><div class="sc"><strong>Top bar</strong> &mdash; your email, role badge, and Sign out button.</div></div>
+<div class="step"><div class="snum" style="background:#1a1a2a;color:#c9a84c">C</div><div class="sc"><strong>Stats row</strong> &mdash; live counts of active matters, depositions, motions, and pending reviews.</div></div>
+<div class="step"><div class="snum" style="background:#1a1a2a;color:#b377ff">D</div><div class="sc"><strong>Module cards</strong> &mdash; shortcuts to each part of the app. You only see what your role allows.</div></div>
+<div class="tip"><b>Tip</b><br/>Click Dashboard in the sidebar any time to return here.</div>
+</div>
+
+<div class="sec" id="s4"><div class="sn">Section 4</div><h2>Working with matters</h2>
+<p class="lead">A matter is ParaIQ's word for a case or legal project. Everything is linked to a matter.</p>
+<div class="step"><div class="snum">1</div><div class="sc">Click <strong>Matters</strong> in the sidebar to see all matters you have access to.</div></div>
+<div class="step"><div class="snum">2</div><div class="sc">Click any matter name to open it and see all documents, notes, and activity.</div></div>
+<div class="step"><div class="snum">3</div><div class="sc">Use the search bar to find a matter by client name or case number.</div></div>
+<div class="tip"><b>Tip</b><br/>If you do not see a New Matter button, your role does not have that permission. Contact your administrator.</div>
+</div>
+
+<div class="sec" id="s5"><div class="sn">Section 5</div><h2>Uploading documents</h2>
+<p class="lead">Upload PDFs, Word files, and other documents into ParaIQ. The AI can analyze them automatically.</p>
+<div class="mock"><div class="mbar"><div class="dr"></div><div class="dy"></div><div class="dg"></div><div class="url">app.para-iq.com/documents</div></div>
+<div style="padding:20px">
+<div class="dz"><div style="font-size:26px;color:rgba(201,168,76,.5);margin-bottom:7px">&#8593;</div>
+<div class="dt">Drop files here, or click to browse</div>
+<div class="ds" style="margin-top:3px">PDF &middot; DOCX &middot; TXT &middot; RTF &mdash; up to 50 MB per file</div></div>
+<div style="background:#14141f;border:1px solid rgba(255,255,255,.1);border-radius:4px;padding:7px 11px;font-family:Arial,sans-serif;font-size:11px;color:#e8e6de">
+&#128196; Complaint.pdf <span style="color:#4caf79;margin-left:8px">&#10003; Uploaded</span></div>
+</div></div>
+<div class="step"><div class="snum">1</div><div class="sc">Click <strong>Documents</strong> in the sidebar.</div></div>
+<div class="step"><div class="snum">2</div><div class="sc">Drag a file onto the dashed box, or click inside it to browse your computer.</div></div>
+<div class="step"><div class="snum">3</div><div class="sc">A green checkmark appears when the upload is complete.</div></div>
+<div class="step"><div class="snum">4</div><div class="sc">Make sure you are inside the correct matter before uploading.</div></div>
+<div class="warn"><b>File size limit</b><br/>Files must be under 50 MB. Convert larger files to PDF and split if needed.</div>
+</div>
+
+<div class="sec" id="s6"><div class="sn">Section 6</div><h2>Running AI analysis</h2>
+<p class="lead">The AI reads your document in seconds and extracts key information &mdash; saving hours of manual review.</p>
+<div class="mock"><div class="mbar"><div class="dr"></div><div class="dy"></div><div class="dg"></div><div class="url">app.para-iq.com/analyzer</div></div>
+<div style="padding:18px"><div class="rc">
+<div class="rh"><div class="rl">Analysis Result</div><div style="font-family:Arial,sans-serif;font-size:9px;color:#888;border:1px solid rgba(255,255,255,.1);border-radius:3px;padding:2px 5px">Raw JSON</div></div>
+<div style="padding:12px 14px">
+<div style="font-family:Arial,sans-serif;font-size:9px;color:#888;text-transform:uppercase;letter-spacing:.06em;margin-bottom:5px">Entities (6)</div>
+<div class="ep">
+<span class="pill pp">John B. Smith</span><span class="pill pp">Mary Jones</span>
+<span class="pill op">Acme Corporation</span><span class="pill op">Superior Court</span>
+<span class="pill dp">January 14, 2025</span><span class="pill lp">&sect; 1983</span>
+</div>
+<div style="font-family:Arial,sans-serif;font-size:9px;color:#888;text-transform:uppercase;letter-spacing:.06em;margin:8px 0 5px">Sentiment</div>
+<div style="display:flex;align-items:center;gap:7px">
+<span style="font-family:Arial,sans-serif;font-size:10px;color:#4caf79;font-weight:600;min-width:58px">Neutral</span>
+<div style="flex:1;height:4px;background:rgba(255,255,255,.07);border-radius:2px"><div style="height:100%;width:65%;background:#4caf79;border-radius:2px"></div></div>
+<span style="font-family:Arial,sans-serif;font-size:9px;color:#888">65%</span>
+</div>
+</div></div></div></div>
+<div class="step"><div class="snum">1</div><div class="sc">Go to <strong>Legal-BERT</strong> or <strong>Analyzer</strong> in the sidebar.</div></div>
+<div class="step"><div class="snum">2</div><div class="sc">Copy text from your document: Ctrl+A to select all, then Ctrl+C to copy.</div></div>
+<div class="step"><div class="snum">3</div><div class="sc">Click inside the text box in ParaIQ and paste: Ctrl+V (Windows) or Cmd+V (Mac).</div></div>
+<div class="step"><div class="snum">4</div><div class="sc">Click the gold <strong>Analyze</strong> button and wait 10&ndash;30 seconds.</div></div>
+<div class="step"><div class="snum">5</div><div class="sc">Results: <span style="color:#4a9eff">blue = people</span> &middot; <span style="color:#b377ff">purple = organizations</span> &middot; <span style="color:#ffb74d">amber = dates</span> &middot; <span style="color:#ff7070">red = legal citations</span>.</div></div>
+</div>
+
+<div class="sec" id="s7"><div class="sn">Section 7</div><h2>The privilege log</h2>
+<p class="lead">The privilege log tracks which documents are protected by attorney-client privilege or work product doctrine.</p>
+<div class="mock"><div class="mbar"><div class="dr"></div><div class="dy"></div><div class="dg"></div><div class="url">app.para-iq.com/privilege-log</div></div>
+<div class="pt"><table>
+<thead><tr><th>Document</th><th>Date</th><th>Privilege type</th><th>Status</th></tr></thead>
+<tbody>
+<tr><td>Email re: settlement</td><td>Jan 12</td><td><span class="pb pa">Attorney-Client</span></td><td style="color:#4caf79;font-size:10px">&#10003; Confirmed</td></tr>
+<tr><td>Draft motion notes</td><td>Jan 9</td><td><span class="pb pw">Work Product</span></td><td style="color:#4caf79;font-size:10px">&#10003; Confirmed</td></tr>
+<tr><td>Invoice Q1 2025</td><td>Jan 3</td><td><span class="pb pn">None</span></td><td style="color:#ffb74d;font-size:10px">&#9888; Pending</td></tr>
+</tbody></table></div></div>
+<div class="step"><div class="snum">1</div><div class="sc">Click <strong>Privilege Log</strong> in the sidebar.</div></div>
+<div class="step"><div class="snum">2</div><div class="sc">Items in amber (Pending review) need a lawyer to confirm their status.</div></div>
+<div class="step"><div class="snum">3</div><div class="sc">The AI suggests classifications, but a licensed attorney must confirm them before any production.</div></div>
+<div class="warn"><b>Attorney review required</b><br/>All privilege designations must be confirmed by a licensed attorney before production to opposing counsel.</div>
+</div>
+
+<div class="sec" id="s8"><div class="sn">Section 8</div><h2>Discovery</h2>
+<p class="lead">Manage document productions, requests, and responses &mdash; organized by matter.</p>
+<div class="step"><div class="snum">1</div><div class="sc">Click <strong>Discovery</strong> and select the matter from the dropdown.</div></div>
+<div class="step"><div class="snum">2</div><div class="sc">Use the tabs: Productions, Requests, and Responses.</div></div>
+<div class="step"><div class="snum">3</div><div class="sc">ParaIQ automatically checks the privilege log before including any document in a production.</div></div>
+<div class="tip"><b>Tip</b><br/>Use the Bates numbering feature to add sequential document numbers before finalizing any production.</div>
+</div>
+
+<div class="sec" id="s9"><div class="sn">Section 9</div><h2>Depositions</h2>
+<p class="lead">Store transcripts and prepare using AI-assisted summarization.</p>
+<div class="step"><div class="snum">1</div><div class="sc">Click <strong>Depositions</strong> in the sidebar.</div></div>
+<div class="step"><div class="snum">2</div><div class="sc">Click <strong>New Deposition</strong> and fill in the witness name, date, and matter.</div></div>
+<div class="step"><div class="snum">3</div><div class="sc">Upload the transcript, then click <strong>Summarize</strong> for a plain-English AI summary.</div></div>
+<div class="step"><div class="snum">4</div><div class="sc">Always verify important statements against the original transcript.</div></div>
+<div class="tip"><b>Tip</b><br/>Use the search bar inside a deposition to find any word or phrase instantly.</div>
+</div>
+
+<div class="sec" id="s10"><div class="sn">Section 10</div><h2>Exporting your work</h2>
+<p class="lead">Use the Exports module to package documents for sharing outside of ParaIQ.</p>
+<div class="mock"><div class="mbar"><div class="dr"></div><div class="dy"></div><div class="dg"></div><div class="url">app.para-iq.com/exports</div></div>
+<div class="eo">
+<div class="ec"><div style="font-size:22px;margin-bottom:5px">&#128196;</div><div class="en">PDF Bundle</div><div class="ed">Merged with Bates numbers</div></div>
+<div class="ec"><div style="font-size:22px;margin-bottom:5px">&#128221;</div><div class="en">Word Document</div><div class="ed">Editable DOCX report</div></div>
+<div class="ec"><div style="font-size:22px;margin-bottom:5px">&#128202;</div><div class="en">Privilege Log CSV</div><div class="ed">Spreadsheet for court</div></div>
+<div class="ec"><div style="font-size:22px;margin-bottom:5px">&#128230;</div><div class="en">Full Archive</div><div class="ed">ZIP of all documents</div></div>
+</div></div>
+<div class="step"><div class="snum">1</div><div class="sc">Click <strong>Exports</strong> and select your matter.</div></div>
+<div class="step"><div class="snum">2</div><div class="sc">Choose your format. PDF Bundle is most common for productions.</div></div>
+<div class="step"><div class="snum">3</div><div class="sc">Click the gold download button. Check your <strong>Downloads folder</strong> when it finishes.</div></div>
+<div class="warn"><b>Before exporting</b><br/>Confirm with the supervising attorney that privilege review is complete.</div>
+</div>
+
+<div class="sec" id="s11"><div class="sn">Section 11</div><h2>Getting help</h2>
+<p class="lead">Several ways to get assistance if something is not working.</p>
+<div class="step"><div class="snum" style="font-size:15px;background:rgba(201,168,76,.15);color:#c9a84c">?</div><div class="sc"><strong>AI Chat assistant</strong> &mdash; Click the gold chat bubble in the bottom-right corner of any screen. Type your question and the AI will guide you.</div></div>
+<div class="step"><div class="snum" style="font-size:15px;background:rgba(74,158,255,.15);color:#4a9eff">&#9993;</div><div class="sc"><strong>Email your administrator</strong> &mdash; For login problems or missing access.</div></div>
+<div class="step"><div class="snum" style="font-size:15px;background:rgba(76,175,121,.15);color:#4caf79">&#9742;</div><div class="sc"><strong>Live tech support</strong> &mdash; Click Talk to a human inside the chat assistant.</div></div>
+<div class="qr">
+<div style="font-size:11px;color:#c9a84c;text-transform:uppercase;letter-spacing:.08em;margin-bottom:6px">Quick-reference card</div>
+<div style="font-size:13px;line-height:2.1">
+<strong style="color:#c9a84c">Login issues</strong> &rarr; Contact your firm administrator<br/>
+<strong style="color:#c9a84c">Can't see a module</strong> &rarr; Your role may not have access &mdash; ask your administrator<br/>
+<strong style="color:#c9a84c">Analysis seems wrong</strong> &rarr; Always verify with the source document<br/>
+<strong style="color:#c9a84c">File won't upload</strong> &rarr; Check file size (max 50 MB) and format (PDF or Word)<br/>
+<strong style="color:#c9a84c">Sign out</strong> &rarr; Click Sign out in the top-right corner
+</div>
+</div>
+<div style="margin-top:28px;text-align:center;font-family:Arial,sans-serif;font-size:12px;color:#888;border-top:1px solid #e0ddd8;padding-top:20px">
+ParaIQ Legal Intelligence Platform &middot; User Guide<br/>
+<span style="color:#c9a84c">Questions? Use the in-app chat assistant or contact your firm administrator.</span>
+</div>
+</div>
+</body>
+</html>

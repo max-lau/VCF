@@ -1,0 +1,1204 @@
+<!DOCTYPE html>
+<html lang="en">
+<head><script src="paraiq-config.js"></script>
+<script src="paraiq-auth.js?v=3"></script>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Case Management — ParaIQ</title>
+  <style>
+    *{box-sizing:border-box;margin:0;padding:0}
+    body{font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;background:#0f172a;color:#e2e8f0}
+    .page{padding:1.5rem 2rem;max-width:1200px;margin:0 auto;margin-left:220px}
+    .page-title{font-size:22px;font-weight:700;color:#f1f5f9;margin-bottom:4px}
+    .page-sub{font-size:13px;color:#64748b;margin-bottom:1.5rem}
+
+    .stats-row{display:flex;gap:12px;margin-bottom:1.5rem;flex-wrap:wrap}
+    .stat-card{background:#1e293b;border:1px solid #334155;border-radius:10px;padding:12px 16px;flex:1;min-width:110px}
+    .stat-n{font-size:24px;font-weight:700;color:#a78bfa}
+    .stat-l{font-size:11px;color:#64748b;margin-top:2px}
+
+    .toolbar{display:flex;gap:10px;margin-bottom:1.25rem;align-items:center;flex-wrap:wrap}
+    .search-input{flex:1;min-width:200px;padding:9px 14px;border-radius:8px;border:1px solid #334155;font-size:13px;background:#1e293b;color:#e2e8f0}
+    .search-input:focus{outline:none;border-color:#7c3aed}
+    .filter-select{padding:9px 12px;border-radius:8px;border:1px solid #334155;font-size:13px;background:#1e293b;color:#e2e8f0}
+    .btn{padding:10px 20px;border-radius:8px;font-size:13px;font-weight:600;cursor:pointer;border:none;transition:all 0.15s}
+    .btn-primary{background:#7c3aed;color:#fff}
+    .btn-primary:hover{background:#6d28d9}
+    .btn-sm{padding:6px 14px;font-size:12px;border-radius:6px;border:1px solid #334155;background:#1e293b;color:#cbd5e1;cursor:pointer}
+    .btn-sm:hover{background:#334155}
+    .btn-danger{background:#fee2e2;color:#991b1b;border:1px solid #fecaca}
+
+    .cases-table{width:100%;border-collapse:collapse;background:#1e293b;border-radius:12px;overflow:hidden;border:1px solid #334155;margin-bottom:1.5rem}
+    .cases-table th{background:#0f172a;padding:10px 14px;text-align:left;font-size:11px;font-weight:700;color:#475569;text-transform:uppercase;letter-spacing:.5px;border-bottom:1px solid #334155}
+    .cases-table td{padding:12px 14px;border-bottom:1px solid #1e3a5f22;font-size:13px;vertical-align:middle;color:#cbd5e1}
+    .cases-table tr:last-child td{border-bottom:none}
+    .cases-table tbody tr{cursor:pointer;transition:background 0.1s}
+    .cases-table tbody tr:hover{background:#1e1b4b}
+    .cases-table tbody tr.selected{background:#2e1065}
+    .case-number{font-weight:700;color:#7c3aed;font-family:monospace;font-size:12px}
+    .client-name{font-weight:600;color:#f1f5f9}
+    .status-badge{padding:3px 10px;border-radius:10px;font-size:10px;font-weight:700;text-transform:uppercase}
+    .status-open{background:#d1fae5;color:#065f46}
+    .status-closed{background:#f3f4f6;color:#6b7280}
+    .status-active{background:#dbeafe;color:#1e40af}
+    .status-pending{background:#fef3c7;color:#92400e}
+    .status-at-risk{background:#fee2e2;color:#991b1b}
+    .empty-row td{text-align:center;color:#94a3b8;padding:2.5rem;font-size:13px}
+
+    /* ── Detail panel ── */
+    .detail-panel{background:#1e293b;border:1px solid #334155;border-radius:12px;overflow:hidden;display:none}
+    .detail-panel.open{display:block}
+    .detail-header{padding:1.25rem 1.5rem;border-bottom:1px solid #334155;display:flex;align-items:flex-start;justify-content:space-between;gap:10px}
+    .detail-case-num{font-family:monospace;font-size:12px;color:#7c3aed;font-weight:700;margin-bottom:4px}
+    .detail-client{font-size:18px;font-weight:700;color:#f1f5f9;margin-bottom:6px}
+    .detail-meta{display:flex;gap:12px;flex-wrap:wrap}
+    .detail-meta-item{font-size:12px;color:#64748b}
+    .detail-meta-item strong{color:#cbd5e1}
+    .detail-tabs{display:flex;gap:0;border-bottom:1px solid #334155}
+    .detail-tab{padding:10px 18px;font-size:13px;font-weight:600;color:#475569;cursor:pointer;border-bottom:2px solid transparent;transition:all 0.15s}
+    .detail-tab:hover{color:#7c3aed}
+    .detail-tab.active{color:#7c3aed;border-bottom-color:#7c3aed}
+    .detail-body{padding:1.25rem 1.5rem}
+    .tab-pane{display:none}.tab-pane.active{display:block}
+
+    .info-grid{display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-bottom:1.25rem}
+    .info-field label{font-size:11px;font-weight:600;color:#94a3b8;text-transform:uppercase;letter-spacing:.5px;display:block;margin-bottom:3px}
+    .info-field .val{font-size:13px;color:#e2e8f0;font-weight:500}
+
+    .doc-list{display:flex;flex-direction:column;gap:8px;max-height:350px;overflow-y:auto}
+    .doc-row{display:flex;align-items:center;gap:10px;padding:10px 12px;background:#0f172a;border-radius:8px;border:1px solid #334155}
+    .doc-icon{font-size:18px;flex-shrink:0}
+    .doc-info{flex:1;min-width:0}
+    .doc-name{font-size:13px;font-weight:600;color:#f1f5f9;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+    .doc-meta{font-size:11px;color:#94a3b8;margin-top:2px}
+    .doc-empty{text-align:center;color:#94a3b8;font-size:13px;padding:2rem}
+
+    .link-form{background:#0f172a;border:1px solid #334155;border-radius:8px;padding:12px;margin-bottom:1rem}
+    .link-form-title{font-size:12px;font-weight:700;color:#64748b;margin-bottom:8px}
+    .link-row{display:flex;gap:8px;align-items:center;flex-wrap:wrap}
+    .link-select{flex:1;min-width:180px;padding:7px 10px;border-radius:6px;border:1px solid #334155;font-size:12px;background:#1e293b;color:#e2e8f0}
+
+    .timeline-list{display:flex;flex-direction:column;gap:0;max-height:400px;overflow-y:auto}
+    .timeline-item{display:flex;gap:14px;padding:10px 0;border-bottom:1px solid #1e3a5f22}
+    .timeline-item:last-child{border-bottom:none}
+    .timeline-dot{width:10px;height:10px;border-radius:50%;background:#7c3aed;flex-shrink:0;margin-top:4px}
+    .timeline-date{font-size:11px;font-weight:700;color:#7c3aed;font-family:monospace;white-space:nowrap;min-width:85px}
+    .timeline-text{font-size:13px;color:#cbd5e1}
+    .timeline-source{font-size:11px;color:#94a3b8;margin-top:2px}
+    .timeline-empty{text-align:center;color:#94a3b8;font-size:13px;padding:2rem}
+
+    .notes-list{display:flex;flex-direction:column;gap:8px;max-height:280px;overflow-y:auto;margin-bottom:1rem}
+    .note-card{background:#1c1a08;border:1px solid #78620a;border-radius:8px;padding:10px 14px}
+    .note-card.pinned{border-color:#7c3aed;background:#1e1b4b}
+    .note-text{font-size:13px;color:#cbd5e1;line-height:1.6}
+    .note-meta{font-size:11px;color:#94a3b8;margin-top:4px}
+    .note-add{display:flex;gap:8px;margin-top:4px}
+    .note-input{flex:1;padding:8px 12px;border-radius:8px;border:1px solid #334155;font-size:13px;background:#0f172a;color:#e2e8f0;resize:none;min-height:60px}
+
+    /* ── Create case modal ── */
+    .modal-overlay{position:fixed;inset:0;background:rgba(0,0,0,.4);z-index:100;display:none;align-items:center;justify-content:center}
+    .modal-overlay.open{display:flex}
+    .modal{background:#fff;border-radius:14px;padding:1.75rem;width:100%;max-width:560px;max-height:90vh;overflow-y:auto}
+    .modal-title{font-size:17px;font-weight:700;color:#f1f5f9;margin-bottom:1.25rem}
+    .modal-grid{display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-bottom:1rem}
+    .modal-field{display:flex;flex-direction:column;gap:4px}
+    .modal-field.full{grid-column:1/-1}
+    .modal-field label{font-size:11px;font-weight:600;color:#64748b;text-transform:uppercase;letter-spacing:.5px}
+    .modal-field input,.modal-field select,.modal-field textarea{padding:8px 12px;border-radius:8px;border:1px solid #334155;font-size:13px;background:#1e293b;color:#e2e8f0}
+    .modal-field input:focus,.modal-field select:focus,.modal-field textarea:focus{outline:none;border-color:#7c3aed}
+    .modal-field textarea{resize:vertical;min-height:70px}
+    .modal-actions{display:flex;gap:10px;justify-content:flex-end;margin-top:1rem}
+
+    .toast{position:fixed;bottom:24px;right:24px;background:#0f172a;color:#fff;padding:12px 20px;border-radius:10px;font-size:13px;font-weight:600;opacity:0;transition:opacity 0.3s;pointer-events:none;z-index:999}
+    .toast.show{opacity:1}
+
+    /* ── Contradiction cards ───────────────────────────────────────── */
+    .contr-card{background:#0f172a;border:1px solid #334155;border-radius:10px;padding:14px 16px;margin-bottom:10px}
+    .contr-card.sev-high  {border-left:3px solid #ef4444}
+    .contr-card.sev-medium{border-left:3px solid #fb923c}
+    .contr-card.sev-low   {border-left:3px solid #fbbf24}
+    .contr-card.reviewed  {opacity:.5}
+    .contr-hd{display:flex;gap:8px;align-items:center;margin-bottom:8px;flex-wrap:wrap}
+    .contr-sev{font-size:10px;font-weight:800;text-transform:uppercase;letter-spacing:.1em;padding:2px 8px;border-radius:8px}
+    .sev-high  .contr-sev{background:rgba(239,68,68,.2);color:#f87171}
+    .sev-medium.contr-sev,.contr-card.sev-medium .contr-sev{background:rgba(251,146,60,.2);color:#fb923c}
+    .sev-low   .contr-sev,.contr-card.sev-low   .contr-sev{background:rgba(251,191,36,.2);color:#fbbf24}
+    .contr-type{font-size:10px;color:#64748b;text-transform:uppercase;letter-spacing:.08em;font-weight:700}
+    .contr-entity{font-size:12px;color:#94a3b8;font-weight:600}
+    .contr-docs{display:grid;grid-template-columns:1fr 1fr;gap:8px;margin:8px 0}
+    .contr-claim{background:#1e293b;border-radius:6px;padding:8px 10px;font-size:12px;color:#cbd5e1;line-height:1.5}
+    .contr-claim strong{display:block;font-size:10px;color:#64748b;text-transform:uppercase;letter-spacing:.06em;margin-bottom:3px}
+    .contr-explanation{font-size:12px;color:#94a3b8;line-height:1.5;margin-top:6px;font-style:italic}
+    .contr-empty{color:#475569;font-size:13px;padding:1.5rem;text-align:center;background:#1e293b;border-radius:8px;border:1px dashed #334155}
+    .contr-footer{display:flex;justify-content:flex-end;margin-top:10px}
+
+    /* ── AI Case Brief modal ───────────────────────────────────────── */
+    .brief-modal-overlay{display:none;position:fixed;inset:0;background:rgba(0,0,0,.7);z-index:1000;overflow-y:auto;padding:2rem}
+    .brief-modal-overlay.open{display:flex;justify-content:center;align-items:flex-start}
+    .brief-modal{background:#0f172a;border:1px solid #334155;border-radius:14px;width:100%;max-width:780px;overflow:hidden}
+    .brief-modal-header{background:#1e293b;padding:16px 20px;display:flex;align-items:center;justify-content:space-between;border-bottom:1px solid #334155}
+    .brief-modal-title{font-size:15px;font-weight:700;color:#f1f5f9}
+    .brief-modal-meta{font-size:11px;color:#64748b;margin-top:2px}
+    .brief-close{background:none;border:none;color:#64748b;font-size:18px;cursor:pointer;padding:4px 8px;border-radius:6px}
+    .brief-close:hover{background:#334155;color:#f1f5f9}
+    .brief-body{padding:20px;display:flex;flex-direction:column;gap:16px}
+    .brief-section{background:#1e293b;border:1px solid #334155;border-radius:8px;padding:14px 16px}
+    .brief-section-title{font-size:11px;font-weight:800;text-transform:uppercase;letter-spacing:.12em;color:#7c3aed;margin-bottom:8px}
+    .brief-section-content{font-size:13px;color:#cbd5e1;line-height:1.7;white-space:pre-line}
+    .brief-risk-badge{display:inline-block;font-size:11px;font-weight:700;padding:3px 10px;border-radius:8px;background:rgba(251,146,60,.2);color:#fb923c;margin-top:4px}
+    .brief-actions{padding:16px 20px;border-top:1px solid #334155;display:flex;gap:10px;justify-content:flex-end}
+    .brief-gen-btn{background:linear-gradient(135deg,#7c3aed,#6d28d9);color:#fff;border:none;border-radius:8px;padding:8px 18px;font-size:13px;font-weight:700;cursor:pointer;display:flex;align-items:center;gap:6px;transition:opacity .2s}
+    .brief-gen-btn:disabled{opacity:.5;cursor:not-allowed}
+    .brief-gen-btn:hover:not(:disabled){opacity:.85}
+
+    /* ── Deadline Calendar panel ───────────────────────────────────── */
+    @keyframes deadlinePulse{
+      0%,100%{box-shadow:inset 3px 0 0 #ef4444;}
+      50%{box-shadow:inset 3px 0 0 rgba(239,68,68,.15);}
+    }
+    @keyframes deadlineGlow{
+      0%,100%{box-shadow:inset 3px 0 0 #fb923c;}
+      50%{box-shadow:inset 3px 0 0 rgba(251,146,60,.15);}
+    }
+    .deadline-critical{animation:deadlinePulse 1.4s ease-in-out infinite;}
+    .deadline-warning {animation:deadlineGlow  1.8s ease-in-out infinite;}
+
+    .cal-panel{background:#1e293b;border:1px solid #334155;border-radius:12px;
+               padding:16px;margin-bottom:16px;display:none}
+    .cal-panel.open{display:block}
+    .cal-top{display:flex;align-items:center;justify-content:space-between;
+             margin-bottom:14px;flex-wrap:wrap;gap:8px}
+    .cal-title{font-size:13px;font-weight:700;color:#f1f5f9}
+    .cal-legend{display:flex;gap:10px;align-items:center;flex-wrap:wrap}
+    .cal-leg-item{display:flex;align-items:center;gap:4px;font-size:10px;
+                  font-weight:700;text-transform:uppercase;letter-spacing:.06em}
+    .cal-leg-dot{width:8px;height:8px;border-radius:50%}
+
+    .cal-grid{display:grid;grid-template-columns:repeat(7,1fr);gap:4px}
+    .cal-dow{font-size:9px;font-weight:700;text-transform:uppercase;
+             letter-spacing:.1em;color:#475569;text-align:center;padding:4px 0}
+    .cal-day{background:#0f172a;border:1px solid #1e293b;border-radius:7px;
+             min-height:62px;padding:5px 6px;position:relative;
+             display:flex;flex-direction:column;gap:3px}
+    .cal-day.today{border-color:#7c3aed;background:#1a0a3d}
+    .cal-day.past{opacity:.35}
+    .cal-day.empty{background:transparent;border-color:transparent}
+    .cal-daynum{font-size:10px;font-weight:700;color:#64748b;text-align:right;
+                margin-bottom:2px;line-height:1}
+    .cal-day.today .cal-daynum{color:#a78bfa}
+    .cal-pill{font-size:9px;font-weight:700;padding:2px 5px;border-radius:5px;
+              white-space:nowrap;overflow:hidden;text-overflow:ellipsis;
+              cursor:pointer;line-height:1.4;max-width:100%}
+    .cal-pill.cal-critical{background:rgba(239,68,68,.25);color:#f87171;
+                       border:1px solid rgba(239,68,68,.4)}
+    .cal-pill.cal-warning{background:rgba(251,146,60,.25);color:#fb923c;
+                       border:1px solid rgba(251,146,60,.4)}
+    .cal-pill.cal-watch{background:rgba(251,191,36,.2);color:#fbbf24;
+                       border:1px solid rgba(251,191,36,.35)}
+    .cal-more{font-size:8px;color:#475569;text-align:right;margin-top:auto}
+  
+    .intel-card{background:#0f172a;border:1px solid #334155;border-radius:10px;padding:14px 16px;display:flex;gap:12px;align-items:flex-start}
+    .intel-card.critical{border-left:3px solid #ef4444}
+    .intel-card.warning{border-left:3px solid #fb923c}
+    .intel-card.info{border-left:3px solid #7c3aed}
+    .intel-card.watch{border-left:3px solid #fbbf24}
+    .intel-icon{font-size:20px;line-height:1;margin-top:1px}
+    .intel-body{flex:1}
+    .intel-title{font-size:13px;font-weight:700;color:#f1f5f9;margin-bottom:3px}
+    .intel-desc{font-size:12px;color:#94a3b8;line-height:1.6}
+    .intel-badge{display:inline-block;font-size:10px;font-weight:700;padding:2px 7px;border-radius:20px;margin-bottom:6px}
+    .badge-critical{background:rgba(239,68,68,.2);color:#f87171}
+    .badge-warning{background:rgba(251,146,60,.2);color:#fb923c}
+    .badge-info{background:rgba(124,58,237,.2);color:#a78bfa}
+    .badge-watch{background:rgba(251,191,36,.2);color:#fbbf24}
+    .intel-empty{text-align:center;padding:2rem;color:#475569;font-size:13px}
+
+  
+    .wall-toolbar{display:flex;gap:6px;margin-bottom:14px;flex-wrap:wrap}
+    .wall-filter{background:#0f172a;border:1px solid #334155;color:#64748b;padding:5px 12px;border-radius:20px;font-size:11px;font-weight:600;cursor:pointer;transition:all 0.15s}
+    .wall-filter.active,.wall-filter:hover{border-color:#7c3aed;color:#a78bfa;background:#1e1b4b}
+    .wall-feed{display:flex;flex-direction:column;gap:0;position:relative}
+    .wall-feed::before{content:'';position:absolute;left:19px;top:0;bottom:0;width:2px;background:#1e293b;z-index:0}
+    .wall-item{display:flex;gap:14px;align-items:flex-start;padding:0 0 18px 0;position:relative;z-index:1}
+    .wall-item.hidden{display:none}
+    .wall-dot{width:14px;height:14px;border-radius:50%;flex-shrink:0;margin-top:3px;border:2px solid #0f172a;z-index:2}
+    .wall-dot.case_opened{background:#7c3aed}
+    .wall-dot.document{background:#3b82f6}
+    .wall-dot.timeline_event{background:#06b6d4}
+    .wall-dot.note{background:#f59e0b}
+    .wall-dot.brief{background:#10b981}
+    .wall-dot.default{background:#475569}
+    .wall-content{flex:1;background:#0f172a;border:1px solid #1e293b;border-radius:8px;padding:10px 14px;min-width:0}
+    .wall-date{font-size:10px;color:#475569;margin-bottom:3px}
+    .wall-title{font-size:13px;font-weight:600;color:#e2e8f0;margin-bottom:4px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+    .wall-body{font-size:12px;color:#94a3b8;line-height:1.6}
+    .wall-badge{display:inline-block;font-size:9px;font-weight:700;padding:1px 6px;border-radius:10px;margin-right:6px;text-transform:uppercase}
+    .badge-doc{background:rgba(59,130,246,.2);color:#60a5fa}
+    .badge-event{background:rgba(6,182,212,.2);color:#22d3ee}
+    .badge-note{background:rgba(245,158,11,.2);color:#fbbf24}
+    .badge-brief{background:rgba(16,185,129,.2);color:#34d399}
+    .badge-case{background:rgba(124,58,237,.2);color:#a78bfa}
+    .wall-empty{color:#475569;font-size:13px;text-align:center;padding:2rem}
+
+  
+    .export-panel{background:#0f172a;border:1px solid #334155;border-radius:10px;padding:14px 16px;margin-bottom:16px}
+    .export-panel-title{font-size:11px;font-weight:700;color:#475569;text-transform:uppercase;letter-spacing:.5px;margin-bottom:10px}
+    .export-btns{display:flex;gap:8px;flex-wrap:wrap}
+    .export-btn{display:flex;align-items:center;gap:6px;padding:8px 14px;border-radius:8px;font-size:12px;font-weight:600;cursor:pointer;border:1px solid;transition:all 0.15s;text-decoration:none}
+    .export-btn:hover{transform:translateY(-1px)}
+    .export-btn.letter{background:rgba(124,58,237,.15);border-color:#7c3aed;color:#a78bfa}
+    .export-btn.privilege{background:rgba(239,68,68,.12);border-color:#ef4444;color:#f87171}
+    .export-btn.timeline{background:rgba(6,182,212,.12);border-color:#06b6d4;color:#22d3ee}
+    .export-btn.case{background:rgba(16,185,129,.12);border-color:#10b981;color:#34d399}
+    .export-btn.generating{opacity:.6;pointer-events:none}
+
+  </style>
+  <link rel="stylesheet" href="paraiq-sidebar.css">
+</head>
+<body>
+<div class="page">
+  <div class="page-title">Case Management</div>
+  <div class="page-sub">Create and manage matters — link documents, extract timelines, track notes</div>
+
+  <div class="stats-row" id="statsRow">
+    <div class="stat-card"><div class="stat-n" id="statTotal">—</div><div class="stat-l">Total Cases</div></div>
+    <div class="stat-card"><div class="stat-n" id="statOpen">—</div><div class="stat-l">Open</div></div>
+    <div class="stat-card"><div class="stat-n" id="statActive">—</div><div class="stat-l">Active</div></div>
+    <div class="stat-card"><div class="stat-n" id="statClosed">—</div><div class="stat-l">Closed</div></div>
+    <div class="stat-card"><div class="stat-n" id="statDocs">—</div><div class="stat-l">Total Docs</div></div>
+  </div>
+
+  <div class="toolbar">
+    <input class="search-input" type="text" id="searchInput" placeholder="Search cases, clients, matter numbers…" oninput="debounceSearch()">
+    <select class="filter-select" id="statusFilter" onchange="loadCases()">
+      <option value="">All Statuses</option>
+      <option value="open">Open</option>
+      <option value="active">Active</option>
+      <option value="pending">Pending</option>
+      <option value="at-risk">At Risk</option>
+      <option value="closed">Closed</option>
+    </select>
+    <button class="btn-sm" id="calToggleBtn" onclick="toggleCalendar()" style="background:#0f172a;border-color:#334155;color:#94a3b8;gap:5px">&#128197; Calendar</button>
+    <button class="btn btn-primary" onclick="openCreateModal()">+ New Case</button>
+    <button class="btn-sm" onclick="loadCases()">↻ Refresh</button>
+  </div>
+
+
+  <!-- ── 30-Day Deadline Calendar ── -->
+  <div class="cal-panel" id="calPanel">
+    <div class="cal-top">
+      <div class="cal-title">&#128197; 30-Day Deadline Calendar</div>
+      <div class="cal-legend">
+        <div class="cal-leg-item"><div class="cal-leg-dot" style="background:#ef4444"></div>Critical (&le;7d)</div>
+        <div class="cal-leg-item"><div class="cal-leg-dot" style="background:#fb923c"></div>Warning (&le;14d)</div>
+        <div class="cal-leg-item"><div class="cal-leg-dot" style="background:#fbbf24"></div>Watch (&le;30d)</div>
+        <span style="font-size:10px;color:#475569;margin-left:8px" id="calUpdated"></span>
+      </div>
+    </div>
+    <div class="cal-grid" id="calGrid">
+      <div style="color:#475569;font-size:12px;grid-column:span 7;text-align:center;padding:1rem">
+        Loading calendar…</div>
+    </div>
+  </div>
+  <table class="cases-table">
+    <thead><tr>
+      <th>Case #</th><th>Client</th><th>Matter</th>
+      <th>Court</th><th>Filing Date</th><th>Status</th><th>Docs</th><th></th>
+    </tr></thead>
+    <tbody id="casesTbody"><tr class="empty-row"><td colspan="8">Loading cases…</td></tr></tbody>
+  </table>
+
+  <!-- ── Case detail panel ── -->
+  <div class="detail-panel" id="detailPanel">
+    <div class="detail-header">
+      <div>
+        <div class="detail-case-num" id="dCaseNum"></div>
+        <div class="detail-client" id="dClient"></div>
+        <div class="detail-meta" id="dMeta"></div>
+      </div>
+      <div style="display:flex;gap:8px;flex-shrink:0">
+        <select class="filter-select" id="dStatusSelect" onchange="updateStatus()" style="font-size:12px;padding:6px 10px">
+          <option value="open">Open</option>
+          <option value="active">Active</option>
+          <option value="pending">Pending</option>
+          <option value="at-risk">At Risk</option>
+          <option value="closed">Closed</option>
+        </select>
+        <button class="btn-sm btn-danger" onclick="deleteCase()">Delete</button>
+        <button class="btn-sm" onclick="closeDetail()">✕ Close</button>
+      </div>
+    </div>
+    <div class="detail-tabs">
+      <div class="detail-tab active" onclick="switchDetailTab('intelligence',this)">&#9889; Intelligence</div>
+      <div class="detail-tab" onclick="switchDetailTab('wall',this)">&#9776; Case Wall</div>
+      <div class="detail-tab" onclick="switchDetailTab('overview',this)">Overview</div>
+      <div class="detail-tab" onclick="switchDetailTab('documents',this)">Documents</div>
+      <div class="detail-tab" onclick="switchDetailTab('timeline',this)">Timeline</div>
+      <div class="detail-tab" onclick="switchDetailTab('notes',this)">Notes</div>
+      <div class="detail-tab" onclick="switchDetailTab('contradictions',this)" id="contrTab">Contradictions</div>
+    </div>
+    <div class="detail-body">
+
+      <div class="tab-pane active" id="pane-intelligence">
+        <div id="intelFeed" style="display:flex;flex-direction:column;gap:10px">
+          <div style="color:#475569;font-size:13px;text-align:center;padding:2rem">
+            &#9889; Analyzing case… </div>
+        </div>
+      </div>
+
+      <div class="tab-pane" id="pane-wall">
+        <div class="wall-toolbar">
+          <button class="wall-filter active" onclick="wallFilter('all',this)">All</button>
+          <button class="wall-filter" onclick="wallFilter('document',this)">&#128196; Docs</button>
+          <button class="wall-filter" onclick="wallFilter('timeline_event',this)">&#128336; Events</button>
+          <button class="wall-filter" onclick="wallFilter('note',this)">&#128221; Notes</button>
+          <button class="wall-filter" onclick="wallFilter('brief',this)">&#9889; Briefs</button>
+        </div>
+        <div class="wall-feed" id="wallFeed">
+          <div class="wall-empty">Loading matter dossier…</div>
+        </div>
+      </div>
+
+      <div class="tab-pane" id="pane-overview">
+        <div style="display:flex;justify-content:flex-end;margin-bottom:12px">
+          <button class="brief-gen-btn" id="briefBtn" onclick="openBriefModal()">
+            &#9889; Generate AI Case Brief
+          </button>
+        </div>
+        <div class="export-panel">
+          <div class="export-panel-title">&#128196; One-Click Professional Output</div>
+          <div class="export-btns">
+            <a class="export-btn letter" id="btnLetter" onclick="exportDoc('client-letter',this)">&#9993; Client Summary Letter</a>
+            <a class="export-btn privilege" id="btnPrivilege" onclick="exportDoc('privilege-log',this)">&#128274; Privilege Log</a>
+            <a class="export-btn timeline" id="btnTimeline" onclick="exportDoc('timeline',this)">&#128336; Timeline PDF</a>
+            <a class="export-btn case" id="btnCase" href="#" onclick="exportDoc('case',this)">&#128203; Case Summary PDF</a>
+          </div>
+        </div>
+        <div class="info-grid" id="overviewGrid"></div>
+        <div id="overviewDesc" style="font-size:13px;color:#cbd5e1;line-height:1.7"></div>
+      </div>
+
+      <div class="tab-pane" id="pane-documents">
+        <div class="link-form">
+          <div class="link-form-title">🔗 Link document from Discovery queue</div>
+          <div class="link-row">
+            <select class="link-select" id="linkDocSelect"><option value="">Loading discovery files…</option></select>
+            <button class="btn-sm" style="background:#7c3aed;color:#fff;border-color:#7c3aed" onclick="linkDocument()">Link Document</button>
+          </div>
+        </div>
+        <div class="doc-list" id="docList"><div class="doc-empty">Loading documents…</div></div>
+      </div>
+
+      <div class="tab-pane" id="pane-timeline">
+        <div style="display:flex;gap:10px;margin-bottom:1rem;align-items:center">
+          <button class="btn-sm" style="background:#7c3aed;color:#fff;border-color:#7c3aed" onclick="extractTimeline()" id="timelineBtn">✨ Extract Timeline with AI</button>
+          <span style="font-size:12px;color:#94a3b8">Pulls dated events from all documents linked to this case</span>
+        </div>
+        <div class="timeline-list" id="timelineList"><div class="timeline-empty">Click Extract Timeline to generate events from linked documents.</div></div>
+      </div>
+
+      <div class="tab-pane" id="pane-notes">
+        <div class="notes-list" id="notesList"></div>
+        <div class="note-add">
+          <textarea class="note-input" id="noteInput" placeholder="Add a note…"></textarea>
+          <div style="display:flex;flex-direction:column;gap:6px">
+            <button class="btn-sm" style="background:#7c3aed;color:#fff;border-color:#7c3aed" onclick="addNote()">Add Note</button>
+            <label style="font-size:11px;color:#64748b;display:flex;align-items:center;gap:4px;cursor:pointer">
+              <input type="checkbox" id="notePinned"> Pin
+            </label>
+          </div>
+        </div>
+      </div>
+
+      <div class="tab-pane" id="pane-contradictions">
+        <div style="margin-bottom:12px;font-size:12px;color:#64748b">
+          Contradictions are detected automatically when new documents are uploaded.
+        </div>
+        <div id="contrList"><div class="contr-empty">No contradictions detected yet.</div></div>
+      </div>
+
+    </div>
+  </div>
+</div>
+
+<!-- ── Create case modal ── -->
+<div class="modal-overlay" id="createModal">
+  <div class="modal">
+    <div class="modal-title">New Case / Matter</div>
+    <div class="modal-grid">
+      <div class="modal-field">
+        <label>Case Number *</label>
+        <input type="text" id="mCaseNum" placeholder="2026-CV-00142">
+      </div>
+      <div class="modal-field">
+        <label>Client Name *</label>
+        <input type="text" id="mClient" placeholder="Smith & Associates">
+      </div>
+      <div class="modal-field">
+        <label>Matter Number</label>
+        <input type="text" id="mMatter" placeholder="M-2026-001">
+      </div>
+      <div class="modal-field">
+        <label>Status</label>
+        <select id="mStatus">
+          <option value="open">Open</option>
+          <option value="active">Active</option>
+          <option value="pending">Pending</option>
+        </select>
+      </div>
+      <div class="modal-field">
+        <label>Court</label>
+        <input type="text" id="mCourt" placeholder="SDNY">
+      </div>
+      <div class="modal-field">
+        <label>Judge</label>
+        <input type="text" id="mJudge" placeholder="Hon. Jane Smith">
+      </div>
+      <div class="modal-field">
+        <label>Filing Date</label>
+        <input type="date" id="mFiling">
+      </div>
+      <div class="modal-field">
+        <label>Tags (comma-separated)</label>
+        <input type="text" id="mTags" placeholder="litigation, contract, IP">
+      </div>
+      <div class="modal-field full">
+        <label>Description</label>
+        <textarea id="mDesc" placeholder="Brief description of the matter…"></textarea>
+      </div>
+    </div>
+    <div class="modal-actions">
+      <button class="btn-sm" onclick="closeCreateModal()">Cancel</button>
+      <button class="btn btn-primary" onclick="createCase()" id="createBtn">Create Case</button>
+    </div>
+  </div>
+</div>
+
+<div class="toast" id="toast"></div>
+
+<script>
+const API = "https://nlp.para-iq.com";
+const KEY = "pk-84d8657019538fb44aeee9a6a58b2342c5b819c4cceecb3996570d9e980afa40";
+const H   = {"X-API-Key": KEY, "Content-Type": "application/json"};
+const HF  = {"X-API-Key": KEY};
+let currentCaseId = null;
+let searchTimer = null;
+
+function toast(msg, ms=3500){
+  const el=document.getElementById("toast");
+  el.textContent=msg; el.classList.add("show");
+  setTimeout(()=>el.classList.remove("show"), ms);
+}
+
+function riskStyle(r){
+  const m={high:"background:rgba(239,68,68,.15);color:#f87171",
+           medium:"background:rgba(251,146,60,.15);color:#fb923c",
+           low:"background:rgba(34,197,94,.15);color:#4ade80",
+           unknown:"background:rgba(100,116,139,.15);color:#94a3b8"};
+  return m[r]||m.unknown;
+}
+function statusClass(s){
+  return "status-"+(s||"open").toLowerCase().replace(/\s+/,"-");
+}
+
+// ── Stats ─────────────────────────────────────────────────────────────────────
+async function loadStats(){
+  try{
+    const r=await fetch(API+"/cases/stats",{headers:H});
+    const d=await r.json();
+    document.getElementById("statTotal").textContent = d.total_cases||0;
+    document.getElementById("statOpen").textContent  = d.by_status?.open||0;
+    document.getElementById("statActive").textContent= d.by_status?.active||0;
+    document.getElementById("statClosed").textContent= d.by_status?.closed||0;
+    document.getElementById("statDocs").textContent  = d.total_documents||0;
+  }catch(e){}
+}
+
+// ── Case list ─────────────────────────────────────────────────────────────────
+async function loadCases(){
+  const q      = document.getElementById("searchInput").value.trim();
+  const status = document.getElementById("statusFilter").value;
+  let url = API+"/cases/search?limit=50";
+  if(q)      url += "&q="+encodeURIComponent(q);
+  if(status) url += "&status="+encodeURIComponent(status);
+  try{
+    const r=await fetch(url,{headers:H});
+    const d=await r.json();
+    const cases=d.cases||d.results||[];
+    const tbody=document.getElementById("casesTbody");
+    if(!cases.length){
+      tbody.innerHTML='<tr class="empty-row"><td colspan="8">No cases found</td></tr>';
+      return;
+    }
+    tbody.innerHTML=cases.map(c=>`
+      <tr onclick="openCase(${c.id})" id="case-row-${c.id}">
+        <td><span class="case-number">${c.case_number}</span></td>
+        <td><span class="client-name">${c.client_name}</span></td>
+        <td style="color:#64748b">${c.matter_number||"—"}</td>
+        <td style="color:#64748b">${c.court||"—"}</td>
+        <td style="color:#64748b">${c.filing_date||"—"}</td>
+        <td><span class="status-badge ${statusClass(c.status)}">${c.status||"open"}</span></td>
+        <td><span style="font-size:10px;font-weight:700;padding:2px 8px;border-radius:8px;${riskStyle(c.risk_level)}">${c.risk_level||'—'}</span></td>
+        <td style="color:#94a3b8;text-align:center">${c.doc_count||0}</td>
+        <td><button class="btn-sm" onclick="event.stopPropagation();openCase(${c.id})">Open →</button></td>
+      </tr>`).join("");
+    try{markDeadlineCases(typeof _dlCache!=='undefined'&&_dlCache?_dlCache.deadlines:null);}catch(_){}
+  }catch(e){
+    document.getElementById("casesTbody").innerHTML='<tr class="empty-row"><td colspan="8">Failed to load cases</td></tr>';
+  }
+}
+
+function debounceSearch(){
+  clearTimeout(searchTimer);
+  searchTimer=setTimeout(loadCases, 350);
+}
+
+// ── Case detail ───────────────────────────────────────────────────────────────
+async function openCase(id){
+  currentCaseId=id;
+  loadIntelligenceFeed(id);
+  loadCaseWall(id);
+  document.querySelectorAll(".cases-table tbody tr").forEach(r=>r.classList.remove("selected"));
+  document.getElementById("case-row-"+id)?.classList.add("selected");
+
+  const r=await fetch(API+"/cases/"+id,{headers:H});
+  const c=await r.json();
+
+  document.getElementById("dCaseNum").textContent  = c.case_number;
+  document.getElementById("dClient").textContent   = c.client_name;
+  document.getElementById("dStatusSelect").value   = c.status||"open";
+  document.getElementById("dMeta").innerHTML=`
+    ${c.court?`<span class="detail-meta-item"><strong>Court:</strong> ${c.court}</span>`:""}
+    ${c.judge?`<span class="detail-meta-item"><strong>Judge:</strong> ${c.judge}</span>`:""}
+    ${c.filing_date?`<span class="detail-meta-item"><strong>Filed:</strong> ${c.filing_date}</span>`:""}
+    ${c.matter_number?`<span class="detail-meta-item"><strong>Matter:</strong> ${c.matter_number}</span>`:""}
+    <span class="detail-meta-item"><strong>Created:</strong> ${(c.created_at||"").slice(0,10)}</span>`;
+
+  document.getElementById("overviewGrid").innerHTML=`
+    <div class="info-field"><label>Case Number</label><div class="val">${c.case_number}</div></div>
+    <div class="info-field"><label>Client</label><div class="val">${c.client_name}</div></div>
+    <div class="info-field"><label>Matter</label><div class="val">${c.matter_number||"—"}</div></div>
+    <div class="info-field"><label>Status</label><div class="val"><span class="status-badge ${statusClass(c.status)}">${c.status}</span></div></div>
+    <div class="info-field"><label>Court</label><div class="val">${c.court||"—"}</div></div>
+    <div class="info-field"><label>Judge</label><div class="val">${c.judge||"—"}</div></div>
+    <div class="info-field"><label>Filing Date</label><div class="val">${c.filing_date||"—"}</div></div>
+    <div class="info-field"><label>Risk Level</label><div class="val">${c.risk_level||"low"}</div></div>`;
+  document.getElementById("overviewDesc").textContent=c.description||"No description.";
+
+  document.getElementById("detailPanel").classList.add("open");
+  document.getElementById("detailPanel").scrollIntoView({behavior:"smooth",block:"start"});
+
+  // Load active tab data
+  loadDocuments();
+  loadDiscoveryFiles();
+  loadNotes();
+  loadContradictions();
+}
+
+function closeDetail(){
+  document.getElementById("detailPanel").classList.remove("open");
+  document.querySelectorAll(".cases-table tbody tr").forEach(r=>r.classList.remove("selected"));
+  currentCaseId=null;
+}
+
+function switchDetailTab(name, el){
+  document.querySelectorAll(".detail-tab").forEach(t=>t.classList.remove("active"));
+  document.querySelectorAll(".tab-pane").forEach(p=>p.classList.remove("active"));
+  el.classList.add("active");
+  document.getElementById("pane-"+name).classList.add("active");
+  if(name==="documents"){ loadDocuments(); loadDiscoveryFiles(); }
+  if(name==="timeline")       loadTimeline();
+  if(name==="notes")          loadNotes();
+  if(name==="contradictions") loadContradictions();
+}
+
+async function updateStatus(){
+  if(!currentCaseId) return;
+  const status=document.getElementById("dStatusSelect").value;
+  await fetch(API+"/cases/"+currentCaseId+"/status",{
+    method:"PUT", headers:H,
+    body:JSON.stringify({status, author:"Counsel"})
+  });
+  toast("Status updated to "+status);
+  loadCases(); loadStats();
+}
+
+async function deleteCase(){
+  if(!currentCaseId||!confirm("Delete this case and all linked data?")) return;
+  await fetch(API+"/cases/"+currentCaseId,{method:"DELETE",headers:H});
+  toast("Case deleted");
+  closeDetail(); loadCases(); loadStats();
+}
+
+// ── Documents (Feature 23) ────────────────────────────────────────────────────
+async function loadDocuments(){
+  if(!currentCaseId) return;
+  try{
+    const r=await fetch(API+"/cases/"+currentCaseId+"/documents",{headers:H});
+    const d=await r.json();
+    const docs=d.documents||[];
+    document.getElementById("docList").innerHTML=docs.length?
+      docs.map(doc=>`
+        <div class="doc-row">
+          <div class="doc-icon">📄</div>
+          <div class="doc-info">
+            <div class="doc-name">${doc.document_name}</div>
+            <div class="doc-meta">${doc.language||"en"} · ${doc.source||""} · ${(doc.created_at||"").slice(0,16)}</div>
+            ${doc.summary?`<div style="font-size:11px;color:#64748b;margin-top:2px">${doc.summary.slice(0,120)}…</div>`:""}
+          </div>
+          ${doc.risk_score!=null?`<span style="font-size:10px;font-weight:700;color:${doc.risk_score>0.7?"#f87171":doc.risk_score>0.4?"#fb923c":"#4ade80"}">${(doc.risk_score*100).toFixed(0)}% risk</span>`:""}
+          <div style="display:flex;flex-direction:column;gap:4px;flex-shrink:0">
+            ${isAudio(doc)?
+              `<button class="btn-sm" style="color:#38bdf8;border-color:#0369a1" onclick="transcribeAndAnalyze(event,${doc.id},'${encodeURIComponent(doc.document_name||"")}')">🎙 Transcribe</button>`:
+              (doc.doc_text||doc.summary?`<button class="btn-sm" onclick="sendToAnalyzer(event,'${encodeURIComponent(doc.doc_text||doc.summary||doc.document_name||"")}','${encodeURIComponent(doc.document_name||"")}')">🔬 Analyze</button>`:"")
+            }
+            <button class="btn-sm" style="color:#a78bfa;border-color:#4c1d95" onclick="sendToRedaction(event,'${encodeURIComponent(doc.doc_text||doc.summary||"")}','${encodeURIComponent(doc.document_name||"")}')">⬛ Redact</button>
+          </div>
+        </div>`).join(""):
+      "<div class='doc-empty'>No documents linked yet. Use the form above to link files from Discovery.</div>";
+  }catch(e){}
+}
+
+async function loadDiscoveryFiles(){
+  try{
+    const r=await fetch(API+"/discovery/queue?limit=100",{headers:HF});
+    const d=await r.json();
+    const files=d.files||[];
+    const sel=document.getElementById("linkDocSelect");
+    sel.innerHTML=files.length?
+      `<option value="">Select a discovery file to link…</option>`+
+      files.map(f=>`<option value="${f.id}" data-name="${f.original_name}">${f.original_name} (${f.case_number||"no case"})</option>`).join(""):
+      `<option value="">No files in discovery queue</option>`;
+  }catch(e){}
+}
+
+async function linkDocument(){
+  if(!currentCaseId) return;
+  const sel=document.getElementById("linkDocSelect");
+  const fileId=sel.value;
+  const fileName=sel.options[sel.selectedIndex]?.dataset.name;
+  if(!fileId){ toast("Select a file to link"); return; }
+  try{
+    await fetch(API+"/cases/"+currentCaseId+"/documents",{
+      method:"POST", headers:H,
+      body:JSON.stringify({document_name: fileName, source:"discovery", doc_text:""})
+    });
+    toast("✅ Document linked to case");
+    loadDocuments(); loadStats();
+  }catch(e){ toast("Failed to link document"); }
+}
+
+// ── Timeline (Feature 24) ─────────────────────────────────────────────────────
+async function loadTimeline(){
+  if(!currentCaseId) return;
+  document.getElementById("timelineList").innerHTML="<div class='timeline-empty'>Loading…</div>";
+  try{
+    const r=await fetch(API+"/cases/"+currentCaseId+"/timeline",{headers:H});
+    const d=await r.json();
+    const events=d.events||d.timeline||[];
+    document.getElementById("timelineList").innerHTML=events.length?
+      events.map(e=>`
+        <div class="timeline-item">
+          <div class="timeline-dot"></div>
+          <div>
+            <div class="timeline-date">${e.date||e.date_normalized||"Unknown date"}</div>
+            <div class="timeline-text">${e.event||e.description||e.text||""}</div>
+            ${e.source?`<div class="timeline-source">Source: ${e.source}</div>`:""}
+          </div>
+        </div>`).join(""):
+      "<div class='timeline-empty'>No timeline events yet — link documents and click Extract Timeline.</div>";
+  }catch(e){
+    document.getElementById("timelineList").innerHTML="<div class='timeline-empty'>Failed to load timeline</div>";
+  }
+}
+
+async function extractTimeline(){
+  if(!currentCaseId) return;
+  const btn=document.getElementById("timelineBtn");
+  btn.disabled=true; btn.textContent="⏳ Extracting…";
+  try{
+    const r=await fetch(API+"/cases/"+currentCaseId+"/timeline/extract",{method:"POST",headers:H});
+    const d=await r.json();
+    if(d.event_count>0){
+      toast("✅ "+d.event_count+" events extracted from "+d.docs_scanned+" documents");
+    } else {
+      toast(d.message||"No events found — link documents with text first");
+    }
+    await loadTimeline();
+  }catch(e){ toast("Extraction failed: "+e.message); }
+  finally{ btn.disabled=false; btn.textContent="✨ Extract Timeline with AI"; }
+}
+
+// ── Notes ─────────────────────────────────────────────────────────────────────
+async function loadNotes(){
+  if(!currentCaseId) return;
+  try{
+    const r=await fetch(API+"/cases/"+currentCaseId+"/notes",{headers:H});
+    const d=await r.json();
+    const notes=d.notes||[];
+    document.getElementById("notesList").innerHTML=notes.length?
+      notes.map(n=>`
+        <div class="note-card ${n.pinned?"pinned":""}">
+          ${n.pinned?`<div style="font-size:10px;font-weight:700;color:#7c3aed;margin-bottom:4px">📌 PINNED</div>`:""}
+          <div class="note-text">${n.note}</div>
+          <div class="note-meta">${n.author||"Counsel"} · ${(n.created_at||"").slice(0,16)}</div>
+        </div>`).join(""):
+      "<div style='color:#94a3b8;font-size:13px;padding:1rem;text-align:center'>No notes yet</div>";
+  }catch(e){}
+}
+
+async function addNote(){
+  if(!currentCaseId) return;
+  const note=document.getElementById("noteInput").value.trim();
+  const pinned=document.getElementById("notePinned").checked?1:0;
+  if(!note){ toast("Enter a note first"); return; }
+  try{
+    await fetch(API+"/cases/"+currentCaseId+"/notes",{
+      method:"POST", headers:H,
+      body:JSON.stringify({note, author:"Counsel", pinned})
+    });
+    document.getElementById("noteInput").value="";
+    document.getElementById("notePinned").checked=false;
+    toast("✅ Note added");
+    loadNotes();
+  }catch(e){ toast("Failed to add note"); }
+}
+
+
+// ── Cross-module handoff ──────────────────────────────────────────────────────
+function isAudio(doc) {
+  const name = (doc.document_name || "").toLowerCase();
+  const text = (doc.doc_text || "").toLowerCase();
+  return /\.(ogg|mp3|wav|m4a|aac|flac|opus|weba)$/.test(name) ||
+         text.includes("intake route: audio") || text.includes("route: audio");
+}
+
+async function transcribeAndAnalyze(e, docId, encodedName) {
+  e.stopPropagation();
+  const name = decodeURIComponent(encodedName);
+  // Find the discovery file ID by looking up the discovery queue
+  const btn = e.target;
+  btn.disabled = true;
+  btn.textContent = "⏳ Transcribing…";
+  try {
+    // First get discovery file ID by matching document name
+    const qr = await fetch(API + "/discovery/queue?limit=100", { headers: H });
+    const qd = await qr.json();
+    const match = (qd.files || []).find(f =>
+      f.original_name === name || f.filename.includes(name)
+    );
+    if (!match) { toast("Could not find file in discovery queue"); btn.disabled=false; btn.textContent="🎙 Transcribe"; return; }
+
+    const tr = await fetch(API + "/media/transcribe/discovery/" + match.id, {
+      method: "POST", headers: H
+    });
+    const td = await tr.json();
+    if (!td.success || !td.transcript) {
+      toast("Transcription failed"); btn.disabled=false; btn.textContent="🎙 Transcribe"; return;
+    }
+    localStorage.setItem("paraiq_handoff_text",   td.transcript);
+    localStorage.setItem("paraiq_handoff_name",   name + " [transcript]");
+    localStorage.setItem("paraiq_handoff_source", "cases");
+    toast("✅ Transcribed — opening Analyzer…");
+    setTimeout(() => window.location.href = "analyzer.html", 800);
+  } catch(err) {
+    toast("Error: " + err.message);
+    btn.disabled = false;
+    btn.textContent = "🎙 Transcribe";
+  }
+}
+
+function sendToAnalyzer(e, encodedText, encodedName) {
+  e.stopPropagation();
+  const text = decodeURIComponent(encodedText);
+  const name = decodeURIComponent(encodedName);
+  localStorage.setItem('paraiq_handoff_text', text);
+  localStorage.setItem('paraiq_handoff_name', name);
+  localStorage.setItem('paraiq_handoff_source', 'cases');
+  window.location.href = 'analyzer.html';
+}
+
+function sendToRedaction(e, encodedText, encodedName) {
+  e.stopPropagation();
+  const text = decodeURIComponent(encodedText);
+  const name = decodeURIComponent(encodedName);
+  localStorage.setItem('paraiq_handoff_text', text);
+  localStorage.setItem('paraiq_handoff_name', name);
+  localStorage.setItem('paraiq_handoff_source', 'cases');
+  window.location.href = 'redaction.html';
+}
+
+// ── Create case ───────────────────────────────────────────────────────────────
+function openCreateModal(){
+  document.getElementById("createModal").classList.add("open");
+  document.getElementById("mCaseNum").focus();
+}
+function closeCreateModal(){
+  document.getElementById("createModal").classList.remove("open");
+}
+
+async function createCase(){
+  const cn=document.getElementById("mCaseNum").value.trim();
+  const cl=document.getElementById("mClient").value.trim();
+  if(!cn||!cl){ toast("Case number and client name are required"); return; }
+
+  const tags=document.getElementById("mTags").value.split(",").map(t=>t.trim()).filter(Boolean);
+  const btn=document.getElementById("createBtn");
+  btn.disabled=true; btn.textContent="Creating…";
+
+  try{
+    const r=await fetch(API+"/cases/",{
+      method:"POST", headers:H,
+      body:JSON.stringify({
+        case_number:   cn,
+        client_name:   cl,
+        matter_number: document.getElementById("mMatter").value.trim(),
+        status:        document.getElementById("mStatus").value,
+        court:         document.getElementById("mCourt").value.trim(),
+        judge:         document.getElementById("mJudge").value.trim(),
+        filing_date:   document.getElementById("mFiling").value,
+        description:   document.getElementById("mDesc").value.trim(),
+        tags,
+      })
+    });
+    const d=await r.json();
+    if(d.id||d.case_number){
+      toast("✅ Case created — "+cn);
+      closeCreateModal();
+      loadCases(); loadStats();
+      if(d.id) openCase(d.id);
+    } else { toast("Failed: "+(d.detail||JSON.stringify(d))); }
+  }catch(e){ toast("Error: "+e.message); }
+  finally{ btn.disabled=false; btn.textContent="Create Case"; }
+}
+
+// Close modal on overlay click
+document.getElementById("createModal").addEventListener("click", e=>{
+  if(e.target===e.currentTarget) closeCreateModal();
+});
+
+// ── Init ──────────────────────────────────────────────────────────────────────
+loadStats();
+loadCases().then(() => {
+  const p = new URLSearchParams(window.location.search).get('case_id');
+  if (p) openCase(parseInt(p));
+});
+
+// ── AI Case Brief ────────────────────────────────────────────────────────────
+async function openBriefModal(){
+  if(!currentCaseId) return;
+  const modal=document.getElementById("briefModal");
+  const body=document.getElementById("briefBody");
+  const btn=document.getElementById("briefBtn");
+  modal.classList.add("open");
+  btn.disabled=true; btn.innerHTML="Generating...";
+  const dlBtn=document.getElementById("briefDlBtn");
+  if(dlBtn){dlBtn.style.display="none";}
+  const genMsg=document.getElementById("briefGenMsg");
+  if(genMsg){genMsg.style.display="inline-block";}
+  body.innerHTML='<div style="text-align:center;padding:2rem;color:#64748b"><div style="font-size:32px;margin-bottom:12px">&#9889;</div><div style="font-size:14px;font-weight:600;color:#f1f5f9;margin-bottom:6px">Generating Case Brief...</div><div style="font-size:12px">Claude is reading all documents, notes, and risk scores</div></div>';
+  try{
+    const r=await fetch(API+"/cases/"+currentCaseId+"/brief",{method:"POST",headers:H});
+    const d=await r.json();
+    if(!r.ok) throw new Error(d.detail||"Unknown error");
+    const rs=d.brief.risk_score;
+    const rc=typeof rs==="number"?(rs>=7?"#f87171":rs>=4?"#fb923c":"#4ade80"):"#94a3b8";
+    const secs=d.brief.sections||{};
+    const escB=s=>String(s||"").replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;");
+    body.innerHTML=Object.entries(secs).map(([k,s])=>`
+      <div class="brief-section">
+        <div class="brief-section-title">${s.title||k}</div>
+        <div class="brief-section-content">${escB(s.content||"")}</div>
+        ${k==="risk"&&rs!==undefined?`<span style="display:inline-block;font-size:11px;font-weight:700;padding:3px 10px;border-radius:8px;background:rgba(124,58,237,.2);color:#a78bfa;margin-top:6px">Risk Score: ${rs}/10</span>`:""}
+      </div>`).join("");
+    document.getElementById("briefModalTitle").textContent=(d.brief.case_number||"")+" — AI Case Brief";
+    document.getElementById("briefModalMeta").textContent="Generated "+(d.brief.generated_at||"")+" · ParaIQ / Claude Sonnet";
+  }catch(e){
+    body.innerHTML='<div style="color:#f87171;padding:1.5rem;text-align:center"><strong>Generation failed</strong><br><span style="font-size:12px">'+e.message+'</span></div>';
+  }finally{
+    btn.disabled=false;btn.innerHTML="&#9889; Generate AI Case Brief";
+    const dlBtn2=document.getElementById("briefDlBtn");
+    if(dlBtn2){dlBtn2.style.display="inline-block";}
+    const genMsg2=document.getElementById("briefGenMsg");
+    if(genMsg2){genMsg2.style.display="none";}
+  }
+}
+function closeBriefModal(){document.getElementById("briefModal").classList.remove("open");}
+function downloadBriefPdf(){
+  if(!currentCaseId) return;
+  const btn=document.getElementById("briefDlBtn");
+  btn.textContent="Preparing..."; btn.disabled=true;
+  const url=API+"/export/brief/"+currentCaseId;
+  fetch(url,{headers:H}).then(r=>{
+    if(!r.ok) throw new Error("No brief yet — generate one first");
+    return r.blob();
+  }).then(blob=>{
+    const a=document.createElement("a");
+    a.href=URL.createObjectURL(blob);
+    a.download="ParaIQ_Brief_"+currentCaseId+".pdf";
+    a.click();
+  }).catch(e=>toast(e.message))
+  .finally(()=>{btn.textContent="⬇ Download PDF";btn.disabled=false;});
+}
+
+// ── Contradiction Engine UI ───────────────────────────────────────────────────
+async function loadContradictions(){
+  if(!currentCaseId) return;
+  const box=document.getElementById("contrList");
+  if(!box) return;
+  box.innerHTML="<div class='contr-empty'>Loading...</div>";
+  try{
+    const r=await fetch(API+"/cases/"+currentCaseId+"/contradictions",{headers:H});
+    const d=await r.json();
+    const items=d.contradictions||[];
+    const tab=document.getElementById("contrTab");
+    if(tab){const u=d.unreviewed||0;tab.textContent="Contradictions"+(u>0?" \u26a0"+u:"");tab.style.color=u>0?"#f87171":"";}
+    if(!items.length){box.innerHTML="<div class='contr-empty'>&#10003; No contradictions detected in this case.</div>";return;}
+    const sevIcon=s=>s==="high"?"\uD83D\uDD34":s==="low"?"\uD83D\uDFE1":"\uD83D\uDFE0";
+    const escC=s=>String(s||"").replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;");
+    box.innerHTML=items.map(item=>`
+      <div class="contr-card sev-${item.severity||"medium"}${item.reviewed?" reviewed":""}" id="contr-${item.id}">
+        <div class="contr-hd">
+          <span class="contr-sev">${sevIcon(item.severity)} ${(item.severity||"medium").toUpperCase()}</span>
+          <span class="contr-type">${(item.c_type||"fact").toUpperCase()}</span>
+          ${item.entity?`<span class="contr-entity">re: ${escC(item.entity)}</span>`:""}
+          ${item.reviewed?`<span style="font-size:10px;color:#22c55e;font-weight:700">&#10003; REVIEWED</span>`:""}
+        </div>
+        <div class="contr-docs">
+          <div class="contr-claim"><strong>${escC(item.doc_a_name||"Document A")}</strong>${escC(item.claim_a||"")}</div>
+          <div class="contr-claim"><strong>${escC(item.doc_b_name||"Document B")}</strong>${escC(item.claim_b||"")}</div>
+        </div>
+        ${item.explanation?`<div class="contr-explanation">${escC(item.explanation)}</div>`:""}
+        ${!item.reviewed?`<div class="contr-footer"><button class="btn-sm" style="color:#22c55e;border-color:#166534" onclick="markReviewed(${item.id})">&#10003; Mark Reviewed</button></div>`:""}
+      </div>`).join("");
+  }catch(e){box.innerHTML="<div class='contr-empty'>Could not load contradictions.</div>";}
+}
+
+async function markReviewed(cId){
+  if(!currentCaseId) return;
+  await fetch(API+"/cases/"+currentCaseId+"/contradictions/"+cId+"/review",{method:"PATCH",headers:H});
+  loadContradictions(); toast("Contradiction marked as reviewed");
+}
+
+</script>
+<script src="paraiq-sidebar-v3.js"></script>
+<script src="paraiq-persist.js"></script>
+
+<!-- ── AI Case Brief modal ── -->
+<div class="brief-modal-overlay" id="briefModal" onclick="if(event.target===this)closeBriefModal()">
+  <div class="brief-modal">
+    <div class="brief-modal-header">
+      <div>
+        <div class="brief-modal-title" id="briefModalTitle">AI Case Brief</div>
+        <div class="brief-modal-meta" id="briefModalMeta">Generated by ParaIQ · Claude Sonnet</div>
+      </div>
+      <button class="brief-close" onclick="closeBriefModal()">&#x2715;</button>
+    </div>
+    <div class="brief-body" id="briefBody">
+      <div style="text-align:center;padding:2rem;color:#64748b">
+        <div style="font-size:32px;margin-bottom:12px">&#9889;</div>
+        <div style="font-size:14px;font-weight:600;color:#f1f5f9;margin-bottom:6px">Generating Case Brief…</div>
+        <div style="font-size:12px">Claude is reading all documents, notes, and risk scores</div>
+      </div>
+    </div>
+    <div class="brief-actions">
+      <span id="briefGenMsg" style="display:none;font-size:12px;color:#94a3b8;font-style:italic;align-self:center">
+        &#9889; Please wait, PDF is generating&hellip;</span>
+      <button class="btn-sm" id="briefDlBtn" onclick="downloadBriefPdf()"
+        style="background:#7c3aed;color:#fff;border-color:#7c3aed">&#11015; Download PDF</button>
+      <button class="btn-sm" onclick="closeBriefModal()">Close</button>
+    </div>
+  </div>
+</div>
+
+
+<script>
+function toggleCalendar() {
+  _calOpen = !_calOpen;
+  var panel = document.getElementById("calPanel");
+  var btn   = document.getElementById("calToggleBtn");
+  panel.classList.toggle("open", _calOpen);
+  btn.style.borderColor = _calOpen ? "#7c3aed" : "#334155";
+  btn.style.color       = _calOpen ? "#a78bfa" : "#94a3b8";
+  btn.style.background  = _calOpen ? "#1e1b4b" : "#0f172a";
+  if (_calOpen) renderCalendar();
+}
+var _calOpen = false;
+
+function renderCalendar() {
+  var grid = document.getElementById("calGrid");
+  if (!grid) return;
+  grid.innerHTML = '<div style="color:#475569;font-size:12px;grid-column:span 7;text-align:center;padding:1rem">Loading...</div>';
+  fetch('/dashboard/deadlines')
+    .then(function(r){ return r.json(); })
+    .then(function(data){ buildCalGrid(data.deadlines || []); })
+    .catch(function(){ buildCalGrid([]); });
+}
+
+function buildCalGrid(deadlines) {
+  var grid = document.getElementById("calGrid");
+  if (!grid) return;
+  var today = new Date(); today.setHours(0,0,0,0);
+  var dlMap = {};
+  deadlines.forEach(function(d) {
+    var key = d.date ? d.date.slice(0,10) : null;
+    if (!key) return;
+    if (!dlMap[key]) dlMap[key] = [];
+    dlMap[key].push(d);
+  });
+  var DOW = ["Sun","Mon","Tue","Wed","Thu","Fri","Sat"];
+  var html = DOW.map(function(d){ return '<div class="cal-dow">'+d+'</div>'; }).join("");
+  for (var i = 0; i < today.getDay(); i++) html += '<div class="cal-day cal-blank"></div>';
+  for (var i = 0; i < 30; i++) {
+    var d = new Date(today); d.setDate(today.getDate() + i);
+    var key = d.toISOString().slice(0,10);
+    var dls = dlMap[key] || [];
+    var urgency = dls.length ? (i<=7?"cal-critical":i<=14?"cal-warning":"cal-watch") : "";
+    var pills = dls.map(function(dl){
+      return '<div class="cal-pill '+urgency+'">'+(dl.label||dl.case_number||"DL")+'</div>';
+    }).join("");
+    html += '<div class="cal-day'+(i===0?" cal-today":"")+'"><span class="cal-daynum">'+d.getDate()+'</span>'+pills+'</div>';
+  }
+  grid.innerHTML = html;
+}
+</script>
+
+
+<script>
+// ── Case Intelligence Feed ────────────────────────────────────────────
+function loadIntelligenceFeed(caseId) {
+  var feed = document.getElementById("intelFeed");
+  if (!feed) return;
+  feed.innerHTML = '<div style="color:#475569;font-size:13px;text-align:center;padding:2rem">&#9889; Analyzing case...</div>';
+  fetch('/cases/' + caseId + '/intelligence')
+    .then(function(r){ return r.json(); })
+    .then(function(data){
+      var signals = data.signals || [];
+      if (!signals.length) {
+        feed.innerHTML = '<div class="intel-empty">&#10003; No alerts. Add documents to enable deeper analysis.</div>';
+        return;
+      }
+      var icons = {critical:'&#128680;', warning:'&#9888;', watch:'&#128336;', info:'&#129302;'};
+      var labels = {critical:'CRITICAL', warning:'WARNING', watch:'WATCH', info:'INSIGHT'};
+      feed.innerHTML = signals.map(function(s){
+        var c = s.severity || 'info';
+        return '<div class="intel-card ' + c + '">' +
+          '<div class="intel-icon">' + (icons[c]||'&#9889;') + '</div>' +
+          '<div class="intel-body">' +
+            '<div><span class="intel-badge badge-' + c + '">' + (labels[c]||'INSIGHT') + '</span></div>' +
+            '<div class="intel-title">' + s.title + '</div>' +
+            '<div class="intel-desc">' + s.description + '</div>' +
+          '</div></div>';
+      }).join('');
+    })
+    .catch(function(){ 
+      feed.innerHTML = '<div class="intel-empty">Could not load intelligence feed.</div>';
+    });
+}
+</script>
+<script>
+// ── Case Wall ─────────────────────────────────────────────────────────
+var _wallFilter = 'all';
+var _wallItems  = [];
+
+function loadCaseWall(caseId) {
+  var feed = document.getElementById("wallFeed");
+  if (!feed) return;
+  feed.innerHTML = '<div class="wall-empty">Loading matter dossier…</div>';
+
+  fetch('/cases/' + caseId + '/wall')
+    .then(function(r){ return r.json(); })
+    .then(function(data){
+      _wallItems = data.items || [];
+      renderWall();
+    })
+    .catch(function(){
+      feed.innerHTML = '<div class="wall-empty">Could not load case wall.</div>';
+    });
+}
+
+function renderWall() {
+  var feed = document.getElementById("wallFeed");
+  if (!feed) return;
+  if (!_wallItems.length) {
+    feed.innerHTML = '<div class="wall-empty">No activity yet on this case.</div>';
+    return;
+  }
+
+  var typeLabels = {
+    case_opened:    ['case',  'Case Opened'],
+    document:       ['doc',   'Document'],
+    timeline_event: ['event', 'Event'],
+    note:           ['note',  'Note'],
+    brief:          ['brief', 'AI Brief']
+  };
+
+  feed.innerHTML = _wallItems.map(function(item) {
+    var type  = item.type || 'default';
+    var tinfo = typeLabels[type] || ['case', type];
+    var hidden = (_wallFilter !== 'all' && type !== _wallFilter) ? ' hidden' : '';
+    var dateStr = (item.date || '').slice(0, 16).replace('T', ' ');
+    var meta = item.meta || {};
+    var extraBadge = '';
+    if (meta.sentiment) extraBadge += '<span style="font-size:9px;color:#64748b;margin-left:4px">' + meta.sentiment + '</span>';
+    if (meta.pinned)    extraBadge += '<span style="font-size:9px;color:#fbbf24;margin-left:4px">&#128204; Pinned</span>';
+
+    return '<div class="wall-item' + hidden + '" data-type="' + type + '">' +
+      '<div class="wall-dot ' + type + '"></div>' +
+      '<div class="wall-content">' +
+        '<div class="wall-date">' + dateStr +
+          '<span class="wall-badge badge-' + tinfo[0] + '" style="margin-left:8px">' + tinfo[1] + '</span>' +
+          extraBadge +
+        '</div>' +
+        '<div class="wall-title">' + (item.title || '') + '</div>' +
+        (item.body ? '<div class="wall-body">' + item.body + '</div>' : '') +
+      '</div></div>';
+  }).join('');
+}
+
+function wallFilter(type, btn) {
+  _wallFilter = type;
+  document.querySelectorAll('.wall-filter').forEach(function(b){ b.classList.remove('active'); });
+  btn.classList.add('active');
+  document.querySelectorAll('.wall-item').forEach(function(el){
+    el.classList.toggle('hidden', type !== 'all' && el.dataset.type !== type);
+  });
+}
+</script>
+<script>
+function exportDoc(type, btn) {
+  if (!currentCaseId) return;
+  var orig = btn.innerHTML;
+  btn.innerHTML = '&#9203; Generating…';
+  btn.classList.add('generating');
+
+  var url;
+  if (type === 'case') {
+    url = '/export/case/' + currentCaseId;
+  } else {
+    url = '/export/' + type + '/' + currentCaseId;
+  }
+
+  fetch(url, {headers: {'X-API-Key': window._paraiqKey || ''}})
+    .then(function(r) {
+      if (!r.ok) throw new Error('Failed');
+      return r.blob();
+    })
+    .then(function(blob) {
+      var a = document.createElement('a');
+      a.href = URL.createObjectURL(blob);
+      a.download = type + '_' + currentCaseId + '.pdf';
+      a.click();
+      btn.innerHTML = '&#10003; Downloaded';
+      btn.classList.remove('generating');
+      setTimeout(function(){ btn.innerHTML = orig; }, 3000);
+    })
+    .catch(function() {
+      btn.innerHTML = '&#10007; Error';
+      btn.classList.remove('generating');
+      setTimeout(function(){ btn.innerHTML = orig; }, 3000);
+    });
+}
+</script>
+</body>
+</html>

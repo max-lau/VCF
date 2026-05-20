@@ -1,6 +1,7 @@
 <!DOCTYPE html>
 <html lang="en">
-<head>
+<head><script src="paraiq-config.js"></script>
+<script src="paraiq-auth.js?v=3"></script>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>NLP Analytics Dashboard</title>
@@ -54,7 +55,7 @@
     .s-pill { display: inline-block; padding: 3px 10px; border-radius: 20px; font-size: 12px; font-weight: 600; text-transform: capitalize; }
     .s-positive{background:#d1fae5;color:#065f46}
     .s-negative{background:#fee2e2;color:#991b1b}
-    .s-neutral{background:#f3f4f6;color:#374151}
+    .s-neutral{background:#f3f4f6;color:#cbd5e1}
     .s-mixed{background:#fef3c7;color:#92400e}
 
     /* History table */
@@ -212,7 +213,7 @@ const SENT_COLORS = {
 
 async function loadStats() {
   try {
-    const resp = await fetch(`${API}/stats`);
+    const resp = await fetch(`${API}/stats`, { headers: { 'X-API-Key': PARAIQ_KEY } });
     const d = await resp.json();
     document.getElementById('kpiTotal').textContent    = d.total_analyses || 0;
     document.getElementById('kpiAvgScore').textContent = d.avg_sentiment_score || 0;
@@ -243,11 +244,11 @@ async function loadStats() {
 async function loadPlatformStats() {
   try {
     const [auditR, casesR, webhooksR, usersR, modelR] = await Promise.all([
-      fetch(`${API}/audit/stats`),
-      fetch(`${API}/cases/stats`),
-      fetch(`${API}/webhooks/subscriptions`),
-      fetch(`${API}/auth/users`).catch(() => ({ json: () => ({ count: '—' }) })),
-      fetch(`${API}/model/info`),
+      fetch(`${API}/audit/stats`, { headers: { 'X-API-Key': PARAIQ_KEY } }),
+      fetch(`${API}/cases/stats`, { headers: { 'X-API-Key': PARAIQ_KEY } }),
+      fetch(`${API}/webhooks/subscriptions`, { headers: { 'X-API-Key': PARAIQ_KEY } }),
+      fetch(`${API}/auth/users`, { headers: { 'X-API-Key': PARAIQ_KEY } }).catch(() => ({ json: () => ({ count: '—' }) })),
+      fetch(`${API}/model/info`, { headers: { 'X-API-Key': PARAIQ_KEY } }),
     ]);
     const audit    = await auditR.json();
     const cases    = await casesR.json();
@@ -271,7 +272,7 @@ async function loadHistory() {
   if (sentiment) url += `&sentiment=${sentiment}`;
   if (keyword)   url += `&keyword=${encodeURIComponent(keyword)}`;
   try {
-    const resp = await fetch(url);
+    const resp = await fetch(url, { headers: { 'X-API-Key': PARAIQ_KEY } });
     const d    = await resp.json();
     const rows = d.results || [];
     document.getElementById('histCount').textContent = `${rows.length} records`;
@@ -335,7 +336,7 @@ async function loadAll() {
 
 loadAll();
 </script>
-  <script src="paraiq-sidebar.js"></script>
+  <script src="paraiq-sidebar-v3.js"></script>
   <script src="paraiq-persist.js"></script>
 </body>
 </html>

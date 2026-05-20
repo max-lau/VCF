@@ -1,0 +1,168 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>ParaIQ — Sign In</title>
+  <style>
+    *{box-sizing:border-box;margin:0;padding:0}
+    body{font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;background:#0f172a;color:#e2e8f0;min-height:100vh;display:flex;align-items:center;justify-content:center;padding:1rem}
+    .card{background:#1e293b;border:1px solid #334155;border-radius:16px;padding:2.5rem;width:100%;max-width:400px}
+    .brand{text-align:center;margin-bottom:2rem}
+    .brand-name{font-size:28px;font-weight:800;letter-spacing:-0.03em}
+    .brand-name span{color:#7c3aed}
+    .brand-sub{font-size:12px;color:#64748b;margin-top:4px}
+    .tabs{display:flex;background:#0f172a;border-radius:8px;padding:4px;margin-bottom:1.5rem}
+    .tab{flex:1;padding:8px;text-align:center;font-size:13px;font-weight:600;border-radius:6px;cursor:pointer;color:#64748b;transition:all 0.2s}
+    .tab.active{background:#1e293b;color:#e2e8f0;box-shadow:0 1px 3px rgba(0,0,0,0.4)}
+    label{display:block;font-size:12px;font-weight:600;color:#94a3b8;margin-bottom:5px;margin-top:1rem}
+    input{width:100%;background:#0f172a;border:1px solid #334155;border-radius:8px;padding:10px 14px;font-size:14px;color:#e2e8f0;outline:none;transition:border-color 0.2s}
+    input:focus{border-color:#7c3aed}
+    input::placeholder{color:#475569}
+    .pw-wrap{position:relative}
+    .pw-wrap input{padding-right:42px}
+    .pw-toggle{position:absolute;right:12px;top:50%;transform:translateY(-50%);background:none;border:none;cursor:pointer;color:#475569;font-size:16px;line-height:1;padding:2px;transition:color 0.2s}
+    .pw-toggle:hover{color:#94a3b8}
+    .btn{width:100%;margin-top:1.5rem;padding:11px;background:#7c3aed;border:none;border-radius:8px;font-size:14px;font-weight:700;color:#fff;cursor:pointer;transition:background 0.2s}
+    .btn:hover{background:#6d28d9}
+    .btn:disabled{background:#4c1d95;cursor:not-allowed;opacity:0.7}
+    .error{background:rgba(239,68,68,0.1);border:1px solid rgba(239,68,68,0.3);border-radius:8px;padding:10px 14px;font-size:13px;color:#fca5a5;margin-top:1rem;display:none}
+    .success{background:rgba(34,197,94,0.1);border:1px solid rgba(34,197,94,0.3);border-radius:8px;padding:10px 14px;font-size:13px;color:#86efac;margin-top:1rem;display:none}
+    .divider{text-align:center;font-size:11px;color:#334155;margin-top:1.5rem}
+    #signup-fields{display:none}
+  </style>
+</head>
+<body>
+<div class="card">
+  <div class="brand">
+    <div class="brand-name">Para<span>IQ</span></div>
+    <div class="brand-sub">Legal Intelligence Platform</div>
+  </div>
+
+  <div class="tabs">
+    <div class="tab active" id="tab-login" onclick="switchTab('login')">Sign In</div>
+    <div class="tab" id="tab-signup" onclick="switchTab('signup')">Register</div>
+  </div>
+
+  <div id="signup-fields">
+    <label>Email</label>
+    <input type="email" id="email" placeholder="you@lawfirm.com">
+  </div>
+
+  <label>Username</label>
+  <input type="text" id="username" placeholder="username" autocomplete="username">
+
+  <label>Password</label>
+  <div class="pw-wrap">
+    <input type="password" id="password" placeholder="••••••••" autocomplete="current-password">
+    <button class="pw-toggle" id="pw-toggle" onclick="togglePw()" title="Show/hide password" type="button">👁</button>
+  </div>
+
+  <div class="error" id="err"></div>
+  <div class="success" id="succ"></div>
+
+  <button class="btn" id="submit-btn" onclick="submit()">Sign In</button>
+  <div class="divider">ParaIQ · nlp.para-iq.com</div>
+</div>
+
+<script>
+  var API = "https://nlp.para-iq.com";
+  var API_KEY = "pk-84d8657019538fb44aeee9a6a58b2342c5b819c4cceecb3996570d9e980afa40";
+  var mode = "login";
+
+  try {
+    var t = localStorage.getItem("paraiq_token");
+    if (t) {
+      var p = JSON.parse(atob(t.split(".")[1].replace(/-/g,"+").replace(/_/g,"/")));
+      if (p.exp && p.exp * 1000 > Date.now()) window.location.replace("home.html");
+    }
+  } catch(e) {}
+
+  function togglePw() {
+    var inp = document.getElementById("password");
+    var btn = document.getElementById("pw-toggle");
+    if (inp.type === "password") {
+      inp.type = "text";
+      btn.textContent = "🙈";
+    } else {
+      inp.type = "password";
+      btn.textContent = "👁";
+    }
+  }
+
+  function switchTab(m) {
+    mode = m;
+    document.getElementById("tab-login").classList.toggle("active", m === "login");
+    document.getElementById("tab-signup").classList.toggle("active", m === "signup");
+    document.getElementById("signup-fields").style.display = m === "signup" ? "block" : "none";
+    document.getElementById("submit-btn").textContent = m === "login" ? "Sign In" : "Create Account";
+    document.getElementById("err").style.display = "none";
+    document.getElementById("succ").style.display = "none";
+  }
+
+  function showErr(msg) {
+    var el = document.getElementById("err");
+    el.textContent = msg; el.style.display = "block";
+    document.getElementById("succ").style.display = "none";
+  }
+
+  function showOk(msg) {
+    var el = document.getElementById("succ");
+    el.textContent = msg; el.style.display = "block";
+    document.getElementById("err").style.display = "none";
+  }
+
+  var HEADERS = {
+    "Content-Type": "application/json",
+    "X-API-Key": API_KEY
+  };
+
+  async function submit() {
+    var btn = document.getElementById("submit-btn");
+    var username = document.getElementById("username").value.trim();
+    var password = document.getElementById("password").value;
+    var email = document.getElementById("email").value.trim();
+
+    if (!username || !password) { showErr("Username and password are required."); return; }
+    if (mode === "signup" && !email) { showErr("Email is required."); return; }
+
+    btn.disabled = true;
+    btn.textContent = mode === "login" ? "Signing in..." : "Creating account...";
+
+    try {
+      if (mode === "signup") {
+        var r = await fetch(API + "/auth/register", {
+          method: "POST", headers: HEADERS,
+          body: JSON.stringify({username: username, password: password, email: email})
+        });
+        var d = await r.json();
+        if (!r.ok) { showErr(d.detail || "Registration failed."); return; }
+        showOk("Account created! Signing you in...");
+      }
+
+      var r2 = await fetch(API + "/auth/login", {
+        method: "POST", headers: HEADERS,
+        body: JSON.stringify({username: username, password: password})
+      });
+      var d2 = await r2.json();
+      if (!r2.ok) { showErr(d2.detail || "Invalid username or password."); return; }
+
+      localStorage.setItem("paraiq_token", d2.token);
+      localStorage.setItem("paraiq_user", username);
+      showOk("Welcome, " + username + "! Redirecting...");
+      setTimeout(function(){ window.location.replace("home.html"); }, 800);
+
+    } catch(e) {
+      showErr("Cannot reach API. Check your connection.");
+    } finally {
+      btn.disabled = false;
+      btn.textContent = mode === "login" ? "Sign In" : "Create Account";
+    }
+  }
+
+  document.addEventListener("keydown", function(e){
+    if (e.key === "Enter") submit();
+  });
+</script>
+</body>
+</html>

@@ -1,6 +1,7 @@
 <!DOCTYPE html>
 <html lang="en">
-<head>
+<head><script src="paraiq-config.js"></script>
+<script src="paraiq-auth.js?v=3"></script>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>Batch NLP Processor</title>
@@ -85,7 +86,7 @@
     tr:last-child td { border-bottom: none; }
     tr:hover td { background: #f9fafb; }
     .s-pill { padding: 3px 10px; border-radius: 20px; font-size: 12px; font-weight: 600; text-transform: capitalize; display: inline-block; }
-    .s-positive{background:#d1fae5;color:#065f46} .s-negative{background:#fee2e2;color:#991b1b} .s-neutral{background:#f3f4f6;color:#374151} .s-mixed{background:#fef3c7;color:#92400e}
+    .s-positive{background:#d1fae5;color:#065f46} .s-negative{background:#fee2e2;color:#991b1b} .s-neutral{background:#f3f4f6;color:#cbd5e1} .s-mixed{background:#fef3c7;color:#92400e}
     .status-ok  { color: #059669; font-weight: 600; }
     .status-err { color: #dc2626; font-weight: 600; }
     .kw-list { font-size: 12px; color: #6b7280; }
@@ -423,9 +424,9 @@ function render(data, validDocs) {
 // Start with 3 empty docs
 addDoc(); addDoc(); addDoc();
 </script>
-  <script src="paraiq-sidebar.js"></script>
+  <script src="paraiq-sidebar-v3.js"></script>
   <script src="paraiq-persist.js"></script>
-  <script src="paraiq-export.js"></script>
+  <script src="paraiq-export.js?v=4"></script>
 
   <script>
   document.addEventListener("DOMContentLoaded", function() {

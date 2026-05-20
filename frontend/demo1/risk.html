@@ -1,6 +1,7 @@
 <!DOCTYPE html>
 <html lang="en">
-<head>
+<head><script src="paraiq-config.js"></script>
+<script src="paraiq-auth.js?v=3"></script>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>Risk Scoring — NLP Legal Analyzer</title>
@@ -141,7 +142,7 @@
       // Signals
       const sigs = d.top_signals || [];
       document.getElementById('signals').innerHTML = sigs
-        .map(s => `<div class="signal-item"><span><strong>${s.signal}</strong> <span style="color:#9ca3af">(${s.category})</span></span><span style="color:#374151;font-weight:600">${s.contribution}</span></div>`)
+        .map(s => `<div class="signal-item"><span><strong>${s.signal}</strong> <span style="color:#9ca3af">(${s.category})</span></span><span style="color:#cbd5e1;font-weight:600">${s.contribution}</span></div>`)
         .join('') || '<div style="color:#9ca3af;font-size:13px">None detected</div>';
 
       // Mitigations
@@ -159,9 +160,16 @@
     }
   }
 </script>
-  <script src="paraiq-sidebar.js"></script>
+  <script src="paraiq-sidebar-v3.js"></script>
   <script src="paraiq-persist.js"></script>
-  <script src="paraiq-export.js"></script>
+  <script src="paraiq-export.js?v=5"></script>
+  <script>
+  document.addEventListener("DOMContentLoaded", function() {
+    if (typeof ParaIQExport !== "undefined") {
+      ParaIQExport.injectButton("risk", "Export Risk PDF");
+    }
+  });
+  </script>
 </body>
 </html>
 

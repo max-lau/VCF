@@ -89,6 +89,26 @@ RISK_SIGNALS = [
     (r'\bdamages\b',                        0.7, "financial"),
     (r'\bforfeiture\b',                     1.2, "financial"),
 
+    # Employment law signals
+    (r'\bwrongful termination\b|\bwrongful discharge\b', 1.5, "employment"),
+    (r'\bharassment\b|\bsexual harassment\b',            1.5, "employment"),
+    (r'\bdiscrimination\b',                                1.3, "employment"),
+    (r'\bretaliation\b',                                   1.4, "employment"),
+    (r'\bwhistleblower\b',                                 1.3, "employment"),
+    (r'\bseverance\b',                                     0.8, "employment"),
+    (r'\bfired\b|\bterminated\b|\blaid off\b',         0.9, "employment"),
+    (r'\bADA\b|\bFMLA\b|\bEEOC\b|\bTitle VII\b',    1.2, "employment"),
+    (r'\bwage theft\b|\bunpaid\b',                       1.1, "employment"),
+    (r'\bnon-compete\b|\btrade secret\b',                1.0, "employment"),
+    # Contract / landlord-tenant signals
+    (r'\bbreach of contract\b',                            1.2, "contract"),
+    (r'\beviction\b|\bunlawful detainer\b',              1.2, "landlord_tenant"),
+    (r'\bsecurity deposit\b',                              0.7, "landlord_tenant"),
+    (r'\brent\b|\btenant\b|\blandlord\b',              0.5, "landlord_tenant"),
+    # Urgency signals
+    (r'\bURGENT\b|\bEMERGENCY\b',                       0.8, "urgency"),
+    (r'\bstatute of limitations\b|\bdeadline\b',         0.7, "urgency"),
+    (r'\bimmediate\b|\bimminent\b',                      0.5, "urgency"),
     # Party signals
     (r'\bUnited States\b|\bU\.S\. Attorney\b', 1.0, "government"),
     (r'\bSEC\b|\bDOJ\b|\bFBI\b|\bIRS\b',   1.2, "government"),

@@ -1,0 +1,515 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Privilege Review — ParaIQ</title>
+<style>
+  :root {
+    --bg:       #07090f;
+    --surface:  #0d1117;
+    --border:   rgba(255,255,255,0.07);
+    --purple:   #7c3aed;
+    --purple-l: #a78bfa;
+    --red:      #f43f5e;
+    --amber:    #f59e0b;
+    --green:    #10b981;
+    --cyan:     #22d3ee;
+    --text:     #e2e8f0;
+    --muted:    #64748b;
+    --dim:      #1e293b;
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { background: var(--bg); color: var(--text); font-family: 'Inter', system-ui, sans-serif; font-size: 14px; min-height: 100vh; }
+
+  /* ── Header ── */
+  .header { background: var(--surface); border-bottom: 1px solid var(--border); padding: 14px 24px; display: flex; align-items: center; justify-content: space-between; position: sticky; top: 0; z-index: 100; }
+  .logo { font-family: 'JetBrains Mono', monospace; font-weight: 800; font-size: 15px; letter-spacing: 4px; color: var(--purple-l); }
+  .header-right { display: flex; align-items: center; gap: 12px; }
+  .client-badge { background: rgba(124,58,237,0.15); border: 1px solid rgba(124,58,237,0.4); border-radius: 20px; padding: 4px 12px; font-size: 11px; color: var(--purple-l); letter-spacing: 1px; cursor: pointer; }
+  .settings-btn { background: none; border: 1px solid var(--border); color: var(--muted); padding: 6px 12px; border-radius: 6px; cursor: pointer; font-size: 12px; }
+  .settings-btn:hover { border-color: var(--purple); color: var(--purple-l); }
+
+  /* ── Stats bar ── */
+  .stats-bar { display: grid; grid-template-columns: repeat(5, 1fr); gap: 12px; padding: 20px 24px; }
+  .stat-card { background: var(--surface); border: 1px solid var(--border); border-radius: 10px; padding: 14px 18px; }
+  .stat-label { font-size: 10px; letter-spacing: 1.5px; color: var(--muted); text-transform: uppercase; margin-bottom: 6px; }
+  .stat-value { font-size: 26px; font-weight: 700; }
+  .stat-value.red    { color: var(--red); }
+  .stat-value.amber  { color: var(--amber); }
+  .stat-value.green  { color: var(--green); }
+  .stat-value.purple { color: var(--purple-l); }
+  .stat-value.cyan   { color: var(--cyan); }
+
+  /* ── Filters ── */
+  .filters { padding: 0 24px 16px; display: flex; gap: 8px; align-items: center; }
+  .tab { background: none; border: 1px solid var(--border); color: var(--muted); padding: 7px 16px; border-radius: 20px; cursor: pointer; font-size: 12px; letter-spacing: 0.5px; transition: all 0.15s; }
+  .tab:hover { border-color: var(--purple); color: var(--purple-l); }
+  .tab.active { background: rgba(124,58,237,0.15); border-color: var(--purple); color: var(--purple-l); }
+  .spacer { flex: 1; }
+  .refresh-btn { background: rgba(34,211,238,0.08); border: 1px solid rgba(34,211,238,0.3); color: var(--cyan); padding: 7px 14px; border-radius: 6px; cursor: pointer; font-size: 12px; }
+
+  /* ── Log list ── */
+  .log-list { padding: 0 24px 40px; display: flex; flex-direction: column; gap: 10px; }
+  .empty-state { text-align: center; padding: 60px; color: var(--muted); }
+  .empty-state .icon { font-size: 40px; margin-bottom: 12px; }
+
+  /* ── Log card ── */
+  .log-card { background: var(--surface); border: 1px solid var(--border); border-radius: 10px; padding: 18px 20px; transition: border-color 0.15s; }
+  .log-card:hover { border-color: rgba(124,58,237,0.35); }
+  .log-card.flagged  { border-left: 3px solid var(--red); }
+  .log-card.reviewed { border-left: 3px solid var(--green); opacity: 0.75; }
+  .log-card.overridden { border-left: 3px solid var(--amber); opacity: 0.75; }
+
+  .card-top { display: flex; align-items: flex-start; justify-content: space-between; margin-bottom: 10px; gap: 12px; }
+  .card-meta { flex: 1; }
+  .card-filename { font-weight: 600; font-size: 14px; color: var(--text); margin-bottom: 4px; }
+  .card-doc-id { font-family: 'JetBrains Mono', monospace; font-size: 10px; color: var(--muted); }
+  .card-badges { display: flex; gap: 6px; align-items: center; flex-wrap: wrap; }
+  .badge { font-size: 10px; letter-spacing: 0.5px; padding: 3px 8px; border-radius: 4px; font-weight: 600; text-transform: uppercase; }
+  .badge-ac   { background: rgba(244,63,94,0.15);  border: 1px solid rgba(244,63,94,0.4);  color: #fb7185; }
+  .badge-wp   { background: rgba(245,158,11,0.15); border: 1px solid rgba(245,158,11,0.4); color: #fbbf24; }
+  .badge-ci   { background: rgba(167,139,250,0.15);border: 1px solid rgba(167,139,250,0.4);color: var(--purple-l); }
+  .badge-none { background: rgba(100,116,139,0.15);border: 1px solid rgba(100,116,139,0.4);color: var(--muted); }
+  .badge-override { background: rgba(34,211,238,0.1); border: 1px solid rgba(34,211,238,0.3); color: var(--cyan); }
+  .badge-auto  { background: rgba(244,63,94,0.1); border: 1px solid rgba(244,63,94,0.3); color: var(--red); }
+  .badge-confirmed  { background: rgba(16,185,129,0.1); border: 1px solid rgba(16,185,129,0.3); color: var(--green); }
+  .badge-overridden { background: rgba(245,158,11,0.1); border: 1px solid rgba(245,158,11,0.3); color: var(--amber); }
+  .badge-pending    { background: rgba(251,191,36,0.1);  border: 1px solid rgba(251,191,36,0.3); color: #fde68a; }
+
+  /* ── Confidence bar ── */
+  .confidence-row { display: flex; align-items: center; gap: 10px; margin: 10px 0; }
+  .conf-label { font-size: 11px; color: var(--muted); width: 80px; flex-shrink: 0; }
+  .conf-bar { flex: 1; height: 5px; background: var(--dim); border-radius: 3px; overflow: hidden; }
+  .conf-fill { height: 100%; border-radius: 3px; transition: width 0.3s; }
+  .conf-value { font-size: 11px; font-weight: 600; width: 36px; text-align: right; flex-shrink: 0; }
+
+  .reason-text { font-size: 12px; color: #94a3b8; line-height: 1.7; background: rgba(255,255,255,0.02); border: 1px solid var(--border); border-radius: 6px; padding: 10px 12px; margin: 10px 0; }
+
+  .card-footer { display: flex; align-items: center; justify-content: space-between; margin-top: 14px; padding-top: 12px; border-top: 1px solid var(--border); }
+  .card-info { font-size: 11px; color: var(--muted); }
+  .card-actions { display: flex; gap: 8px; }
+  .btn { padding: 7px 14px; border-radius: 6px; font-size: 12px; font-weight: 600; cursor: pointer; border: none; transition: all 0.15s; letter-spacing: 0.3px; }
+  .btn-confirm  { background: rgba(16,185,129,0.15);  border: 1px solid rgba(16,185,129,0.4);  color: var(--green); }
+  .btn-confirm:hover  { background: rgba(16,185,129,0.25); }
+  .btn-override { background: rgba(245,158,11,0.15);  border: 1px solid rgba(245,158,11,0.4);  color: var(--amber); }
+  .btn-override:hover { background: rgba(245,158,11,0.25); }
+  .btn-further  { background: rgba(100,116,139,0.15); border: 1px solid rgba(100,116,139,0.4); color: var(--muted); }
+  .btn-further:hover  { background: rgba(100,116,139,0.25); }
+  .reviewed-note { font-size: 11px; color: var(--muted); font-style: italic; }
+
+  /* ── Modal ── */
+  .modal-overlay { position: fixed; inset: 0; background: rgba(0,0,0,0.7); z-index: 200; display: none; align-items: center; justify-content: center; }
+  .modal-overlay.open { display: flex; }
+  .modal { background: #0f1520; border: 1px solid rgba(124,58,237,0.3); border-radius: 12px; width: 480px; max-width: 95vw; max-height: 90vh; overflow-y: auto; }
+  .modal-header { padding: 20px 24px 16px; border-bottom: 1px solid var(--border); display: flex; justify-content: space-between; align-items: center; }
+  .modal-title { font-weight: 700; font-size: 15px; }
+  .modal-close { background: none; border: none; color: var(--muted); cursor: pointer; font-size: 20px; line-height: 1; }
+  .modal-body { padding: 20px 24px; }
+  .modal-footer { padding: 16px 24px 20px; border-top: 1px solid var(--border); display: flex; gap: 10px; justify-content: flex-end; }
+  .form-group { margin-bottom: 16px; }
+  .form-label { font-size: 11px; letter-spacing: 1px; color: var(--muted); text-transform: uppercase; margin-bottom: 6px; display: block; }
+  .form-input, .form-textarea { width: 100%; background: var(--dim); border: 1px solid var(--border); border-radius: 6px; padding: 10px 12px; color: var(--text); font-size: 13px; font-family: inherit; }
+  .form-input:focus, .form-textarea:focus { outline: none; border-color: var(--purple); }
+  .form-textarea { resize: vertical; min-height: 80px; }
+  .decision-row { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; margin-bottom: 16px; }
+  .decision-btn { padding: 10px 8px; border-radius: 8px; border: 1px solid var(--border); background: var(--dim); color: var(--muted); cursor: pointer; font-size: 11px; text-align: center; transition: all 0.15s; font-weight: 600; letter-spacing: 0.3px; }
+  .decision-btn:hover { border-color: var(--purple); color: var(--purple-l); }
+  .decision-btn.selected.confirm  { background: rgba(16,185,129,0.15);  border-color: var(--green);  color: var(--green); }
+  .decision-btn.selected.override { background: rgba(245,158,11,0.15);  border-color: var(--amber);  color: var(--amber); }
+  .decision-btn.selected.further  { background: rgba(100,116,139,0.15); border-color: #94a3b8; color: #94a3b8; }
+  .btn-primary { background: var(--purple); color: #fff; }
+  .btn-primary:hover { background: #6d28d9; }
+  .btn-secondary { background: var(--dim); border: 1px solid var(--border); color: var(--muted); }
+
+  /* ── Settings modal ── */
+  .settings-info { font-size: 12px; color: var(--muted); line-height: 1.7; margin-bottom: 16px; }
+
+  /* ── Loading ── */
+  .loading { text-align: center; padding: 40px; color: var(--muted); }
+  .spinner { display: inline-block; width: 24px; height: 24px; border: 2px solid var(--border); border-top-color: var(--purple); border-radius: 50%; animation: spin 0.8s linear infinite; margin-bottom: 10px; }
+  @keyframes spin { to { transform: rotate(360deg); } }
+
+  /* ── Toast ── */
+  .toast { position: fixed; bottom: 24px; right: 24px; background: var(--surface); border: 1px solid var(--border); border-radius: 8px; padding: 12px 18px; font-size: 13px; z-index: 300; transform: translateY(100px); opacity: 0; transition: all 0.3s; max-width: 320px; }
+  .toast.show { transform: translateY(0); opacity: 1; }
+  .toast.success { border-color: rgba(16,185,129,0.5); color: var(--green); }
+  .toast.error   { border-color: rgba(244,63,94,0.5);  color: var(--red); }
+</style>
+</head>
+<body>
+
+<!-- Header -->
+<div class="header">
+  <div style="display:flex;align-items:center;gap:16px;">
+    <div class="logo">PARAIQ</div>
+    <div style="color:#334155;font-size:11px;letter-spacing:2px;">PRIVILEGE REVIEW</div>
+  </div>
+  <div class="header-right">
+    <div class="client-badge" id="clientBadge" onclick="openSettings()">⬡ CLIENT: —</div>
+    <button class="settings-btn" onclick="openSettings()">⚙ Settings</button>
+    <a href="/" style="color:var(--muted);font-size:12px;text-decoration:none;">← Dashboard</a>
+  </div>
+</div>
+
+<!-- Stats -->
+<div class="stats-bar">
+  <div class="stat-card">
+    <div class="stat-label">Total Screened</div>
+    <div class="stat-value cyan" id="statTotal">—</div>
+  </div>
+  <div class="stat-card">
+    <div class="stat-label">Total Flagged</div>
+    <div class="stat-value red" id="statFlagged">—</div>
+  </div>
+  <div class="stat-card">
+    <div class="stat-label">Review Queue</div>
+    <div class="stat-value amber" id="statQueue">—</div>
+  </div>
+  <div class="stat-card">
+    <div class="stat-label">Attorney Reviewed</div>
+    <div class="stat-value green" id="statReviewed">—</div>
+  </div>
+  <div class="stat-card">
+    <div class="stat-label">Fine-tune Examples</div>
+    <div class="stat-value purple" id="statFinetune">—</div>
+  </div>
+</div>
+
+<!-- Filters -->
+<div class="filters">
+  <button class="tab active" onclick="setFilter('flagged')">All Flagged</button>
+  <button class="tab" onclick="setFilter('queue')">Pending Review</button>
+  <button class="tab" onclick="setFilter('confirmed')">Confirmed</button>
+  <button class="tab" onclick="setFilter('overridden')">Overridden</button>
+  <div class="spacer"></div>
+  <button class="refresh-btn" onclick="loadData()">↻ Refresh</button>
+</div>
+
+<!-- Log List -->
+<div class="log-list" id="logList">
+  <div class="loading"><div class="spinner"></div><br>Loading privilege log...</div>
+</div>
+
+<!-- Review Modal -->
+<div class="modal-overlay" id="reviewModal">
+  <div class="modal">
+    <div class="modal-header">
+      <div class="modal-title">Attorney Review</div>
+      <button class="modal-close" onclick="closeReview()">×</button>
+    </div>
+    <div class="modal-body">
+      <div class="form-group">
+        <div class="form-label">Document</div>
+        <div id="reviewDocName" style="font-weight:600;color:var(--text);margin-bottom:4px;"></div>
+        <div id="reviewDocId" style="font-family:monospace;font-size:11px;color:var(--muted);"></div>
+      </div>
+      <div class="form-group">
+        <div class="form-label">Model Assessment</div>
+        <div id="reviewReason" class="reason-text"></div>
+      </div>
+      <div class="form-group">
+        <div class="form-label">Your Decision</div>
+        <div class="decision-row">
+          <button class="decision-btn confirm" onclick="selectDecision('privilege_upheld')" id="btn_privilege_upheld">✓ Privilege Upheld</button>
+          <button class="decision-btn override" onclick="selectDecision('privilege_overridden')" id="btn_privilege_overridden">✗ Not Privileged</button>
+          <button class="decision-btn further" onclick="selectDecision('needs_further_review')" id="btn_needs_further_review">⋯ Further Review</button>
+        </div>
+      </div>
+      <div class="form-group">
+        <label class="form-label" for="reviewNotes">Notes (optional — saved to privilege log)</label>
+        <textarea class="form-textarea" id="reviewNotes" placeholder="Add reasoning, relevant case law, or context for the privilege determination..."></textarea>
+      </div>
+      <div class="form-group">
+        <label class="form-label" for="reviewAttorney">Attorney ID / Bar Number</label>
+        <input class="form-input" id="reviewAttorney" placeholder="e.g. NY-12345 or your name" />
+      </div>
+    </div>
+    <div class="modal-footer">
+      <button class="btn btn-secondary" onclick="closeReview()">Cancel</button>
+      <button class="btn btn-primary" onclick="submitReview()">Submit Review</button>
+    </div>
+  </div>
+</div>
+
+<!-- Settings Modal -->
+<div class="modal-overlay" id="settingsModal">
+  <div class="modal">
+    <div class="modal-header">
+      <div class="modal-title">Connection Settings</div>
+      <button class="modal-close" onclick="closeSettings()">×</button>
+    </div>
+    <div class="modal-body">
+      <p class="settings-info">Configure your API connection. These are stored in your browser's localStorage and never sent to third parties.</p>
+      <div class="form-group">
+        <label class="form-label" for="settingsApiBase">API Base URL</label>
+        <input class="form-input" id="settingsApiBase" placeholder="https://nlp.para-iq.com" />
+      </div>
+      <div class="form-group">
+        <label class="form-label" for="settingsApiKey">API Key (X-API-Key)</label>
+        <input class="form-input" id="settingsApiKey" type="password" placeholder="pk-..." />
+      </div>
+      <div class="form-group">
+        <label class="form-label" for="settingsClientId">Client ID</label>
+        <input class="form-input" id="settingsClientId" placeholder="e.g. client_alpha" />
+      </div>
+    </div>
+    <div class="modal-footer">
+      <button class="btn btn-secondary" onclick="closeSettings()">Cancel</button>
+      <button class="btn btn-primary" onclick="saveSettings()">Save & Connect</button>
+    </div>
+  </div>
+</div>
+
+<!-- Toast -->
+<div class="toast" id="toast"></div>
+
+<script>
+// ── State ──────────────────────────────────────────────────────────────────
+let config = {
+  apiBase:  localStorage.getItem('pq_api_base')   || '',
+  apiKey:   localStorage.getItem('pq_api_key')    || '',
+  clientId: localStorage.getItem('pq_client_id')  || '',
+};
+let allEntries  = [];
+let currentFilter = 'flagged';
+let reviewEntry   = null;
+let selectedDecision = null;
+
+// ── Init ───────────────────────────────────────────────────────────────────
+window.onload = () => {
+  if (!config.apiBase || !config.apiKey || !config.clientId) {
+    openSettings();
+  } else {
+    updateClientBadge();
+    loadData();
+  }
+};
+
+// ── API ────────────────────────────────────────────────────────────────────
+async function api(path, method = 'GET', body = null) {
+  const opts = {
+    method,
+    headers: {
+      'X-API-Key':   config.apiKey,
+      'X-Client-ID': config.clientId,
+      'Content-Type': 'application/json',
+    },
+  };
+  if (body) opts.body = JSON.stringify(body);
+  const r = await fetch(config.apiBase + path, opts);
+  if (!r.ok) throw new Error(`HTTP ${r.status}`);
+  return r.json();
+}
+
+async function loadData() {
+  try {
+    document.getElementById('logList').innerHTML = '<div class="loading"><div class="spinner"></div><br>Loading...</div>';
+    const [log, stats] = await Promise.all([
+      api('/api/privilege/privilege-log?only_flagged=true&limit=100'),
+      api('/api/privilege/stats'),
+    ]);
+    allEntries = log.entries || [];
+    renderStats(stats);
+    renderList();
+  } catch (e) {
+    document.getElementById('logList').innerHTML = `<div class="empty-state"><div class="icon">⚠</div><div style="color:var(--red)">Connection failed: ${e.message}</div><div style="margin-top:8px;font-size:12px;">Check your settings and try again.</div></div>`;
+  }
+}
+
+// ── Render stats ───────────────────────────────────────────────────────────
+function renderStats(s) {
+  document.getElementById('statTotal').textContent    = s.total_screened   ?? '—';
+  document.getElementById('statFlagged').textContent  = s.total_flagged    ?? '—';
+  document.getElementById('statQueue').textContent    = s.review_queue     ?? '—';
+  document.getElementById('statReviewed').textContent = s.attorney_reviewed ?? '—';
+  document.getElementById('statFinetune').textContent = s.finetune_examples ?? '—';
+}
+
+// ── Filter & render ────────────────────────────────────────────────────────
+function setFilter(f) {
+  currentFilter = f;
+  document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
+  event.target.classList.add('active');
+  renderList();
+}
+
+function filterEntries() {
+  if (currentFilter === 'flagged')   return allEntries.filter(e => e.privileged);
+  if (currentFilter === 'queue')     return allEntries.filter(e => e.privileged && e.attorney_confirmed == null);
+  if (currentFilter === 'confirmed') return allEntries.filter(e => e.attorney_decision === 'privilege_upheld');
+  if (currentFilter === 'overridden')return allEntries.filter(e => e.attorney_decision === 'privilege_overridden');
+  return allEntries;
+}
+
+function renderList() {
+  const entries = filterEntries();
+  const list    = document.getElementById('logList');
+
+  if (!entries.length) {
+    list.innerHTML = `<div class="empty-state"><div class="icon">✓</div><div>No entries for this filter.</div></div>`;
+    return;
+  }
+
+  list.innerHTML = entries.map(e => renderCard(e)).join('');
+}
+
+function privilegeLabel(type) {
+  const map = { attorney_client:'Attorney-Client', work_product:'Work Product', common_interest:'Common Interest', none:'None' };
+  return map[type] || type;
+}
+function privilegeBadgeClass(type) {
+  const map = { attorney_client:'badge-ac', work_product:'badge-wp', common_interest:'badge-ci', none:'badge-none' };
+  return map[type] || 'badge-none';
+}
+function confColor(conf) {
+  if (conf >= 0.82) return '#f43f5e';
+  if (conf >= 0.58) return '#f59e0b';
+  return '#64748b';
+}
+function reviewStatus(e) {
+  if (e.attorney_decision === 'privilege_upheld')    return '<span class="badge badge-confirmed">✓ Confirmed</span>';
+  if (e.attorney_decision === 'privilege_overridden') return '<span class="badge badge-overridden">✗ Overridden</span>';
+  if (e.attorney_decision === 'needs_further_review') return '<span class="badge badge-pending">⋯ Further Review</span>';
+  if (e.auto_flagged) return '<span class="badge badge-auto">⚑ Auto-Flagged</span>';
+  return '<span class="badge badge-pending">Pending</span>';
+}
+
+function renderCard(e) {
+  const conf    = e.confidence || 0;
+  const confPct = Math.round(conf * 100);
+  const isKeywordOverride = (e.reason || '').startsWith('[Keyword Override]');
+  const cardClass = e.attorney_decision === 'privilege_upheld' ? 'reviewed' :
+                    e.attorney_decision === 'privilege_overridden' ? 'overridden' : 'flagged';
+
+  const reviewedBy  = e.attorney_notes ? `<div style="font-size:11px;color:var(--muted);margin-top:4px;">Notes: ${e.attorney_notes}</div>` : '';
+  const actionBtns  = e.attorney_confirmed != null
+    ? `<span class="reviewed-note">Reviewed ${e.reviewed_at ? new Date(e.reviewed_at).toLocaleDateString() : ''}</span>`
+    : `<button class="btn btn-confirm"  onclick='openReview(${JSON.stringify(e).replace(/'/g,"&apos;")})'>✓ Confirm</button>
+       <button class="btn btn-override" onclick='openReview(${JSON.stringify(e).replace(/'/g,"&apos;")})'>✗ Override</button>
+       <button class="btn btn-further"  onclick='openReview(${JSON.stringify(e).replace(/'/g,"&apos;")})'>⋯ More</button>`;
+
+  return `
+  <div class="log-card ${cardClass}">
+    <div class="card-top">
+      <div class="card-meta">
+        <div class="card-filename">${e.filename || e.doc_id || 'Untitled Document'}</div>
+        <div class="card-doc-id">ID: ${e.doc_id} &nbsp;·&nbsp; ${new Date(e.created_at).toLocaleString()}</div>
+      </div>
+      <div class="card-badges">
+        <span class="badge ${privilegeBadgeClass(e.privilege_type)}">${privilegeLabel(e.privilege_type)}</span>
+        ${isKeywordOverride ? '<span class="badge badge-override">Keyword Override</span>' : ''}
+        ${reviewStatus(e)}
+      </div>
+    </div>
+
+    <div class="confidence-row">
+      <div class="conf-label">Confidence</div>
+      <div class="conf-bar"><div class="conf-fill" style="width:${confPct}%;background:${confColor(conf)};"></div></div>
+      <div class="conf-value" style="color:${confColor(conf)}">${confPct}%</div>
+    </div>
+
+    <div class="reason-text">${(e.reason || '').replace('[Keyword Override] ','')}</div>
+
+    ${e.recipients && JSON.parse(e.recipients||'[]').length ? `<div style="font-size:11px;color:var(--muted);margin-bottom:8px;">Recipients: ${JSON.parse(e.recipients).join(', ')}</div>` : ''}
+    ${e.sender ? `<div style="font-size:11px;color:var(--muted);margin-bottom:4px;">Sender: ${e.sender}</div>` : ''}
+    ${reviewedBy}
+
+    <div class="card-footer">
+      <div class="card-info">Log entry: <span style="font-family:monospace;">${e.id}</span></div>
+      <div class="card-actions">${actionBtns}</div>
+    </div>
+  </div>`;
+}
+
+// ── Review modal ───────────────────────────────────────────────────────────
+function openReview(entryJson) {
+  reviewEntry = typeof entryJson === 'string' ? JSON.parse(entryJson) : entryJson;
+  selectedDecision = null;
+
+  document.getElementById('reviewDocName').textContent = reviewEntry.filename || reviewEntry.doc_id || 'Untitled';
+  document.getElementById('reviewDocId').textContent   = 'Log ID: ' + reviewEntry.id;
+  document.getElementById('reviewReason').textContent  = (reviewEntry.reason || '').replace('[Keyword Override] ', '');
+  document.getElementById('reviewNotes').value         = '';
+  document.getElementById('reviewAttorney').value      = localStorage.getItem('pq_attorney_id') || '';
+
+  document.querySelectorAll('.decision-btn').forEach(b => b.classList.remove('selected'));
+  document.getElementById('reviewModal').classList.add('open');
+}
+
+function closeReview() {
+  document.getElementById('reviewModal').classList.remove('open');
+  reviewEntry = null;
+  selectedDecision = null;
+}
+
+function selectDecision(d) {
+  selectedDecision = d;
+  document.querySelectorAll('.decision-btn').forEach(b => b.classList.remove('selected'));
+  document.getElementById('btn_' + d).classList.add('selected');
+}
+
+async function submitReview() {
+  if (!reviewEntry) return;
+  if (!selectedDecision) { showToast('Please select a decision first.', 'error'); return; }
+
+  const attorneyId = document.getElementById('reviewAttorney').value.trim();
+  if (attorneyId) localStorage.setItem('pq_attorney_id', attorneyId);
+
+  const payload = {
+    log_id:       reviewEntry.id,
+    confirmed:    selectedDecision === 'privilege_upheld',
+    decision:     selectedDecision,
+    notes:        document.getElementById('reviewNotes').value.trim(),
+    attorney_id:  attorneyId,
+    text_snippet: '',
+  };
+
+  try {
+    await api('/api/privilege/review', 'PUT', payload);
+    showToast('Review submitted successfully.', 'success');
+    closeReview();
+    await loadData();
+  } catch (e) {
+    showToast('Submission failed: ' + e.message, 'error');
+  }
+}
+
+// ── Settings ───────────────────────────────────────────────────────────────
+function openSettings() {
+  document.getElementById('settingsApiBase').value  = config.apiBase;
+  document.getElementById('settingsApiKey').value   = config.apiKey;
+  document.getElementById('settingsClientId').value = config.clientId;
+  document.getElementById('settingsModal').classList.add('open');
+}
+
+function closeSettings() {
+  document.getElementById('settingsModal').classList.remove('open');
+}
+
+function saveSettings() {
+  config.apiBase  = document.getElementById('settingsApiBase').value.trim().replace(/\/$/, '');
+  config.apiKey   = document.getElementById('settingsApiKey').value.trim();
+  config.clientId = document.getElementById('settingsClientId').value.trim();
+  localStorage.setItem('pq_api_base',   config.apiBase);
+  localStorage.setItem('pq_api_key',    config.apiKey);
+  localStorage.setItem('pq_client_id',  config.clientId);
+  closeSettings();
+  updateClientBadge();
+  loadData();
+}
+
+function updateClientBadge() {
+  document.getElementById('clientBadge').textContent = '⬡ CLIENT: ' + (config.clientId || '—').toUpperCase();
+}
+
+// ── Toast ──────────────────────────────────────────────────────────────────
+function showToast(msg, type = 'success') {
+  const t = document.getElementById('toast');
+  t.textContent  = msg;
+  t.className    = `toast ${type} show`;
+  setTimeout(() => t.classList.remove('show'), 3500);
+}
+</script>
+</body>
+</html>
