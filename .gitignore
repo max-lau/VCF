@@ -63,3 +63,18 @@ redactions/
 write_*.py
 serve.py
 redaction.py
+
+# ── Binary & media — never commit client files ─────────────────────────────────
+*.pdf
+*.docx
+*.xlsx
+*.png
+*.jpg
+*.jpeg
+*.gif
+*.ogg
+*.mp3
+*.mp4
+*.wav
+*.zip
+*.tar.gz
