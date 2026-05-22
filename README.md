@@ -36,12 +36,12 @@ extract obligations, identify risk, and accelerate legal workflows.
 
 ## Tech Stack
 
-- **Backend:** Python 3.12, FastAPI, Uvicorn, SQLite
-- **NLP / AI:** Anthropic Claude API (`claude-haiku-4-5-20251001`, `claude-sonnet-4-6`)
+- **Backend:** Python 3.12, FastAPI, Uvicorn, SQLite, PostgreSQL
+- **NLP / AI:** DistilBERT / Anthropic Claude API (`claude-haiku-4-5-20251001`, `claude-sonnet-4-6`)
 - **PDF Export:** ReportLab
-- **OCR:** Tesseract / Google Vision
+- **OCR:** Claude Vision
 - **Frontend:** Vanilla HTML/CSS/JavaScript (21 pages)
-- **Infrastructure:** Hetzner VPS, Cloudflare Tunnel, pm2
+- **Infrastructure:** Hetzner VPS, Cloudflare Tunnel, pm2, Supabase
 
 ---
 
