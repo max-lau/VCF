@@ -3,6 +3,8 @@ import { ref, computed, onMounted } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import axios from 'axios'
 import DiscoveryUpload from '@/components/DiscoveryUpload.vue'
+import CaseKanban from '@/components/CaseKanban.vue'
+import DraftingAssistant from '@/components/DraftingAssistant.vue'
 
 const route  = useRoute()
 const router = useRouter()
@@ -36,6 +38,8 @@ const newNote     = ref('')
 const savingNote  = ref(false)
 
 const TABS = [
+  { key: 'kanban', label: 'Kanban', icon: '⚖️' },
+  { key: 'drafting', label: 'Drafting', icon: '✍️' },
   { key: 'documents',    label: 'Documents',    icon: '📄' },
   { key: 'discovery',    label: 'Discovery',    icon: '🔍' },
   { key: 'notes',        label: 'Notes',        icon: '📝' },
@@ -284,8 +288,18 @@ onMounted(fetchMatter)
           <span v-if="t.key==='calendar'       && calendarEvents.length" class="tab-count">{{ calendarEvents.length }}</span>
         </button>
       </div>
+      <!-- Kanban -->
+      <div v-if="activeTab === 'kanban'">
+        <CaseKanban :case-id="caseId" />
+      </div>
 
-      <!-- ── Documents ── -->
+      <!-- Drafting -->
+      <div v-if="activeTab === 'drafting'">
+        <DraftingAssistant :case-id="caseId" />
+      </div>
+
+
+
       <div v-if="activeTab === 'documents'">
         <div v-if="!docs.length" class="empty-tab">
           <div class="empty-tab__icon">📄</div>

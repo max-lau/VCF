@@ -3,6 +3,8 @@ import { ref, onMounted } from 'vue'
 import client from '@/api/client'
 
 const firmId  = () => { try { return JSON.parse(localStorage.getItem('paraiq_user')||'{}').firm_id||'default' } catch { return 'default' } }
+const token   = () => localStorage.getItem('paraiq_token')
+const authHdr = () => ({ Authorization: 'Bearer ' + token() })
 
 const matters   = ref([])
 const accesses  = ref([])

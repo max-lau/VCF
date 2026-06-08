@@ -2,71 +2,46 @@
 audit_trail.py
 ==============
 FastAPI Middleware + APIRouter: Audit Trail (#20)
-Logs every API request to the audit_log table in analyses.db:
-  - endpoint, method, status_code, response_time_ms
-  - timestamp, client_ip, request_body_size
-Query endpoints to review audit history.
+Logs every API request to the audit_log table in Supabase Postgres.
 """
 
 import time
-import sqlite3
-import json
+import csv as _csv
+import io as _io
 from datetime import datetime, timezone
 from fastapi import APIRouter, Request
-from fastapi.responses import JSONResponse
+from fastapi.responses import JSONResponse, StreamingResponse as SR
 from starlette.middleware.base import BaseHTTPMiddleware
 from typing import Optional
 
-DB_PATH = "backend/demo1/analyses.db"
-router  = APIRouter()
+from backend.demo1.pg import get_conn
+
+router = APIRouter()
 
 
 # ── DB Setup ───────────────────────────────────────────────────────────────────
 
-def get_conn():
-    conn = sqlite3.connect(DB_PATH)
-    conn.row_factory = sqlite3.Row
-    return conn
-
-
 def init_audit_table():
-    conn = get_conn()
-    conn.execute("""
-        CREATE TABLE IF NOT EXISTS audit_log (
-            id              INTEGER PRIMARY KEY AUTOINCREMENT,
-            timestamp       TEXT    NOT NULL,
-            method          TEXT    NOT NULL,
-            endpoint        TEXT    NOT NULL,
-            status_code     INTEGER,
-            response_time_ms REAL,
-            client_ip       TEXT,
-            body_size_bytes INTEGER,
-            error           TEXT
-        )
-    """)
-    conn.commit()
-    conn.close()
+    """No-op — table exists in Supabase Postgres."""
     print("[AuditTrail] Table initialized ✓")
 
 
 def log_request(method, endpoint, status_code, response_time_ms,
                 client_ip, body_size, error=None):
     try:
-        conn = get_conn()
-        conn.execute("""
-            INSERT INTO audit_log
-              (timestamp, method, endpoint, status_code,
-               response_time_ms, client_ip, body_size_bytes, error)
-            VALUES (?,?,?,?,?,?,?,?)
-        """, (
-            datetime.now(timezone.utc).isoformat(),
-            method, endpoint, status_code,
-            round(response_time_ms, 2),
-            client_ip, body_size,
-            str(error) if error else None
-        ))
-        conn.commit()
-        conn.close()
+        with get_conn("default") as conn:
+            conn.execute("""
+                INSERT INTO audit_log
+                  (timestamp, method, endpoint, status_code,
+                   response_time_ms, client_ip, body_size_bytes, error)
+                VALUES (%s,%s,%s,%s,%s,%s,%s,%s)
+            """, (
+                datetime.now(timezone.utc).isoformat(),
+                method, endpoint, status_code,
+                round(response_time_ms, 2),
+                client_ip, body_size,
+                str(error) if error else None,
+            ))
     except Exception as e:
         print(f"[AuditTrail] Log error: {e}")
 
@@ -76,8 +51,7 @@ def log_request(method, endpoint, status_code, response_time_ms,
 class AuditMiddleware(BaseHTTPMiddleware):
     """Intercepts every request and logs it to audit_log."""
 
-    # Skip noisy internal endpoints
-    SKIP_PATHS = {"/docs", "/openapi.json", "/redoc", "/favicon.ico", "/health"}
+    SKIP_PATHS    = {"/docs", "/openapi.json", "/redoc", "/favicon.ico", "/health"}
     SKIP_PREFIXES = ("/export/",)
 
     async def dispatch(self, request: Request, call_next):
@@ -86,12 +60,11 @@ class AuditMiddleware(BaseHTTPMiddleware):
         if path in self.SKIP_PATHS or any(path.startswith(p) for p in self.SKIP_PREFIXES):
             return await call_next(request)
 
-        start      = time.perf_counter()
-        client_ip  = request.client.host if request.client else "unknown"
-        body       = await request.body()
-        body_size  = len(body)
+        start     = time.perf_counter()
+        client_ip = request.client.host if request.client else "unknown"
+        body      = await request.body()
+        body_size = len(body)
 
-        # Re-inject body so downstream handlers can still read it
         async def receive():
             return {"type": "http.request", "body": body}
         request._receive = receive
@@ -102,10 +75,8 @@ class AuditMiddleware(BaseHTTPMiddleware):
             response    = await call_next(request)
             status_code = response.status_code
         except Exception as e:
-            error = str(e)
-            response = JSONResponse(
-                {"detail": "Internal server error"}, status_code=500
-            )
+            error    = str(e)
+            response = JSONResponse({"detail": "Internal server error"}, status_code=500)
 
         elapsed_ms = (time.perf_counter() - start) * 1000
 
@@ -129,124 +100,105 @@ def get_audit_logs(
     endpoint: Optional[str] = None,
     method:   Optional[str] = None,
     status:   Optional[int] = None,
-    limit:    int = 50,
+    limit:    int           = 50,
 ):
-    """
-    Retrieve audit log entries with optional filters.
-    - endpoint: filter by path (partial match)
-    - method: GET, POST, PUT, DELETE
-    - status: HTTP status code
-    - limit: max records (default 50, max 200)
-    """
-    limit = min(limit, 200)
-    conn  = get_conn()
-
-    query  = "SELECT * FROM audit_log WHERE 1=1"
+    limit  = min(limit, 200)
+    sql    = "SELECT * FROM audit_log WHERE TRUE"
     params = []
 
     if endpoint:
-        query += " AND endpoint LIKE ?"
+        sql += " AND endpoint ILIKE %s"
         params.append(f"%{endpoint}%")
     if method:
-        query += " AND method = ?"
+        sql += " AND method = %s"
         params.append(method.upper())
     if status:
-        query += " AND status_code = ?"
+        sql += " AND status_code = %s"
         params.append(status)
 
-    query += " ORDER BY id DESC LIMIT ?"
+    sql += " ORDER BY id DESC LIMIT %s"
     params.append(limit)
 
-    rows = conn.execute(query, params).fetchall()
-    conn.close()
+    with get_conn("default") as conn:
+        rows = conn.execute(sql, params).fetchall()
 
-    return {
-        "success": True,
-        "count": len(rows),
-        "logs": [dict(r) for r in rows],
-    }
+    return {"success": True, "count": len(rows), "logs": [dict(r) for r in rows]}
 
 
 @router.get("/stats")
 def audit_stats():
-    """Aggregate statistics from the audit log."""
-    conn = get_conn()
+    with get_conn("default") as conn:
+        total = conn.execute(
+            "SELECT COUNT(*) AS n FROM audit_log"
+        ).fetchone()["n"]
 
-    total = conn.execute("SELECT COUNT(*) FROM audit_log").fetchone()[0]
+        by_endpoint = conn.execute("""
+            SELECT endpoint, COUNT(*) AS cnt,
+                   ROUND(AVG(response_time_ms)::numeric, 2) AS avg_ms,
+                   MIN(status_code) AS min_status,
+                   MAX(status_code) AS max_status
+            FROM audit_log
+            GROUP BY endpoint
+            ORDER BY cnt DESC
+            LIMIT 20
+        """).fetchall()
 
-    by_endpoint = conn.execute("""
-        SELECT endpoint, COUNT(*) cnt,
-               ROUND(AVG(response_time_ms),2) avg_ms,
-               MIN(status_code) min_status,
-               MAX(status_code) max_status
-        FROM audit_log
-        GROUP BY endpoint
-        ORDER BY cnt DESC
-        LIMIT 20
-    """).fetchall()
+        by_status = conn.execute("""
+            SELECT status_code, COUNT(*) AS cnt
+            FROM audit_log
+            GROUP BY status_code
+            ORDER BY cnt DESC
+        """).fetchall()
 
-    by_status = conn.execute("""
-        SELECT status_code, COUNT(*) cnt
-        FROM audit_log
-        GROUP BY status_code
-        ORDER BY cnt DESC
-    """).fetchall()
+        slowest = conn.execute("""
+            SELECT endpoint, method, response_time_ms, timestamp
+            FROM audit_log
+            ORDER BY response_time_ms DESC
+            LIMIT 5
+        """).fetchall()
 
-    slowest = conn.execute("""
-        SELECT endpoint, method, response_time_ms, timestamp
-        FROM audit_log
-        ORDER BY response_time_ms DESC
-        LIMIT 5
-    """).fetchall()
-
-    errors = conn.execute("""
-        SELECT endpoint, method, error, timestamp
-        FROM audit_log
-        WHERE error IS NOT NULL
-        ORDER BY id DESC
-        LIMIT 10
-    """).fetchall()
-
-    conn.close()
+        errors = conn.execute("""
+            SELECT endpoint, method, error, timestamp
+            FROM audit_log
+            WHERE error IS NOT NULL
+            ORDER BY id DESC
+            LIMIT 10
+        """).fetchall()
 
     return {
-        "success": True,
-        "total_requests": total,
-        "by_endpoint": [dict(r) for r in by_endpoint],
-        "by_status_code": [dict(r) for r in by_status],
+        "success":           True,
+        "total_requests":    total,
+        "by_endpoint":       [dict(r) for r in by_endpoint],
+        "by_status_code":    [dict(r) for r in by_status],
         "slowest_endpoints": [dict(r) for r in slowest],
-        "recent_errors": [dict(r) for r in errors],
+        "recent_errors":     [dict(r) for r in errors],
     }
 
 
 @router.delete("/logs/clear")
 def clear_audit_logs():
-    """Clear all audit log entries. Use with caution."""
-    conn = get_conn()
-    conn.execute("DELETE FROM audit_log")
-    conn.commit()
-    conn.close()
+    with get_conn("default") as conn:
+        conn.execute("DELETE FROM audit_log")
     return {"success": True, "message": "Audit log cleared"}
 
 
-# ── Feature 15: Chain of Custody (Discovery) ──────────────────────────────────
-
-DISCOVERY_PREFIXES = ("/discovery/", "/bates/", "/production/")
+# ── Chain of Custody (Discovery) ──────────────────────────────────────────────
 
 ACTION_LABELS = {
-    ("POST", "/discovery/intake"):          "Files uploaded to intake queue",
+    ("POST",   "/discovery/intake"):        "Files uploaded to intake queue",
     ("DELETE", "/discovery/queue"):         "File removed from queue",
-    ("POST", "/discovery/process/ocr"):     "OCR processing triggered",
-    ("POST", "/discovery/process/zip"):     "ZIP extraction triggered",
-    ("POST", "/discovery/assign"):          "Files assigned to case",
-    ("POST", "/discovery/extract-dates"):   "Date extraction run",
-    ("GET",  "/discovery/duplicates"):      "Duplicate scan performed",
-    ("POST", "/bates/configure"):           "Bates production set configured",
-    ("POST", "/bates/stamp"):               "Bates stamping executed",
+    ("POST",   "/discovery/process/ocr"):   "OCR processing triggered",
+    ("POST",   "/discovery/process/zip"):   "ZIP extraction triggered",
+    ("POST",   "/discovery/assign"):        "Files assigned to case",
+    ("POST",   "/discovery/extract-dates"): "Date extraction run",
+    ("GET",    "/discovery/duplicates"):    "Duplicate scan performed",
+    ("POST",   "/bates/configure"):         "Bates production set configured",
+    ("POST",   "/bates/stamp"):             "Bates stamping executed",
     ("DELETE", "/bates/log"):               "Bates log cleared",
-    ("GET",  "/production/bundle"):         "Production ZIP downloaded",
-    ("GET",  "/production/catalog"):        "Production catalog viewed",
+    ("GET",    "/production/bundle"):       "Production ZIP downloaded",
+    ("GET",    "/production/catalog"):      "Production catalog viewed",
 }
+
 
 def label_action(method: str, endpoint: str) -> str:
     for (m, e), label in ACTION_LABELS.items():
@@ -254,61 +206,51 @@ def label_action(method: str, endpoint: str) -> str:
             return label
     return f"{method} {endpoint}"
 
-import csv as _csv, io as _io
 
 @router.get("/discovery/chain")
-def get_chain_of_custody(
-    limit: int = 200,
-    case_filter: str = None
-):
-    """Tamper-evident chain of custody — all discovery actions in order."""
-    conn = get_conn()
-    rows = conn.execute("""
-        SELECT * FROM audit_log
-        WHERE (endpoint LIKE '/discovery/%'
-            OR endpoint LIKE '/bates/%'
-            OR endpoint LIKE '/production/%')
-        ORDER BY id ASC
-        LIMIT ?
-    """, (limit,)).fetchall()
-    conn.close()
+def get_chain_of_custody(limit: int = 200):
+    with get_conn("default") as conn:
+        rows = conn.execute("""
+            SELECT * FROM audit_log
+            WHERE (endpoint ILIKE '/discovery/%'
+                OR endpoint ILIKE '/bates/%'
+                OR endpoint ILIKE '/production/%')
+            ORDER BY id ASC
+            LIMIT %s
+        """, (limit,)).fetchall()
 
     entries = []
     for r in rows:
         entries.append({
-            "seq":           r["id"],
-            "timestamp":     r["timestamp"],
-            "action":        label_action(r["method"], r["endpoint"]),
-            "method":        r["method"],
-            "endpoint":      r["endpoint"],
-            "status":        r["status_code"],
-            "response_ms":   round(r["response_time_ms"] or 0, 1),
-            "client_ip":     (r["client_ip"] or "")[:20],
-            "ok":            200 <= (r["status_code"] or 0) < 300,
+            "seq":         r["id"],
+            "timestamp":   r["timestamp"],
+            "action":      label_action(r["method"], r["endpoint"]),
+            "method":      r["method"],
+            "endpoint":    r["endpoint"],
+            "status":      r["status_code"],
+            "response_ms": round(r["response_time_ms"] or 0, 1),
+            "client_ip":   (r["client_ip"] or "")[:20],
+            "ok":          200 <= (r["status_code"] or 0) < 300,
         })
 
-    return {
-        "total":   len(entries),
-        "entries": entries,
-    }
+    return {"total": len(entries), "entries": entries}
+
 
 @router.get("/discovery/chain/export")
 def export_chain_csv():
-    """Download chain of custody as a CSV file."""
-    conn = get_conn()
-    rows = conn.execute("""
-        SELECT * FROM audit_log
-        WHERE (endpoint LIKE '/discovery/%'
-            OR endpoint LIKE '/bates/%'
-            OR endpoint LIKE '/production/%')
-        ORDER BY id ASC
-    """).fetchall()
-    conn.close()
+    with get_conn("default") as conn:
+        rows = conn.execute("""
+            SELECT * FROM audit_log
+            WHERE (endpoint ILIKE '/discovery/%'
+                OR endpoint ILIKE '/bates/%'
+                OR endpoint ILIKE '/production/%')
+            ORDER BY id ASC
+        """).fetchall()
 
     buf = _io.StringIO()
-    w = _csv.writer(buf)
-    w.writerow(["Seq","Timestamp","Action","Method","Endpoint",
-                "Status","Response ms","Client IP"])
+    w   = _csv.writer(buf)
+    w.writerow(["Seq", "Timestamp", "Action", "Method", "Endpoint",
+                "Status", "Response ms", "Client IP"])
     for r in rows:
         w.writerow([
             r["id"], r["timestamp"],
@@ -319,10 +261,8 @@ def export_chain_csv():
         ])
 
     buf.seek(0)
-    from fastapi.responses import StreamingResponse as SR
     return SR(
         _io.BytesIO(buf.getvalue().encode()),
         media_type="text/csv",
-        headers={"Content-Disposition":
-                 "attachment; filename=chain_of_custody.csv"}
+        headers={"Content-Disposition": "attachment; filename=chain_of_custody.csv"}
     )

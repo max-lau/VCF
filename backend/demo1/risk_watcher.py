@@ -14,6 +14,8 @@ from datetime import datetime, timezone, timedelta
 import httpx
 import psutil
 from anthropic import Anthropic
+from backend.demo1.hermes_kanban import run_hermes_kanban
+from backend.demo1.notifications_router import generate_notifications
 
 log = logging.getLogger("risk_watcher")
 
@@ -379,6 +381,15 @@ def start_scheduler(app):
     scheduler = AsyncIOScheduler()
     scheduler.add_job(run_assessment, "interval", minutes=30, id="risk_watcher",
                       next_run_time=datetime.now())   # run immediately on startup too
+    scheduler.add_job(
+        run_hermes_kanban,
+        "interval", minutes=15, id="hermes_kanban", replace_existing=True,
+        args=[os.getenv("HERMES_SERVICE_JWT", "")]
+    )
+    scheduler.add_job(
+        lambda: [generate_notifications(firm) for firm in ["default", "firm_abc", "meridian_legal"]],
+        "interval", minutes=30, id="notifications_gen", replace_existing=True,
+    )
     scheduler.start()
     log.info("[RiskWatcher] Scheduler started — running every 30 minutes")
     return scheduler

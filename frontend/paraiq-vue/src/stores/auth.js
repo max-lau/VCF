@@ -6,12 +6,18 @@ import { usePermissionsStore } from './permissions'
 
 export const useAuthStore = defineStore('auth', () => {
   const token    = ref(localStorage.getItem('paraiq_token') || null)
-  const user     = ref(JSON.parse(localStorage.getItem('paraiq_user') || 'null'))
+  const user     = ref((() => { try { return JSON.parse(localStorage.getItem('paraiq_user') || 'null') } catch(e) { localStorage.removeItem('paraiq_user'); return null } })())
   const loading  = ref(false)
   const error    = ref(null)
 
   const isAuthenticated = computed(() => !!token.value)
   const firmId          = computed(() => user.value?.firm_id || 'default')
+  const FIRM_NAMES = {
+    'default':       'ParaIQ',
+    'firm_abc':      'Thornton & Associates',
+    'meridian_legal':'Meridian Legal Group',
+  }
+  const firmName = computed(() => FIRM_NAMES[firmId.value] || firmId.value)
   const userEmail       = computed(() => user.value?.email || user.value?.username || '')
   const userId          = computed(() => user.value?.user_id || null)
 
@@ -40,7 +46,7 @@ export const useAuthStore = defineStore('auth', () => {
         user_id:  data.user_id,
         username: data.username,
         email:    data.email || '',
-        firm_id:  firm_id,
+        firm_id:  data.firm_id || firm_id,
         role:     data.role,
         tier:     data.tier ?? _roleTier(data.role),
       }
@@ -85,7 +91,7 @@ export const useAuthStore = defineStore('auth', () => {
 
   return {
     token, user, loading, error,
-    isAuthenticated, firmId, userEmail, userId,
+    isAuthenticated, firmId, firmName, userEmail, userId,
     login, logout, init,
   }
 })

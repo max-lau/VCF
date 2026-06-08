@@ -141,6 +141,7 @@ const counts = computed(() => ({
             {{ typeIcon(n.research_type) }} {{ n.research_type.replace(/_/g,' ') }}
           </span>
           <span class="stance-pill" :class="n.is_favorable ? 'fav' : 'adv'">{{ n.is_favorable ? 'Favorable' : 'Adverse' }}</span>
+          <span v-if="n.created_by === 'hermes-agent'" class="hermes-pill">🤖 Hermes</span>
           <span class="dim sm">{{ fmtDate(n.created_at) }}</span>
           <div class="note-actions">
             <button class="icon-btn" @click="openEdit(n)">✏</button>
@@ -226,6 +227,7 @@ const counts = computed(() => ({
 .stance-pill { border-radius: 4px; font-size: 0.68rem; font-weight: 700; padding: 0.15rem 0.4rem; }
 .stance-pill.fav { background: rgba(72,187,120,.15); color: #48bb78; }
 .stance-pill.adv { background: rgba(252,129,129,.15); color: #fc8181; }
+.hermes-pill { border-radius: 4px; font-size: 0.68rem; font-weight: 700; padding: 0.15rem 0.5rem; background: rgba(74,124,247,.15); color: #4a7cf7; }
 .icon-btn    { background: none; border: none; color: var(--text-muted); cursor: pointer; font-size: 0.85rem; padding: 0.15rem 0.3rem; border-radius: 4px; transition: color .15s; }
 .icon-btn:hover { color: var(--text-primary); }
 .icon-btn.del:hover { color: #fc8181; }

@@ -5,6 +5,7 @@ import { usePermissionsStore } from '@/stores/permissions'
 // Lazy-load all views
 const LoginView       = () => import('@/views/LoginView.vue')
 const AppShell        = () => import('@/components/layout/AppShell.vue')
+const EmailInboxView  = () => import('@/views/email/EmailInboxView.vue')
 const DashboardView   = () => import('@/views/DashboardView.vue')
 const ModuleStub      = () => import('@/views/ModuleStub.vue')
 
@@ -30,6 +31,8 @@ const LegalBertView      = () => import('@/views/legal-bert/LegalBertView.vue')
 const AiConfigView       = () => import('@/views/ai-config/AiConfigView.vue')
 const SuperAdminMonitorView = () => import('@/views/monitor/SuperAdminMonitorView.vue')
 const ClientPortalView   = () => import('@/views/portal/ClientPortalView.vue')
+const VoiceShortcutsView  = () => import('@/views/VoiceShortcutsView.vue')
+const ClientPortalAccess  = () => import('@/views/portal/ClientPortalAccess.vue')
 const LegalResearchView  = () => import('@/views/research/LegalResearchView.vue')
 const RiskView           = () => import('@/views/risk/RiskView.vue')
 const IntakeView         = () => import('@/views/intake/IntakeView.vue')
@@ -53,6 +56,12 @@ const AdminView       = () => import('@/views/admin/AdminView.vue')
 const BillingView     = () => import('@/views/admin/BillingView.vue')
 
 const routes = [
+  {
+    path: '/client-portal/view/:token',
+    name: 'client_portal_access',
+    component: ClientPortalAccess,
+    meta: { public: true },
+  },
   {
     path: '/login',
     name: 'login',
@@ -140,6 +149,7 @@ const routes = [
         component: ContractsView,
         meta: { module: 'contracts' },
       },
+      { path: 'email-inbox', name: 'email_inbox', component: EmailInboxView },
       {
         path: 'correspondence',
         name: 'correspondence',
@@ -220,6 +230,11 @@ const routes = [
         meta: { module: 'client_portal' },
       },
 
+      {
+        path: 'voice-shortcuts',
+        name: 'voice_shortcuts',
+        component: VoiceShortcutsView,
+      },
       // ── Firm Admin ────────────────────────────────────────────────
         { path: 'admin', component: AdminView },
       {

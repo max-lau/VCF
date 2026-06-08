@@ -23,6 +23,7 @@
         <NavItem v-if="g.motions"        to="/motions"        icon="file-certificate" label="Motions" />
         <NavItem v-if="g.contracts"      to="/contracts"      icon="writing"          label="Contracts" />
         <NavItem v-if="g.correspondence" to="/correspondence" icon="mail"             label="Correspondence" />
+        <NavItem                          to="/email-inbox"    icon="inbox"            label="Email Intake" />
         <NavItem v-if="g.calendar"       to="/calendar"       icon="calendar"         label="Calendar" />
         <NavItem v-if="g.contacts"       to="/contacts"       icon="address-book"     label="Contacts" />
       </NavGroup>
@@ -69,6 +70,10 @@
         <NavItem v-if="g.billing"      to="/admin/billing" icon="credit-card" label="Billing" />
       </NavGroup>
 
+      <NavGroup label="Voice">
+        <NavItem to="/voice-shortcuts" icon="microphone-2" label="Voice Shortcuts" />
+      </NavGroup>
+
       <NavGroup v-if="!isFirmAdmin && g.billing" label="Account">
         <NavItem to="/admin/billing" icon="credit-card" label="Billing" />
       </NavGroup>
@@ -99,7 +104,7 @@ const { gates: g, role, isFirmAdmin, isScoped, isTier } = usePermissions()
 const { isOpen, close } = useSidebar()
 const route = useRoute()
 
-const firmId = auth.firmId
+const firmId = auth.firmName || auth.firmId
 
 const ROLE_LABELS = {
   paraiq_super:    'Super Admin',

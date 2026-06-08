@@ -1,4 +1,6 @@
 from backend.demo1.ocr_intake import init_intake_table, router as intake_router
+from backend.demo1.voice_router import router as voice_router
+from backend.demo1.voice_shortcuts_router import router as voice_shortcuts_router
 from backend.demo1.fine_tune import init_model_table, router as model_router
 from backend.demo1.slack_teams import init_notify_table, router as notify_router
 from backend.demo1.auth import init_auth_table, router as auth_router
@@ -22,6 +24,7 @@ from backend.demo1.production_bundler import router as bundler_router
 from backend.demo1.privilege_log import router as privilege_router, init_privilege_table
 from backend.demo1.media_transcription import router as media_router, init_transcription_table
 from backend.demo1.message_parser import router as messages_router, init_messages_table
+from backend.demo1.email_router import router as email_router
 from backend.demo1.multilingual import analyze_multilingual, detect_language, SUPPORTED_LANGUAGES
 from backend.demo1.summary_scorer import score_summary, batch_score_summaries
 from backend.demo1.entity_confidence import score_entities, get_entity_summary
@@ -67,15 +70,19 @@ from backend.demo1.routers.misc_routers import (
     exports_router, ai_config_router,
     client_portal_router, legal_bert_router,
 )
+from backend.demo1.kanban_router import router as kanban_router
+from backend.demo1.drafting_router import router as drafting_router
+from backend.demo1.notifications_router import router as notifications_router
 
 load_dotenv()
+from backend.demo1.pg import init_pool, make_tenant_middleware
 
 # ── API Key Auth Middleware ───────────────────────────────────────────────────
 
 PARAIQ_API_KEY = os.getenv("PARAIQ_API_KEY", "")
 
 EXEMPT_PATHS = {"/health", "/openapi.json", "/docs", "/redoc", "/favicon.ico", "/dashboard/deadlines", "/dashboard/stats"}
-EXEMPT_PREFIXES = ("/auth/", "/api/auth/", "/docs/", "/redoc/", "/cases/", "/research/", "/audit/", "/export/client-letter/", "/export/privilege-log/", "/export/timeline/", "/export/case/", "/export/brief/", "/dashboard/")
+EXEMPT_PREFIXES = ("/auth/", "/api/auth/", "/docs/", "/redoc/", "/cases/", "/research/", "/audit/", "/export/client-letter/", "/export/privilege-log/", "/export/timeline/", "/export/case/", "/export/brief/", "/dashboard/", "/client-portal/view/")
 STATIC_EXTS = (".html", ".js", ".css", ".ico", ".png", ".svg", ".woff", ".woff2", ".json")
 
 class APIKeyMiddleware(BaseHTTPMiddleware):
@@ -101,7 +108,12 @@ class APIKeyMiddleware(BaseHTTPMiddleware):
         return await call_next(request)
 
 app = FastAPI(title="NLP Text Analyzer API")
+@app.on_event("startup")
+async def _startup():
+    init_pool()
+
 app.add_middleware(APIKeyMiddleware)
+app.add_middleware(make_tenant_middleware())
 app.include_router(intake_router, prefix="/intake", tags=["OCR Intake"])
 app.include_router(model_router, prefix="/model", tags=["Fine-Tuned Model"])
 app.include_router(notify_router, prefix="/notify", tags=["Slack & Teams"])
@@ -143,6 +155,11 @@ _scheduler = None
 
 @app.on_event("startup")
 async def startup_event():
+    from backend.demo1.email_poller import GmailPollerService
+    import asyncio
+    asyncio.create_task(GmailPollerService().run())
+    from backend.demo1.outlook_poller import OutlookPollerService
+    asyncio.create_task(OutlookPollerService().run())
     global _scheduler
     _scheduler = start_scheduler(app)
 
@@ -157,6 +174,12 @@ app.include_router(exports_router)
 app.include_router(ai_config_router)
 app.include_router(client_portal_router)
 app.include_router(legal_bert_router)
+app.include_router(voice_router)
+app.include_router(voice_shortcuts_router)
+app.include_router(email_router)
+app.include_router(kanban_router)
+app.include_router(drafting_router, prefix="/draft", tags=["drafting"])
+app.include_router(notifications_router, prefix="", tags=["notifications"])
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],

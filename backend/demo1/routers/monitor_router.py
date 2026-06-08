@@ -1,44 +1,42 @@
 """
 monitor_router.py — Super Admin system monitor
 Prefix: /monitor
-Sections: health, api-stats, events, cloudflare
+Sections: health, api-stats, events, cloudflare, risk-log
 """
 from fastapi import APIRouter, Query
 from typing import Optional
-import sqlite3, os, json, subprocess
+import os, json, subprocess
 from datetime import datetime, timezone, timedelta
 import httpx
 
+from backend.demo1.pg import get_conn
+
 router = APIRouter(prefix="/monitor", tags=["Monitor"])
 
-DB_PATH  = "backend/demo1/analyses.db"
 CF_TOKEN = os.getenv("CF_API_TOKEN", "")
 CF_ZONE  = os.getenv("CF_ZONE_ID", "")
 
-def get_conn():
-    conn = sqlite3.connect(DB_PATH)
-    conn.row_factory = sqlite3.Row
-    return conn
 
 # ── System health ──────────────────────────────────────────────────────────────
 @router.get("/health")
 async def system_health():
-    result = {"cpu": None, "memory": None, "disk": None, "uptime_seconds": None, "processes": []}
+    result = {"cpu": None, "memory": None, "disk": None,
+              "uptime_seconds": None, "processes": []}
     try:
         import psutil
         result["cpu"] = round(psutil.cpu_percent(interval=0.2), 1)
         mem = psutil.virtual_memory()
         result["memory"] = {
             "percent":  round(mem.percent, 1),
-            "used_gb":  round(mem.used  / 1024**3, 2),
-            "total_gb": round(mem.total / 1024**3, 2),
+            "used_gb":  round(mem.used   / 1024**3, 2),
+            "total_gb": round(mem.total  / 1024**3, 2),
         }
         disk = psutil.disk_usage("/")
         result["disk"] = {
             "percent":  round(disk.percent, 1),
-            "used_gb":  round(disk.used / 1024**3, 1),
+            "used_gb":  round(disk.used  / 1024**3, 1),
             "total_gb": round(disk.total / 1024**3, 1),
-            "free_gb":  round(disk.free / 1024**3, 1),
+            "free_gb":  round(disk.free  / 1024**3, 1),
         }
         result["uptime_seconds"] = int(
             (datetime.now() - datetime.fromtimestamp(psutil.boot_time())).total_seconds()
@@ -70,111 +68,129 @@ async def system_health():
 # ── API statistics ─────────────────────────────────────────────────────────────
 @router.get("/api-stats")
 async def api_stats(hours: int = Query(24, ge=1, le=168)):
-    conn = get_conn()
-    try:
-        since = (datetime.now(timezone.utc) - timedelta(hours=hours)).isoformat()
+    since = (datetime.now(timezone.utc) - timedelta(hours=hours)).isoformat()
 
+    with get_conn("default") as conn:
         total = conn.execute(
-            "SELECT COUNT(*) FROM audit_log WHERE timestamp > ?", (since,)
-        ).fetchone()[0]
+            "SELECT COUNT(*) AS n FROM audit_log WHERE timestamp > %s", (since,)
+        ).fetchone()["n"]
 
         server_errors = conn.execute(
-            "SELECT COUNT(*) FROM audit_log WHERE timestamp > ? AND status_code >= 500", (since,)
-        ).fetchone()[0]
+            "SELECT COUNT(*) AS n FROM audit_log WHERE timestamp > %s AND status_code >= 500",
+            (since,)
+        ).fetchone()["n"]
 
         client_errors = conn.execute(
-            "SELECT COUNT(*) FROM audit_log WHERE timestamp > ? AND status_code >= 400 AND status_code < 500", (since,)
-        ).fetchone()[0]
-
-        avg_ms = conn.execute(
-            "SELECT AVG(response_time_ms) FROM audit_log WHERE timestamp > ? AND response_time_ms IS NOT NULL",
+            "SELECT COUNT(*) AS n FROM audit_log "
+            "WHERE timestamp > %s AND status_code >= 400 AND status_code < 500",
             (since,)
-        ).fetchone()[0]
+        ).fetchone()["n"]
+
+        avg_row = conn.execute(
+            "SELECT ROUND(AVG(response_time_ms)::numeric, 1) AS avg_ms "
+            "FROM audit_log WHERE timestamp > %s AND response_time_ms IS NOT NULL",
+            (since,)
+        ).fetchone()
+        avg_ms = avg_row["avg_ms"] if avg_row else None
 
         top = conn.execute("""
-            SELECT endpoint, COUNT(*) as count,
-                   ROUND(AVG(response_time_ms),1) as avg_ms,
-                   SUM(CASE WHEN status_code>=400 THEN 1 ELSE 0 END) as errors
-            FROM audit_log WHERE timestamp > ?
-            GROUP BY endpoint ORDER BY count DESC LIMIT 10
+            SELECT endpoint,
+                   COUNT(*) AS count,
+                   ROUND(AVG(response_time_ms)::numeric, 1) AS avg_ms,
+                   SUM(CASE WHEN status_code >= 400 THEN 1 ELSE 0 END) AS errors
+            FROM audit_log
+            WHERE timestamp > %s
+            GROUP BY endpoint
+            ORDER BY count DESC
+            LIMIT 10
         """, (since,)).fetchall()
 
         hourly = conn.execute("""
-            SELECT strftime('%Y-%m-%dT%H:00', timestamp) as hour,
-                   COUNT(*) as count,
-                   SUM(CASE WHEN status_code>=500 THEN 1 ELSE 0 END) as errors
-            FROM audit_log WHERE timestamp > ?
-            GROUP BY hour ORDER BY hour
+            SELECT to_char(timestamp AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24":00"') AS hour,
+                   COUNT(*) AS count,
+                   SUM(CASE WHEN status_code >= 500 THEN 1 ELSE 0 END) AS errors
+            FROM audit_log
+            WHERE timestamp > %s
+            GROUP BY hour
+            ORDER BY hour
         """, (since,)).fetchall()
 
         recent_errors = conn.execute("""
-            SELECT timestamp, method, endpoint, status_code, error, response_time_ms, client_ip
-            FROM audit_log WHERE status_code >= 400
-            ORDER BY timestamp DESC LIMIT 15
+            SELECT timestamp, method, endpoint, status_code,
+                   error, response_time_ms, client_ip
+            FROM audit_log
+            WHERE status_code >= 400
+            ORDER BY timestamp DESC
+            LIMIT 15
         """).fetchall()
 
-        return {
-            "period_hours":    hours,
-            "total_requests":  total,
-            "server_errors":   server_errors,
-            "client_errors":   client_errors,
-            "error_rate_pct":  round(server_errors / total * 100, 2) if total else 0,
-            "avg_response_ms": round(avg_ms, 1) if avg_ms else None,
-            "top_endpoints":   [dict(r) for r in top],
-            "hourly":          [{"hour": r[0], "count": r[1], "errors": r[2]} for r in hourly],
-            "recent_errors":   [dict(r) for r in recent_errors],
-        }
-    finally:
-        conn.close()
+    return {
+        "period_hours":    hours,
+        "total_requests":  total,
+        "server_errors":   server_errors,
+        "client_errors":   client_errors,
+        "error_rate_pct":  round(server_errors / total * 100, 2) if total else 0,
+        "avg_response_ms": float(avg_ms) if avg_ms else None,
+        "top_endpoints":   [dict(r) for r in top],
+        "hourly":          [dict(r) for r in hourly],
+        "recent_errors":   [dict(r) for r in recent_errors],
+    }
 
 
 # ── Event log ─────────────────────────────────────────────────────────────────
 @router.get("/events")
 async def event_log(
-    page:     int            = Query(1,  ge=1),
-    per_page: int            = Query(50, ge=10, le=200),
-    method:   Optional[str]  = None,
-    status:   Optional[str]  = None,   # "errors" | "ok"
-    endpoint: Optional[str]  = None,
+    page:     int           = Query(1,   ge=1),
+    per_page: int           = Query(50,  ge=10, le=200),
+    method:   Optional[str] = None,
+    status:   Optional[str] = None,   # "errors" | "ok"
+    endpoint: Optional[str] = None,
 ):
-    conn = get_conn()
-    try:
-        clauses, params = [], []
-        if method:
-            clauses.append("method = ?");       params.append(method.upper())
-        if status == "errors":
-            clauses.append("status_code >= 400")
-        elif status == "ok":
-            clauses.append("status_code < 400")
-        if endpoint:
-            clauses.append("endpoint LIKE ?");  params.append(f"%{endpoint}%")
+    clauses, params = [], []
+    if method:
+        clauses.append("method = %s")
+        params.append(method.upper())
+    if status == "errors":
+        clauses.append("status_code >= 400")
+    elif status == "ok":
+        clauses.append("status_code < 400")
+    if endpoint:
+        clauses.append("endpoint ILIKE %s")
+        params.append(f"%{endpoint}%")
 
-        where  = ("WHERE " + " AND ".join(clauses)) if clauses else ""
-        total  = conn.execute(f"SELECT COUNT(*) FROM audit_log {where}", params).fetchone()[0]
-        offset = (page - 1) * per_page
-        rows   = conn.execute(
+    where  = ("WHERE " + " AND ".join(clauses)) if clauses else ""
+    offset = (page - 1) * per_page
+
+    with get_conn("default") as conn:
+        total = conn.execute(
+            f"SELECT COUNT(*) AS n FROM audit_log {where}", params
+        ).fetchone()["n"]
+
+        rows = conn.execute(
             f"""SELECT id, timestamp, method, endpoint, status_code,
                        response_time_ms, client_ip, body_size_bytes, error
                 FROM audit_log {where}
-                ORDER BY timestamp DESC LIMIT ? OFFSET ?""",
+                ORDER BY timestamp DESC
+                LIMIT %s OFFSET %s""",
             params + [per_page, offset]
         ).fetchall()
 
-        return {"total": total, "page": page, "per_page": per_page,
-                "events": [dict(r) for r in rows]}
-    finally:
-        conn.close()
+    return {
+        "total":    total,
+        "page":     page,
+        "per_page": per_page,
+        "events":   [dict(r) for r in rows],
+    }
 
 
 # ── Cloudflare ─────────────────────────────────────────────────────────────────
 @router.get("/cloudflare")
 async def cloudflare_status():
-    result = {"configured": bool(CF_TOKEN and CF_ZONE),
+    result = {"configured":    bool(CF_TOKEN and CF_ZONE),
               "public_status": None, "zone": None, "analytics": None}
     hdrs = {"Authorization": f"Bearer {CF_TOKEN}", "Content-Type": "application/json"}
 
     async with httpx.AsyncClient(timeout=8.0) as http:
-        # Public platform status — no auth
         try:
             r = await http.get("https://www.cloudflarestatus.com/api/v2/status.json")
             d = r.json()
@@ -188,7 +204,6 @@ async def cloudflare_status():
         if not (CF_TOKEN and CF_ZONE):
             return result
 
-        # Zone info
         try:
             r = await http.get(
                 f"https://api.cloudflare.com/client/v4/zones/{CF_ZONE}", headers=hdrs)
@@ -196,15 +211,14 @@ async def cloudflare_status():
             if d.get("success"):
                 z = d["result"]
                 result["zone"] = {
-                    "name":    z.get("name"),
-                    "status":  z.get("status"),
-                    "plan":    z.get("plan", {}).get("name"),
-                    "paused":  z.get("paused", False),
+                    "name":   z.get("name"),
+                    "status": z.get("status"),
+                    "plan":   z.get("plan", {}).get("name"),
+                    "paused": z.get("paused", False),
                 }
         except Exception as e:
             result["zone_error"] = str(e)
 
-        # Analytics via GraphQL (REST analytics API is sunset)
         try:
             gql = """{ viewer { zones(filter: {zoneTag: "%s"}) {
               httpRequests1hGroups(limit: 1, orderBy: [datetime_DESC]) {
@@ -214,7 +228,7 @@ async def cloudflare_status():
                 "https://api.cloudflare.com/client/v4/graphql",
                 headers=hdrs, json={"query": gql}
             )
-            d = r.json()
+            d     = r.json()
             zones = d.get("data", {}).get("viewer", {}).get("zones", [])
             if zones:
                 groups = zones[0].get("httpRequests1hGroups", [])
@@ -240,15 +254,14 @@ async def cloudflare_status():
 # ── Risk assessment log ────────────────────────────────────────────────────────
 @router.get("/risk-log")
 async def risk_log(limit: int = Query(20, ge=1, le=100)):
-    conn = get_conn()
     try:
-        rows = conn.execute("""
-            SELECT id, assessed_at, risk_level, summary, prediction, actions, alerted
-            FROM risk_assessments
-            ORDER BY assessed_at DESC LIMIT ?
-        """, (limit,)).fetchall()
+        with get_conn("default") as conn:
+            rows = conn.execute("""
+                SELECT id, assessed_at, risk_level, summary, prediction, actions, alerted
+                FROM risk_assessments
+                ORDER BY assessed_at DESC
+                LIMIT %s
+            """, (limit,)).fetchall()
         return {"assessments": [dict(r) for r in rows]}
     except Exception:
         return {"assessments": [], "note": "Risk table not yet initialized"}
-    finally:
-        conn.close()

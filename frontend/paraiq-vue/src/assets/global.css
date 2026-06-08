@@ -199,3 +199,20 @@ html, body, #app {
   box-shadow: 0 0 0 3px var(--gold-glow);
 }
 .piq-input::placeholder { color: var(--text-tertiary); }
+
+/* ── Mobile fixes ─────────────────────────────────────────────────────────── */
+
+/* Remove 300ms tap delay on mobile only - do not block scroll */
+a, button, [role="button"] {
+  touch-action: manipulation;
+}
+
+/* Ensure sidebar is always above backdrop on mobile */
+@media (max-width: 899px) {
+  .sidebar--open {
+    z-index: 300 !important;
+  }
+  .shell__backdrop {
+    z-index: 299 !important;
+  }
+}

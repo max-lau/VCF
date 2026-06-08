@@ -12,11 +12,10 @@ Endpoints:
   PUT  /auth/password       - change password
   GET  /auth/users          - list all users (admin only)
 
-Users stored in analyses.db (users table).
+Users stored in Supabase Postgres (users table).
 Token expiry: 24 hours (configurable via .env JWT_EXPIRE_HOURS).
 """
 
-import sqlite3
 import bcrypt
 import os
 from datetime import datetime, timezone, timedelta
@@ -25,10 +24,10 @@ from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from pydantic import BaseModel
 from typing import Optional
 from jose import jwt, JWTError
+from backend.demo1.pg import get_conn
 
-router  = APIRouter()
-DB_PATH = "backend/demo1/analyses.db"
-bearer  = HTTPBearer(auto_error=False)
+router = APIRouter()
+bearer = HTTPBearer(auto_error=False)
 
 # ── Config ─────────────────────────────────────────────────────────────────────
 SECRET_KEY   = os.getenv("JWT_SECRET_KEY", "nlp-portfolio-secret-change-in-production")
@@ -39,10 +38,10 @@ EXPIRE_HOURS = int(os.getenv("JWT_EXPIRE_HOURS", "24"))
 ROLE_TIER_MAP = {
     "paraiq_super":    0,
     "firm_admin":      1,
-    "admin":           1,   # legacy role name
+    "admin":           1,
     "senior_attorney": 2,
     "associate":       3,
-    "user":            3,   # legacy role name
+    "user":            3,
     "paralegal":       4,
     "client_viewer":   5,
     "billing_contact": 6,
@@ -53,28 +52,8 @@ SCOPED_ROLES = {"paralegal", "client_viewer"}
 
 # ── DB Setup ───────────────────────────────────────────────────────────────────
 
-def get_conn():
-    conn = sqlite3.connect(DB_PATH)
-    conn.row_factory = sqlite3.Row
-    return conn
-
-
 def init_auth_table():
-    conn = get_conn()
-    conn.execute("""
-        CREATE TABLE IF NOT EXISTS users (
-            id           INTEGER PRIMARY KEY AUTOINCREMENT,
-            username     TEXT    UNIQUE NOT NULL,
-            email        TEXT    UNIQUE NOT NULL,
-            password_hash TEXT   NOT NULL,
-            role         TEXT    DEFAULT 'user',
-            active       INTEGER DEFAULT 1,
-            created_at   TEXT    NOT NULL,
-            last_login   TEXT
-        )
-    """)
-    conn.commit()
-    conn.close()
+    """No-op — table exists in Supabase Postgres."""
     print("[Auth] Users table initialized ✓")
 
 
@@ -93,51 +72,51 @@ def verify_password(password: str, hashed: str) -> bool:
 def build_permissions_for_user(user_id: int, firm_id: str = "default") -> dict:
     """
     Builds the permission snapshot for the Vue frontend.
-    Looks up role_assignments + module_permissions tables (from roles migration).
-    Falls back gracefully if those tables don't exist yet.
+    Looks up role_assignments + module_permissions tables.
+    Falls back gracefully if no assignment found.
     """
-    conn = get_conn()
     try:
-        row = conn.execute("""
-            SELECT r.name AS role_name, r.tier, r.default_open
-            FROM role_assignments ra
-            JOIN roles r ON r.id = ra.role_id
-            WHERE ra.user_id = ? AND ra.firm_id = ?
-        """, (user_id, firm_id)).fetchone()
+        with get_conn("default") as conn:
+            row = conn.execute("""
+                SELECT r.name AS role_name, r.tier, r.default_open
+                FROM role_assignments ra
+                JOIN roles r ON r.id = ra.role_id
+                WHERE ra.user_id = %s AND ra.firm_id = %s
+            """, (user_id, firm_id)).fetchone()
 
-        if not row:
-            # No role assignment yet — fall back to legacy role from users table
-            user_row  = conn.execute(
-                "SELECT role FROM users WHERE id=?", (user_id,)
-            ).fetchone()
-            legacy    = user_row["role"] if user_row else "user"
-            role_name = "firm_admin" if legacy == "admin" else "associate"
-            tier      = ROLE_TIER_MAP.get(role_name, 3)
-            modules   = {}
-        else:
-            role_name = row["role_name"]
-            tier      = row["tier"]
+            if not row:
+                user_row = conn.execute(
+                    "SELECT role FROM users WHERE id = %s", (user_id,)
+                ).fetchone()
+                legacy    = user_row["role"] if user_row else "associate"
+                # Use the role directly from users table if it's a known role
+                role_name = legacy if legacy in ROLE_TIER_MAP else ("firm_admin" if legacy == "admin" else "associate")
+                tier      = ROLE_TIER_MAP.get(role_name, 3)
+                modules   = {}
+            else:
+                role_name = row["role_name"]
+                tier      = row["tier"]
 
-            module_rows = conn.execute("""
-                SELECT mp.module, mp.can_read, mp.can_write,
-                       mp.can_delete, mp.can_export, mp.can_admin
-                FROM module_permissions mp
-                WHERE mp.role_id = (
-                    SELECT role_id FROM role_assignments
-                    WHERE user_id = ? AND firm_id = ?
-                )
-            """, (user_id, firm_id)).fetchall()
+                module_rows = conn.execute("""
+                    SELECT mp.module, mp.can_read, mp.can_write,
+                           mp.can_delete, mp.can_export, mp.can_admin
+                    FROM module_permissions mp
+                    WHERE mp.role_id = (
+                        SELECT role_id FROM role_assignments
+                        WHERE user_id = %s AND firm_id = %s
+                    )
+                """, (user_id, firm_id)).fetchall()
 
-            modules = {
-                r["module"]: {
-                    "read":   r["can_read"],
-                    "write":  r["can_write"],
-                    "delete": r["can_delete"],
-                    "export": r["can_export"],
-                    "admin":  r["can_admin"],
+                modules = {
+                    r["module"]: {
+                        "read":   r["can_read"],
+                        "write":  r["can_write"],
+                        "delete": r["can_delete"],
+                        "export": r["can_export"],
+                        "admin":  r["can_admin"],
+                    }
+                    for r in module_rows
                 }
-                for r in module_rows
-            }
 
         return {
             "role":      role_name,
@@ -147,22 +126,18 @@ def build_permissions_for_user(user_id: int, firm_id: str = "default") -> dict:
         }
 
     except Exception:
-        # Roles tables not yet migrated — return safe open default
         return {
             "role":      "associate",
             "tier":      3,
             "is_scoped": False,
             "modules":   {},
         }
-    finally:
-        conn.close()
 
 
 # ── JWT helpers ────────────────────────────────────────────────────────────────
 
 def create_token(user_id: int, username: str, role: str, firm_id: str = "default") -> str:
     expire = datetime.now(timezone.utc) + timedelta(hours=EXPIRE_HOURS)
-    # guest_trial users get a private namespace — they can never collide with real firms
     if role == "guest_trial":
         firm_id = f"trial_{user_id}"
     payload = {
@@ -204,12 +179,11 @@ def get_current_user(credentials: HTTPAuthorizationCredentials = Depends(bearer)
     payload = decode_token(credentials.credentials)
     user_id = int(payload.get("sub", 0))
 
-    conn = get_conn()
-    user = conn.execute(
-        "SELECT id, username, email, role, firm_id, active, created_at, last_login FROM users WHERE id=?",
-        (user_id,)
-    ).fetchone()
-    conn.close()
+    with get_conn("default") as conn:
+        user = conn.execute(
+            "SELECT id, username, email, role, firm_id, active, created_at, last_login FROM users WHERE id = %s",
+            (user_id,)
+        ).fetchone()
 
     if not user:
         raise HTTPException(401, "User not found")
@@ -238,7 +212,6 @@ class RegisterBody(BaseModel):
 class LoginBody(BaseModel):
     username: str
     password: str
-    # firm_id now derived from DB — not accepted from client
 
 class ChangePasswordBody(BaseModel):
     current_password: str
@@ -257,31 +230,30 @@ def register(body: RegisterBody):
     if "@" not in body.email:
         raise HTTPException(400, "Invalid email address")
 
-    hashed = hash_password(body.password)
-    conn   = get_conn()
+    hashed  = hash_password(body.password)
+    firm_id = body.firm_id or "default"
 
-    existing = conn.execute(
-        "SELECT id FROM users WHERE username=? OR email=?",
-        (body.username, body.email)
-    ).fetchone()
-    if existing:
-        conn.close()
-        raise HTTPException(409, "Username or email already registered")
+    with get_conn("default") as conn:
+        existing = conn.execute(
+            "SELECT id FROM users WHERE username = %s OR email = %s",
+            (body.username, body.email)
+        ).fetchone()
+        if existing:
+            raise HTTPException(409, "Username or email already registered")
 
-    cur = conn.execute("""
-        INSERT INTO users (username, email, password_hash, role, created_at, firm_id)
-        VALUES (?,?,?,?,?,?)
-    """, (
-        body.username, body.email, hashed,
-        body.role if body.role in ("user", "admin") else "user",
-        datetime.now(timezone.utc).isoformat(),
-        getattr(body, 'firm_id', 'default')
-    ))
-    user_id = cur.lastrowid
-    conn.commit()
-    conn.close()
+        cur = conn.execute("""
+            INSERT INTO users (username, email, password_hash, role, created_at, firm_id)
+            VALUES (%s, %s, %s, %s, %s, %s)
+            RETURNING id
+        """, (
+            body.username, body.email, hashed,
+            body.role if body.role in ("user", "admin") else "user",
+            datetime.now(timezone.utc).isoformat(),
+            firm_id,
+        ))
+        user_id = cur.fetchone()["id"]
 
-    token = create_token(user_id, body.username, "user")
+    token = create_token(user_id, body.username, "user", firm_id)
 
     return {
         "success":          True,
@@ -296,41 +268,42 @@ def register(body: RegisterBody):
 @router.post("/login")
 def login(body: LoginBody):
     """Authenticate and receive a JWT token + permission snapshot."""
-    conn = get_conn()
-    user = conn.execute(
-        "SELECT * FROM users WHERE username=? AND active=1",
-        (body.username,)
-    ).fetchone()
+    with get_conn("default") as conn:
+        user = conn.execute(
+            "SELECT * FROM users WHERE (username = %s OR email = %s) AND active = TRUE",
+            (body.username, body.username)
+        ).fetchone()
 
-    if not user or not verify_password(body.password, user["password_hash"]):
-        conn.close()
-        raise HTTPException(401, "Invalid username or password")
+        if not user or not verify_password(body.password, user["password_hash"]):
+            raise HTTPException(401, "Invalid username or password")
 
-    conn.execute(
-        "UPDATE users SET last_login=? WHERE id=?",
-        (datetime.now(timezone.utc).isoformat(), user["id"])
-    )
-    conn.commit()
-    conn.close()
+        conn.execute(
+            "UPDATE users SET last_login = %s WHERE id = %s",
+            (datetime.now(timezone.utc).isoformat(), user["id"])
+        )
 
-    firm_id     = user["firm_id"] if user["firm_id"] else "default"
-    token       = create_token(user["id"], user["username"], user["role"], firm_id)
-    permissions = build_permissions_for_user(user["id"], firm_id)
+    user      = dict(user)
+    firm_id   = user["firm_id"] if user["firm_id"] else "default"
+    token     = create_token(user["id"], user["username"], user["role"], firm_id)
+    if user["role"] == "guest_trial":
+        firm_id = f"trial_{user['id']}"
+    # For guest_trial users, create_token overrides firm_id to trial_{user_id}
+    if user["role"] == "guest_trial":
+        firm_id = f"trial_{user['id']}"
+    perms     = build_permissions_for_user(user["id"], firm_id)
 
     return {
-        # Original fields — unchanged
         "success":          True,
         "token":            token,
         "token_type":       "bearer",
         "username":         user["username"],
         "expires_in_hours": EXPIRE_HOURS,
-        # New fields for Vue frontend
         "user_id":          user["id"],
         "email":            user["email"],
-        "role":             permissions["role"],
-        "tier":             permissions["tier"],
-        "firm_id":          firm_id,
-        "permissions":      permissions,
+        "role":             perms["role"],
+        "tier":             perms["tier"],
+        "firm_id":          token.split(".")[1] and __import__("base64").b64decode(token.split(".")[1] + "==").decode() and firm_id,
+        "permissions":      perms,
     }
 
 
@@ -354,11 +327,9 @@ def get_me(current_user: dict = Depends(get_current_user)):
 def get_my_permissions(current_user: dict = Depends(get_current_user)):
     """
     Returns the full permission snapshot for the current user.
-    Called by the Vue frontend on app mount when token already exists
-    (e.g. after a page refresh) and permissions need to be re-hydrated.
+    Called by the Vue frontend on app mount when token already exists.
     """
-    permissions = build_permissions_for_user(current_user["id"])
-    return permissions
+    return build_permissions_for_user(current_user["id"])
 
 
 @router.post("/refresh")
@@ -384,34 +355,31 @@ def change_password(body: ChangePasswordBody,
     if len(body.new_password) < 8:
         raise HTTPException(400, "New password must be at least 8 characters")
 
-    conn = get_conn()
-    user = conn.execute(
-        "SELECT password_hash FROM users WHERE id=?", (current_user["id"],)
-    ).fetchone()
+    with get_conn("default") as conn:
+        user = conn.execute(
+            "SELECT password_hash FROM users WHERE id = %s", (current_user["id"],)
+        ).fetchone()
 
-    if not verify_password(body.current_password, user["password_hash"]):
-        conn.close()
-        raise HTTPException(401, "Current password is incorrect")
+        if not verify_password(body.current_password, user["password_hash"]):
+            raise HTTPException(401, "Current password is incorrect")
 
-    new_hash = hash_password(body.new_password)
-    conn.execute(
-        "UPDATE users SET password_hash=? WHERE id=?",
-        (new_hash, current_user["id"])
-    )
-    conn.commit()
-    conn.close()
+        conn.execute(
+            "UPDATE users SET password_hash = %s WHERE id = %s",
+            (hash_password(body.new_password), current_user["id"])
+        )
 
     return {"success": True, "message": "Password updated successfully"}
 
 
 @router.get("/users")
 def list_users(current_user: dict = Depends(require_admin)):
-    """List all users — admin only."""
-    conn = get_conn()
-    rows = conn.execute(
-        "SELECT id, username, email, role, active, created_at, last_login FROM users ORDER BY id"
-    ).fetchall()
-    conn.close()
+    """List all users — scoped to current firm."""
+    firm_id = current_user.get("firm_id", "default")
+    with get_conn(firm_id) as conn:
+        rows = conn.execute(
+            "SELECT id, username, email, role, active, created_at, last_login FROM users WHERE firm_id=%s ORDER BY id",
+            (firm_id,)
+        ).fetchall()
     return {
         "success": True,
         "count":   len(rows),
@@ -424,57 +392,60 @@ def list_users(current_user: dict = Depends(require_admin)):
 class UpdateRoleBody(BaseModel):
     role: str
 
+
 @router.put("/users/{user_id}/active")
 def toggle_user_active(user_id: int, current_user: dict = Depends(require_admin)):
-    """Toggle a user's active status."""
-    conn = get_conn()
-    user = conn.execute("SELECT active FROM users WHERE id=?", (user_id,)).fetchone()
-    if not user:
-        conn.close()
-        raise HTTPException(404, "User not found")
-    new_status = 0 if user["active"] else 1
-    conn.execute("UPDATE users SET active=? WHERE id=?", (new_status, user_id))
-    conn.commit()
-    conn.close()
+    firm_id = current_user.get("firm_id", "default")
+    with get_conn(firm_id) as conn:
+        user = conn.execute(
+            "SELECT active FROM users WHERE id = %s AND firm_id=%s", (user_id, firm_id)
+        ).fetchone()
+        if not user:
+            raise HTTPException(404, "User not found")
+
+        new_status = not user["active"]
+        conn.execute(
+            "UPDATE users SET active = %s WHERE id = %s AND firm_id=%s", (new_status, user_id, firm_id)
+        )
+
     return {"success": True, "active": new_status}
 
 
 @router.put("/users/{user_id}/role")
 def update_user_role(user_id: int, body: UpdateRoleBody,
                      current_user: dict = Depends(require_admin)):
-    """Update a user's role in both users table and role_assignments."""
+    """Update a user's role — scoped to current firm."""
     if body.role not in ROLE_TIER_MAP:
         raise HTTPException(400, f"Invalid role: {body.role}")
-    conn = get_conn()
-    user = conn.execute("SELECT id FROM users WHERE id=?", (user_id,)).fetchone()
-    if not user:
-        conn.close()
-        raise HTTPException(404, "User not found")
-    # Update legacy role column
-    conn.execute("UPDATE users SET role=? WHERE id=?", (body.role, user_id))
-    # Upsert role_assignments
-    try:
-        role_row = conn.execute(
-            "SELECT id FROM roles WHERE name=?", (body.role,)
+    firm_id = current_user.get("firm_id", "default")
+    with get_conn(firm_id) as conn:
+        user = conn.execute(
+            "SELECT id FROM users WHERE id = %s AND firm_id=%s", (user_id, firm_id)
         ).fetchone()
-        if role_row:
-            existing = conn.execute(
-                "SELECT id FROM role_assignments WHERE user_id=? AND firm_id='default'",
-                (user_id,)
+        if not user:
+            raise HTTPException(404, "User not found")
+        conn.execute(
+            "UPDATE users SET role = %s WHERE id = %s AND firm_id=%s", (body.role, user_id, firm_id)
+        )
+        try:
+            role_row = conn.execute(
+                "SELECT id FROM roles WHERE name = %s", (body.role,)
             ).fetchone()
-            if existing:
-                conn.execute(
-                    "UPDATE role_assignments SET role_id=? WHERE user_id=? AND firm_id='default'",
-                    (role_row["id"], user_id)
-                )
-            else:
-                conn.execute(
-                    "INSERT INTO role_assignments (user_id, role_id, firm_id, assigned_at) VALUES (?,?,?,?)",
-                    (user_id, role_row["id"], "default",
-                     datetime.now(timezone.utc).isoformat())
-                )
-    except Exception:
-        pass  # roles tables may not be fully migrated
-    conn.commit()
-    conn.close()
+            if role_row:
+                existing = conn.execute(
+                    "SELECT id FROM role_assignments WHERE user_id = %s AND firm_id = %s",
+                    (user_id, firm_id)
+                ).fetchone()
+                if existing:
+                    conn.execute(
+                        "UPDATE role_assignments SET role_id = %s WHERE user_id = %s AND firm_id = %s",
+                        (role_row["id"], user_id, firm_id)
+                    )
+                else:
+                    conn.execute(
+                        "INSERT INTO role_assignments (user_id, role_id, firm_id, assigned_at) VALUES (%s, %s, %s, %s)",
+                        (user_id, role_row["id"], firm_id, datetime.now(timezone.utc).isoformat())
+                    )
+        except Exception:
+            pass
     return {"success": True, "role": body.role, "tier": ROLE_TIER_MAP.get(body.role, 3)}

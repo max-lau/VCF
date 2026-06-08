@@ -17,7 +17,9 @@
     </div>
 
     <div class="topbar__right">
-      <span v-if="auth.firmId" class="topbar__firm">{{ auth.firmId }}</span>
+      <NotificationCenter />
+      <VoiceCommand />
+      <span v-if="auth.firmId" class="topbar__firm">{{ auth.firmName }}</span>
       <span class="topbar__email">{{ auth.userEmail }}</span>
       <span v-if="roleBadge" :class="['piq-badge', roleBadge.cls]">{{ roleBadge.label }}</span>
       <button class="piq-btn piq-btn--ghost topbar__logout" @click="handleLogout">
@@ -32,6 +34,8 @@ import { computed } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { useAuthStore } from '@/stores/auth'
 import { useSidebar } from '@/composables/useSidebar'
+import VoiceCommand from '@/components/layout/VoiceCommand.vue'
+import NotificationCenter from '@/components/layout/NotificationCenter.vue'
 
 const auth   = useAuthStore()
 const route  = useRoute()
@@ -65,12 +69,14 @@ const PAGE_TITLES = {
 const pageTitle = computed(() => PAGE_TITLES[route.name] || 'ParaIQ')
 
 const ROLE_BADGES = {
-  paraiq_super: { label: 'Super',     cls: 'piq-badge--red'  },
-  admin:        { label: 'Admin',     cls: 'piq-badge--gold' },
-  partner:      { label: 'Partner',   cls: 'piq-badge--gold' },
-  associate:    { label: 'Associate', cls: 'piq-badge--dim'  },
-  paralegal:    { label: 'Paralegal', cls: 'piq-badge--dim'  },
-  client:       { label: 'Client',    cls: 'piq-badge--dim'  },
+  paraiq_super: { label: 'Super Admin', cls: 'piq-badge--red'  },
+  firm_admin:   { label: 'Firm Admin',  cls: 'piq-badge--gold' },
+  admin:        { label: 'Admin',       cls: 'piq-badge--gold' },
+  partner:      { label: 'Partner',     cls: 'piq-badge--gold' },
+  senior_attorney: { label: 'Sr. Attorney', cls: 'piq-badge--gold' },
+  associate:    { label: 'Associate',   cls: 'piq-badge--dim'  },
+  paralegal:    { label: 'Paralegal',   cls: 'piq-badge--dim'  },
+  client:       { label: 'Client',      cls: 'piq-badge--dim'  },
 }
 const roleBadge = computed(() => ROLE_BADGES[auth.role] || null)
 

@@ -17,7 +17,9 @@
       <main class="shell__main">
         <RouterView v-slot="{ Component }">
           <Transition name="fade" mode="out-in">
-            <component :is="Component" :key="route.fullPath" />
+            <ErrorBoundary :context="route.name">
+              <component :is="Component" :key="route.fullPath" />
+            </ErrorBoundary>
           </Transition>
         </RouterView>
       </main>
@@ -30,6 +32,7 @@ import { useRoute } from 'vue-router'
 import Sidebar from './Sidebar.vue'
 import TopBar  from './TopBar.vue'
 import { useSidebar } from '@/composables/useSidebar'
+import ErrorBoundary from '@/components/ErrorBoundary.vue'
 
 const route = useRoute()
 const { isOpen, close } = useSidebar()

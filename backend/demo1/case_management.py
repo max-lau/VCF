@@ -1,42 +1,40 @@
 """
 case_management.py
 ==================
-FastAPI APIRouter: Legal Case Management System
-
-Register in main.py:
-    from backend.demo1.case_management import router as cases_router
-    app.include_router(cases_router, prefix="/cases", tags=["Case Management"])
+FastAPI APIRouter: Legal Case Management System — Postgres version
 
 Endpoints:
-  POST   /cases/                    - create new case
-  GET    /cases/                    - list all cases (filtered/paginated)
-  GET    /cases/stats               - dashboard stats
-  GET    /cases/search              - full-text cross-case search
-  GET    /cases/{case_id}           - case detail + docs + notes
-  PUT    /cases/{case_id}/status    - update status
-  DELETE /cases/{case_id}          - soft-delete
-  POST   /cases/{case_id}/documents - add document to case
-  GET    /cases/{case_id}/documents - list documents
-  GET    /cases/{case_id}/timeline  - auto-generated timeline
-  POST   /cases/{case_id}/notes     - add note
-  GET    /cases/{case_id}/notes     - list notes
+  POST   /cases/                        - create new case
+  GET    /cases/stats                   - dashboard stats
+  GET    /cases/search                  - full-text cross-case search
+  GET    /cases/{case_id}               - case detail + docs + notes
+  PUT    /cases/{case_id}/status        - update status
+  DELETE /cases/{case_id}              - soft-delete
+  POST   /cases/{case_id}/documents     - add document to case
+  GET    /cases/{case_id}/documents     - list documents
+  GET    /cases/{case_id}/timeline      - auto-generated timeline
+  POST   /cases/{case_id}/notes         - add note
+  GET    /cases/{case_id}/notes         - list notes
+  POST   /cases/{case_id}/timeline/extract - AI timeline extraction
+  GET    /cases/{case_id}/contradictions - list contradictions
+  PATCH  /cases/{case_id}/contradictions/{c_id}/review - mark reviewed
+  POST   /cases/{case_id}/brief         - generate AI brief
 """
 
-import sqlite3
 import json
 import re
 from datetime import datetime, timezone
 from typing import List, Optional
 from fastapi import Depends, APIRouter, HTTPException, Query
 from backend.demo1.auth import get_current_firm_id, get_current_user
+from backend.demo1.pg import get_conn
 from backend.demo1.intelligence import (
     run_case_contradiction_scan, get_case_contradictions,
     mark_reviewed, generate_case_brief,
 )
 from pydantic import BaseModel
 
-router  = APIRouter()
-DB_PATH = "analyses.db"   # same DB as the rest of the NLP pipeline
+router = APIRouter()
 
 
 # ══════════════════════════════════════════════════════════════════════════════
@@ -82,113 +80,13 @@ class AddNoteBody(BaseModel):
 # ══════════════════════════════════════════════════════════════════════════════
 
 def init_case_db():
-    conn = sqlite3.connect(DB_PATH)
-    c    = conn.cursor()
-
-    c.execute("""
-        CREATE TABLE IF NOT EXISTS cases (
-            id            INTEGER PRIMARY KEY AUTOINCREMENT,
-            case_number   TEXT UNIQUE NOT NULL,
-            client_name   TEXT NOT NULL,
-            matter_number TEXT,
-            status        TEXT DEFAULT 'open'
-                          CHECK(status IN ('open','pending','closed','archived')),
-            court         TEXT,
-            judge         TEXT,
-            filing_date   TEXT,
-            description   TEXT,
-            risk_level    TEXT DEFAULT 'unknown',
-            created_at    TEXT DEFAULT (datetime('now')),
-            updated_at    TEXT DEFAULT (datetime('now')),
-            deleted       INTEGER DEFAULT 0
-        )
-    """)
-
-    c.execute("""
-        CREATE TABLE IF NOT EXISTS case_documents (
-            id            INTEGER PRIMARY KEY AUTOINCREMENT,
-            case_id       INTEGER NOT NULL REFERENCES cases(id),
-            document_name TEXT NOT NULL,
-            source        TEXT DEFAULT 'uploaded'
-                          CHECK(source IN ('uploaded','pacer','email','manual')),
-            doc_text      TEXT,
-            sentiment     TEXT,
-            risk_score    REAL,
-            events_json   TEXT,
-            entities_json TEXT,
-            summary       TEXT,
-            language      TEXT DEFAULT 'en',
-            upload_date   TEXT DEFAULT (datetime('now')),
-            pacer_doc_id  TEXT,
-            pacer_seq_no  TEXT
-        )
-    """)
-
-    c.execute("""
-        CREATE TABLE IF NOT EXISTS case_notes (
-            id         INTEGER PRIMARY KEY AUTOINCREMENT,
-            case_id    INTEGER NOT NULL REFERENCES cases(id),
-            author     TEXT DEFAULT 'System',
-            note       TEXT NOT NULL,
-            pinned     INTEGER DEFAULT 0,
-            created_at TEXT DEFAULT (datetime('now'))
-        )
-    """)
-
-    c.execute("""
-        CREATE TABLE IF NOT EXISTS case_tags (
-            case_id INTEGER NOT NULL REFERENCES cases(id),
-            tag     TEXT NOT NULL,
-            PRIMARY KEY (case_id, tag)
-        )
-    """)
-
-    c.execute("""
-        CREATE VIRTUAL TABLE IF NOT EXISTS case_fts
-        USING fts5(
-            case_id UNINDEXED,
-            document_name,
-            doc_text,
-            summary,
-            content='case_documents',
-            content_rowid='id'
-        )
-    """)
-
-    c.execute("""
-        CREATE TRIGGER IF NOT EXISTS case_fts_insert
-        AFTER INSERT ON case_documents BEGIN
-            INSERT INTO case_fts(rowid, case_id, document_name, doc_text, summary)
-            VALUES (new.id, new.case_id, new.document_name,
-                    COALESCE(new.doc_text,''), COALESCE(new.summary,''));
-        END
-    """)
-
-    c.execute("""
-        CREATE TRIGGER IF NOT EXISTS case_fts_update
-        AFTER UPDATE ON case_documents BEGIN
-            INSERT INTO case_fts(case_fts, rowid, case_id, document_name, doc_text, summary)
-            VALUES('delete', old.id, old.case_id, old.document_name,
-                   COALESCE(old.doc_text,''), COALESCE(old.summary,''));
-            INSERT INTO case_fts(rowid, case_id, document_name, doc_text, summary)
-            VALUES (new.id, new.case_id, new.document_name,
-                    COALESCE(new.doc_text,''), COALESCE(new.summary,''));
-        END
-    """)
-
-    conn.commit()
-    conn.close()
+    """No-op — tables exist in Supabase Postgres."""
     print("[CaseDB] Tables initialized ✓")
 
 
 # ══════════════════════════════════════════════════════════════════════════════
 # HELPERS
 # ══════════════════════════════════════════════════════════════════════════════
-
-def get_db():
-    conn = sqlite3.connect(DB_PATH)
-    conn.row_factory = sqlite3.Row
-    return conn
 
 def row_to_dict(row):
     return dict(row) if row else None
@@ -223,298 +121,378 @@ def extract_dates_from_text(text: str) -> list:
             seen.add(item["date"]); unique.append(item)
     return unique
 
+def safe_json_dumps(val):
+    """Serialize list/dict to JSON string for JSONB insert; pass None through."""
+    if val is None:
+        return None
+    if isinstance(val, (dict, list)):
+        return json.dumps(val)
+    return val
+
 
 # ══════════════════════════════════════════════════════════════════════════════
 # ROUTES
 # ══════════════════════════════════════════════════════════════════════════════
 
 @router.post("/")
-async def create_case(body: CreateCaseBody):
-    conn = get_db()
+async def create_case(
+    body: CreateCaseBody,
+    firm_id: str = Depends(get_current_firm_id),
+):
     try:
-        conn.execute("""
-            INSERT INTO cases
-              (case_number, client_name, matter_number, status,
-               court, judge, filing_date, description)
-            VALUES (?,?,?,?,?,?,?,?)
-        """, (body.case_number.strip(), body.client_name.strip(),
-              body.matter_number, body.status, body.court,
-              body.judge, body.filing_date, body.description))
+        with get_conn(firm_id) as conn:
+            cur = conn.execute("""
+                INSERT INTO cases
+                  (firm_id, case_number, client_name, matter_number, status,
+                   court, judge, filing_date, description)
+                VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s)
+                RETURNING id
+            """, (firm_id, body.case_number.strip(), body.client_name.strip(),
+                  body.matter_number, body.status, body.court,
+                  body.judge, body.filing_date or None, body.description))
+            case_id = cur.fetchone()["id"]
 
-        case_id = conn.execute(
-            "SELECT id FROM cases WHERE case_number=?",
-            (body.case_number,)).fetchone()["id"]
+            for tag in body.tags:
+                conn.execute(
+                    "INSERT INTO case_tags (firm_id, case_id, tag) VALUES (%s,%s,%s) ON CONFLICT DO NOTHING",
+                    (firm_id, case_id, tag.lower().strip()))
+            conn.execute(
+                "INSERT INTO case_notes (firm_id, case_id, note) VALUES (%s,%s,%s)",
+                (firm_id, case_id,
+                 f"Case created: {body.case_number} for {body.client_name}"))
 
-        for tag in body.tags:
-            conn.execute("INSERT OR IGNORE INTO case_tags VALUES (?,?)",
-                         (case_id, tag.lower().strip()))
-        conn.execute(
-            "INSERT INTO case_notes (case_id, note) VALUES (?,?)",
-            (case_id, f"Case created: {body.case_number} for {body.client_name}"))
-        conn.commit()
         return {"success": True, "case_id": case_id,
                 "case_number": body.case_number}
-    except sqlite3.IntegrityError:
-        raise HTTPException(409, "Case number already exists")
-    finally:
-        conn.close()
+    except Exception as e:
+        if "unique" in str(e).lower():
+            raise HTTPException(409, "Case number already exists")
+        raise HTTPException(500, str(e))
 
 
 @router.get("/stats")
-async def case_stats():
-    conn  = get_db()
-    stats = {}
-    rows  = conn.execute(
-        f"SELECT status, COUNT(*) cnt FROM cases WHERE deleted=0 AND (firm_id='default' OR firm_id IS NULL) GROUP BY status"
-    ).fetchall()
-    stats["by_status"] = {r["status"]: r["cnt"] for r in rows}
-    stats["total_cases"] = sum(stats["by_status"].values())
-    rows = conn.execute(
-        "SELECT risk_level, COUNT(*) cnt FROM cases WHERE deleted=0 GROUP BY risk_level"
-    ).fetchall()
-    stats["by_risk"] = {r["risk_level"]: r["cnt"] for r in rows}
-    stats["total_documents"] = conn.execute(
-        "SELECT COUNT(*) FROM case_documents").fetchone()[0]
-    rows = conn.execute(
-        "SELECT source, COUNT(*) cnt FROM case_documents GROUP BY source"
-    ).fetchall()
-    stats["docs_by_source"] = {r["source"]: r["cnt"] for r in rows}
-    rows = conn.execute("""
-        SELECT c.case_number, c.client_name, COUNT(cd.id) doc_count
-        FROM cases c LEFT JOIN case_documents cd ON cd.case_id=c.id
-        WHERE c.deleted=0 GROUP BY c.id ORDER BY doc_count DESC LIMIT 5
-    """).fetchall()
-    stats["most_active_cases"] = [row_to_dict(r) for r in rows]
-    conn.close()
-    return stats
+async def case_stats(firm_id: str = Depends(get_current_firm_id)):
+    with get_conn(firm_id) as conn:
+        rows = conn.execute(
+            "SELECT status, COUNT(*) AS cnt FROM cases WHERE deleted = FALSE AND firm_id=%s GROUP BY status",
+            (firm_id,)
+        ).fetchall()
+        by_status = {r["status"]: r["cnt"] for r in rows}
+        rows = conn.execute(
+            "SELECT risk_level, COUNT(*) AS cnt FROM cases WHERE deleted = FALSE AND firm_id=%s GROUP BY risk_level",
+            (firm_id,)
+        ).fetchall()
+        by_risk = {r["risk_level"]: r["cnt"] for r in rows}
+        total_docs = conn.execute(
+            "SELECT COUNT(*) AS n FROM case_documents WHERE firm_id=%s",
+            (firm_id,)
+        ).fetchone()["n"]
+        rows = conn.execute(
+            "SELECT source, COUNT(*) AS cnt FROM case_documents WHERE firm_id=%s GROUP BY source",
+            (firm_id,)
+        ).fetchall()
+        docs_by_source = {r["source"]: r["cnt"] for r in rows}
+
+        rows = conn.execute("""
+            SELECT c.case_number, c.client_name,
+                   COUNT(cd.id) AS doc_count
+            FROM cases c
+            LEFT JOIN case_documents cd ON cd.case_id = c.id
+            WHERE c.deleted = FALSE AND c.firm_id = %s
+            GROUP BY c.id, c.case_number, c.client_name
+            ORDER BY doc_count DESC LIMIT 5
+        """, (firm_id,)).fetchall()
+        most_active = [row_to_dict(r) for r in rows]
+
+    total = sum(by_status.values())
+    active = by_status.get("open", 0)
+    return {
+        "by_status":         by_status,
+        "total_cases":       total,
+        "total":             total,
+        "active":            active,
+        "by_risk":           by_risk,
+        "total_documents":   total_docs,
+        "docs_by_source":    docs_by_source,
+        "most_active_cases": most_active,
+    }
 
 
 @router.get("/search")
 async def search_cases(
-    q:       Optional[str] = Query(None),
-    _jwt_auth: str = Depends(get_current_firm_id),  # validates token
-    current_user: dict = Depends(get_current_user),
-    status:  Optional[str] = Query(None),
-    case_id: Optional[int] = Query(None),
-    limit:   int           = Query(50, le=100),
+    q:            Optional[str] = Query(None),
+    firm_id:      str           = Depends(get_current_firm_id),
+    current_user: dict          = Depends(get_current_user),
+    status:       Optional[str] = Query(None),
+    case_id:      Optional[int] = Query(None),
+    limit:        int           = Query(50, le=100),
 ):
-    conn = get_db()
-
-    # No query — return all cases with optional status filter
-    if not q or not q.strip():
-        firm_id = current_user.get('firm_id', 'default')
-        extra = f"WHERE deleted=0 AND (firm_id='{firm_id}' OR firm_id IS NULL)"
-        params = []
-        if status:
-            extra += " AND status=?"
-            params.append(status)
-        extra += " ORDER BY created_at DESC LIMIT ?"
-        params.append(limit)
-        rows = conn.execute(
-            f"SELECT id, case_number, client_name, matter_number, court, "
-            f"filing_date, status, risk_level, created_at,"
-            f"(SELECT COUNT(*) FROM case_documents WHERE case_id=cases.id) AS doc_count FROM cases {extra}",
-            params
-        ).fetchall()
-        conn.close()
-        return {"query": "", "cases": [row_to_dict(r) for r in rows],
-                "results": [row_to_dict(r) for r in rows], "count": len(rows)}
-
-    # FTS search — wrap in double quotes to handle hyphens and special chars
-    safe_q = '"'+ q.strip().replace('"', ' ') + '"'
-    base = """
-        SELECT cf.rowid, cf.case_id, cf.document_name,
-               snippet(case_fts,2,'<mark>','</mark>','…',20) AS snippet,
-               c.case_number, c.client_name, c.status,
-               c.matter_number, c.court, c.filing_date,
-               c.risk_level, c.id, c.created_at
-        FROM   case_fts cf JOIN cases c ON c.id=cf.case_id
-        WHERE  case_fts MATCH ? AND (c.firm_id=? OR c.firm_id IS NULL)
-        ORDER BY rank LIMIT ?
-    """
-    try:
-        if case_id:
-            rows = conn.execute(
-                base.format(extra="AND cf.case_id=?"),
-                (safe_q, case_id, limit)).fetchall()
-        else:
-            extra = ""
-            params = [safe_q]
+    with get_conn(firm_id) as conn:
+        # No query — list all cases
+        if not q or not q.strip():
+            sql = """
+                SELECT c.id, c.case_number, c.client_name, c.matter_number,
+                       c.court, c.filing_date, c.status, c.risk_level, c.created_at,
+                       COUNT(cd.id) AS doc_count
+                FROM cases c
+                LEFT JOIN case_documents cd ON cd.case_id = c.id
+                WHERE c.deleted = FALSE AND c.firm_id = %s
+            """
+            params = [firm_id]
             if status:
-                extra = "AND c.status=?"
+                sql += " AND c.status = %s"
                 params.append(status)
+            sql += " GROUP BY c.id ORDER BY c.created_at DESC LIMIT %s"
             params.append(limit)
-            rows = conn.execute(
-                base.format(extra=extra), params).fetchall()
-    except Exception:
-        # FTS failed — fallback to LIKE search
-        rows = conn.execute(
-            """SELECT id, case_number, client_name, matter_number, court,
-                      filing_date, status, doc_count, risk_level, created_at
-               FROM cases WHERE deleted=0
-               AND (case_number LIKE ? OR client_name LIKE ? OR matter_number LIKE ?)
-               ORDER BY created_at DESC LIMIT ?""",
-            (f"%{q}%", f"%{q}%", f"%{q}%", limit)
-        ).fetchall()
-    conn.close()
+            rows = conn.execute(sql, params).fetchall()
+            results = [row_to_dict(r) for r in rows]
+            return {"query": "", "cases": results,
+                    "results": results, "count": len(results)}
+
+        # Full-text search via tsvector GIN index
+        try:
+            sql = """
+                SELECT cd.case_id,
+                       cd.document_name,
+                       ts_headline('english', COALESCE(cd.doc_text,''),
+                           plainto_tsquery('english', %s),
+                           'MaxFragments=1, MaxWords=20') AS snippet,
+                       c.case_number, c.client_name, c.status,
+                       c.matter_number, c.court, c.filing_date,
+                       c.risk_level, c.id, c.created_at
+                FROM case_documents cd
+                JOIN cases c ON c.id = cd.case_id
+                WHERE cd.doc_tsv @@ plainto_tsquery('english', %s)
+                  AND c.deleted = FALSE
+            """
+            params = [q.strip(), q.strip()]
+            if case_id:
+                sql += " AND cd.case_id = %s"
+                params.append(case_id)
+            if status:
+                sql += " AND c.status = %s"
+                params.append(status)
+            sql += (
+                " ORDER BY ts_rank(cd.doc_tsv, plainto_tsquery('english', %s)) DESC"
+                " LIMIT %s"
+            )
+            params += [q.strip(), limit]
+            rows = conn.execute(sql, params).fetchall()
+        except Exception:
+            # Fallback to ILIKE search
+            rows = conn.execute("""
+                SELECT id, case_number, client_name, matter_number, court,
+                       filing_date, status, risk_level, created_at
+                FROM cases
+                WHERE deleted = FALSE
+                  AND (case_number ILIKE %s OR client_name ILIKE %s
+                       OR matter_number ILIKE %s)
+                ORDER BY created_at DESC LIMIT %s
+            """, (f"%{q}%", f"%{q}%", f"%{q}%", limit)).fetchall()
+
     results = [row_to_dict(r) for r in rows]
-    return {"query": q, "cases": results, "results": results, "count": len(results)}
+    return {"query": q, "cases": results,
+            "results": results, "count": len(results)}
 
 
 @router.get("/{case_id}")
-async def get_case(case_id: int):
-    conn = get_db()
-    case = row_to_dict(conn.execute(
-        "SELECT * FROM cases WHERE id=? AND deleted=0", (case_id,)).fetchone())
-    if not case:
-        conn.close()
-        raise HTTPException(404, "Case not found")
-    docs  = [row_to_dict(r) for r in conn.execute(
-        "SELECT * FROM case_documents WHERE case_id=? ORDER BY upload_date DESC",
-        (case_id,)).fetchall()]
-    notes = [row_to_dict(r) for r in conn.execute(
-        "SELECT * FROM case_notes WHERE case_id=? ORDER BY pinned DESC, created_at DESC",
-        (case_id,)).fetchall()]
-    tags  = [r["tag"] for r in conn.execute(
-        "SELECT tag FROM case_tags WHERE case_id=?", (case_id,)).fetchall()]
-    conn.close()
+async def get_case(
+    case_id: int,
+    firm_id: str = Depends(get_current_firm_id),
+):
+    with get_conn(firm_id) as conn:
+        case = row_to_dict(conn.execute(
+            "SELECT * FROM cases WHERE id = %s AND deleted = FALSE",
+            (case_id,)).fetchone())
+        if not case:
+            raise HTTPException(404, "Case not found")
+
+        docs = [row_to_dict(r) for r in conn.execute(
+            "SELECT * FROM case_documents WHERE case_id = %s ORDER BY upload_date DESC",
+            (case_id,)).fetchall()]
+
+        notes = [row_to_dict(r) for r in conn.execute(
+            "SELECT * FROM case_notes WHERE case_id = %s ORDER BY pinned DESC, created_at DESC",
+            (case_id,)).fetchall()]
+
+        tags = [r["tag"] for r in conn.execute(
+            "SELECT tag FROM case_tags WHERE case_id = %s", (case_id,)).fetchall()]
+
+    # JSONB columns already parsed — convert any stray strings just in case
     for d in docs:
-        for f in ["events_json","entities_json"]:
-            if d.get(f):
+        for f in ["events_json", "entities_json"]:
+            if isinstance(d.get(f), str):
                 try: d[f] = json.loads(d[f])
                 except: pass
+
     case.update({"documents": docs, "notes": notes,
                  "tags": tags, "doc_count": len(docs)})
     return case
 
 
 @router.put("/{case_id}/status")
-async def update_status(case_id: int, body: UpdateStatusBody):
-    if body.status not in ("open","pending","closed","archived"):
+async def update_status(
+    case_id: int,
+    body:    UpdateStatusBody,
+    firm_id: str = Depends(get_current_firm_id),
+):
+    if body.status not in ("open", "pending", "closed", "archived"):
         raise HTTPException(400, "Invalid status")
-    conn = get_db()
-    conn.execute("UPDATE cases SET status=?, updated_at=? WHERE id=?",
-                 (body.status, ts_now(), case_id))
-    conn.execute(
-        "INSERT INTO case_notes (case_id, author, note) VALUES (?,?,?)",
-        (case_id, body.author, f"Status changed to: {body.status}"))
-    conn.commit(); conn.close()
+    with get_conn(firm_id) as conn:
+        conn.execute(
+            "UPDATE cases SET status = %s, updated_at = %s WHERE id = %s",
+            (body.status, ts_now(), case_id))
+        conn.execute(
+            "INSERT INTO case_notes (firm_id, case_id, author, note) VALUES (%s,%s,%s,%s)",
+            (firm_id, case_id, body.author, f"Status changed to: {body.status}"))
     return {"success": True, "case_id": case_id, "status": body.status}
 
 
 @router.delete("/{case_id}")
-async def delete_case(case_id: int):
-    conn = get_db()
-    conn.execute("UPDATE cases SET deleted=1, updated_at=? WHERE id=?",
-                 (ts_now(), case_id))
-    conn.commit(); conn.close()
+async def delete_case(
+    case_id: int,
+    firm_id: str = Depends(get_current_firm_id),
+):
+    with get_conn(firm_id) as conn:
+        conn.execute(
+            "UPDATE cases SET deleted = TRUE, updated_at = %s WHERE id = %s",
+            (ts_now(), case_id))
     return {"success": True, "message": "Case soft-deleted"}
 
 
 @router.post("/{case_id}/documents")
-async def add_document(case_id: int, body: AddDocumentBody):
-    conn = get_db()
-    if not conn.execute(
-            "SELECT id FROM cases WHERE id=? AND deleted=0",
+async def add_document(
+    case_id: int,
+    body:    AddDocumentBody,
+    firm_id: str = Depends(get_current_firm_id),
+):
+    with get_conn(firm_id) as conn:
+        if not conn.execute(
+            "SELECT id FROM cases WHERE id = %s AND deleted = FALSE",
             (case_id,)).fetchone():
-        conn.close()
-        raise HTTPException(404, "Case not found")
-    cur = conn.execute("""
-        INSERT INTO case_documents
-          (case_id, document_name, source, doc_text, sentiment, risk_score,
-           events_json, entities_json, summary, language, pacer_doc_id, pacer_seq_no)
-        VALUES (?,?,?,?,?,?,?,?,?,?,?,?)
-    """, (case_id, body.document_name, body.source, body.doc_text,
-          body.sentiment, body.risk_score,
-          json.dumps(body.events_json)   if body.events_json   else None,
-          json.dumps(body.entities_json) if body.entities_json else None,
-          body.summary, body.language, body.pacer_doc_id, body.pacer_seq_no))
-    docs     = conn.execute(
-        "SELECT risk_score FROM case_documents WHERE case_id=?",
-        (case_id,)).fetchall()
-    new_risk = compute_case_risk([row_to_dict(d) for d in docs])
-    conn.execute("UPDATE cases SET risk_level=?, updated_at=? WHERE id=?",
-                 (new_risk, ts_now(), case_id))
-    conn.commit()
-    _new_doc_id = cur.lastrowid
-    conn.close()
+            raise HTTPException(404, "Case not found")
+
+        cur = conn.execute("""
+            INSERT INTO case_documents
+              (firm_id, case_id, document_name, source, doc_text, sentiment,
+               risk_score, events_json, entities_json, summary, language,
+               pacer_doc_id, pacer_seq_no)
+            VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)
+            RETURNING id
+        """, (
+            firm_id, case_id, body.document_name, body.source, body.doc_text,
+            body.sentiment, body.risk_score,
+            safe_json_dumps(body.events_json),
+            safe_json_dumps(body.entities_json),
+            body.summary, body.language, body.pacer_doc_id, body.pacer_seq_no,
+        ))
+        new_doc_id = cur.fetchone()["id"]
+
+        docs     = conn.execute(
+            "SELECT risk_score FROM case_documents WHERE case_id = %s",
+            (case_id,)).fetchall()
+        new_risk = compute_case_risk([row_to_dict(d) for d in docs])
+        conn.execute(
+            "UPDATE cases SET risk_level = %s, updated_at = %s WHERE id = %s",
+            (new_risk, ts_now(), case_id))
+
     # Fire contradiction scan in background — non-blocking
     if body.doc_text:
         import threading as _th
         _th.Thread(
             target=run_case_contradiction_scan,
-            args=(case_id, _new_doc_id),
+            args=(case_id, new_doc_id),
             daemon=True
         ).start()
+
     return {"success": True, "case_id": case_id,
-            "document_id": _new_doc_id,
+            "document_id": new_doc_id,
             "document_name": body.document_name, "new_risk_level": new_risk}
 
 
 @router.get("/{case_id}/documents")
-async def list_documents(case_id: int, source: Optional[str] = Query(None)):
-    conn   = get_db()
-    q      = "SELECT * FROM case_documents WHERE case_id=?"
-    params = [case_id]
-    if source: q += " AND source=?"; params.append(source)
-    rows   = conn.execute(q + " ORDER BY upload_date DESC", params).fetchall()
-    conn.close()
+async def list_documents(
+    case_id: int,
+    source:  Optional[str] = Query(None),
+    firm_id: str           = Depends(get_current_firm_id),
+):
+    with get_conn(firm_id) as conn:
+        sql    = "SELECT * FROM case_documents WHERE case_id = %s"
+        params = [case_id]
+        if source:
+            sql += " AND source = %s"
+            params.append(source)
+        rows = conn.execute(sql + " ORDER BY upload_date DESC", params).fetchall()
+
     docs = [row_to_dict(r) for r in rows]
     for d in docs:
-        for f in ["events_json","entities_json"]:
-            if d.get(f):
+        for f in ["events_json", "entities_json"]:
+            if isinstance(d.get(f), str):
                 try: d[f] = json.loads(d[f])
                 except: pass
     return {"case_id": case_id, "documents": docs, "count": len(docs)}
 
 
 @router.get("/{case_id}/timeline")
-async def case_timeline(case_id: int):
-    conn = get_db()
-    docs = [row_to_dict(r) for r in conn.execute(
-        "SELECT document_name, doc_text, events_json FROM case_documents WHERE case_id=?",
-        (case_id,)).fetchall()]
-    conn.close()
+async def case_timeline(
+    case_id: int,
+    firm_id: str = Depends(get_current_firm_id),
+):
+    with get_conn(firm_id) as conn:
+        docs = [row_to_dict(r) for r in conn.execute(
+            "SELECT document_name, doc_text, events_json FROM case_documents WHERE case_id = %s",
+            (case_id,)).fetchall()]
+
     all_events = []
     for doc in docs:
-        if doc.get("events_json"):
+        ev_json = doc.get("events_json")
+        if ev_json:
+            items = ev_json if isinstance(ev_json, list) else []
             try:
-                for ev in json.loads(doc["events_json"]):
-                    ev["source_doc"] = doc["document_name"]
-                    ev["source"]     = "nlp_extractor"
-                    all_events.append(ev)
+                if isinstance(ev_json, str):
+                    items = json.loads(ev_json)
             except: pass
+            for ev in items:
+                ev["source_doc"] = doc["document_name"]
+                ev["source"]     = "nlp_extractor"
+                all_events.append(ev)
         if doc.get("doc_text"):
             for rd in extract_dates_from_text(doc["doc_text"]):
                 all_events.append({**rd, "source_doc": doc["document_name"],
                                    "source": "regex_scan"})
+
     def sort_key(ev):
-        for fmt in ("%Y-%m-%d","%m/%d/%Y","%m/%d/%y","%B %d, %Y","%B %d %Y"):
+        for fmt in ("%Y-%m-%d", "%m/%d/%Y", "%m/%d/%y", "%B %d, %Y", "%B %d %Y"):
             try: return datetime.strptime((ev.get("date","")).strip(), fmt)
             except: pass
         return datetime.min
+
     all_events.sort(key=sort_key)
     return {"case_id": case_id, "event_count": len(all_events),
             "timeline": all_events}
 
 
 @router.post("/{case_id}/notes")
-async def add_note(case_id: int, body: AddNoteBody):
-    conn = get_db()
-    conn.execute(
-        "INSERT INTO case_notes (case_id, author, note, pinned) VALUES (?,?,?,?)",
-        (case_id, body.author, body.note, body.pinned))
-    conn.commit(); conn.close()
+async def add_note(
+    case_id: int,
+    body:    AddNoteBody,
+    firm_id: str = Depends(get_current_firm_id),
+):
+    with get_conn(firm_id) as conn:
+        conn.execute(
+            "INSERT INTO case_notes (firm_id, case_id, author, note, pinned) VALUES (%s,%s,%s,%s,%s)",
+            (firm_id, case_id, body.author, body.note, bool(body.pinned)))
     return {"success": True}
 
 
 @router.get("/{case_id}/notes")
-async def list_notes(case_id: int):
-    conn = get_db()
-    rows = conn.execute(
-        "SELECT * FROM case_notes WHERE case_id=? ORDER BY pinned DESC, created_at DESC",
-        (case_id,)).fetchall()
-    conn.close()
+async def list_notes(
+    case_id: int,
+    firm_id: str = Depends(get_current_firm_id),
+):
+    with get_conn(firm_id) as conn:
+        rows = conn.execute(
+            "SELECT * FROM case_notes WHERE case_id = %s ORDER BY pinned DESC, created_at DESC",
+            (case_id,)).fetchall()
     return {"case_id": case_id, "notes": [row_to_dict(r) for r in rows]}
 
 
@@ -523,14 +501,17 @@ init_case_db()
 
 
 # ── AI Timeline Extraction ────────────────────────────────────────────────────
+
 @router.post("/{case_id}/timeline/extract")
-async def extract_timeline_ai(case_id: int):
+async def extract_timeline_ai(
+    case_id: int,
+    firm_id: str = Depends(get_current_firm_id),
+):
     """Call Claude to extract timeline events from all linked case documents."""
-    conn = get_db()
-    docs = [row_to_dict(r) for r in conn.execute(
-        "SELECT document_name, doc_text FROM case_documents WHERE case_id=? AND doc_text IS NOT NULL",
-        (case_id,)).fetchall()]
-    conn.close()
+    with get_conn(firm_id) as conn:
+        docs = [row_to_dict(r) for r in conn.execute(
+            "SELECT id, document_name, doc_text FROM case_documents WHERE case_id = %s AND doc_text IS NOT NULL",
+            (case_id,)).fetchall()]
 
     texts = []
     for doc in docs:
@@ -557,50 +538,46 @@ async def extract_timeline_ai(case_id: int):
     )
 
     try:
-        msg = _client.messages.create(
+        msg = _ant.Anthropic(api_key=_os.getenv("ANTHROPIC_API_KEY")).messages.create(
             model="claude-haiku-4-5-20251001",
             max_tokens=2000,
             messages=[{"role": "user", "content": prompt}]
         )
-        raw = msg.content[0].text.strip()
-        raw = _re.sub(r'^```json\s*', '', raw)
-        raw = _re.sub(r'\s*```$', '', raw)
+        raw    = msg.content[0].text.strip()
+        raw    = _re.sub(r'^```json\s*', '', raw)
+        raw    = _re.sub(r'\s*```$', '', raw)
         parsed = _json.loads(raw)
         events = parsed.get("events", [])
 
-        conn = get_db()
-        for ev in events:
-            src_doc = ev.get("source_doc", "")
-            if src_doc:
-                existing = conn.execute(
-                    "SELECT id, events_json FROM case_documents WHERE case_id=? AND document_name=?",
-                    (case_id, src_doc)).fetchone()
-                if existing:
-                    try:
-                        prev = _json.loads(existing["events_json"] or "[]")
-                    except Exception:
-                        prev = []
-                    prev.append(ev)
-                    conn.execute(
-                        "UPDATE case_documents SET events_json=? WHERE id=?",
-                        (_json.dumps(prev), existing["id"]))
-        conn.commit()
-        conn.close()
+        # Persist events back to case_documents
+        with get_conn(firm_id) as conn:
+            for ev in events:
+                src_doc = ev.get("source_doc", "")
+                if src_doc:
+                    existing = conn.execute(
+                        "SELECT id, events_json FROM case_documents WHERE case_id = %s AND document_name = %s",
+                        (case_id, src_doc)).fetchone()
+                    if existing:
+                        prev = existing["events_json"] or []
+                        if isinstance(prev, str):
+                            try: prev = _json.loads(prev)
+                            except: prev = []
+                        prev.append(ev)
+                        conn.execute(
+                            "UPDATE case_documents SET events_json = %s WHERE id = %s",
+                            (_json.dumps(prev), existing["id"]))
 
-        # Auto-score risk from combined doc text and update case
+        # Auto-score risk
         try:
             from backend.demo1.risk_scorer import score_text as _score_txt
-            _risk   = _score_txt(combined[:3000])
-            _level  = _risk.get("level", "unknown")
-            _score  = _risk.get("score", 0)
-            conn2   = get_db()
-            conn2.execute(
-                "UPDATE cases SET risk_level=? WHERE id=?",
-                (_level, case_id)
-            )
-            conn2.commit()
-            conn2.close()
-        except Exception as _re:
+            _risk  = _score_txt(combined[:3000])
+            _level = _risk.get("level", "unknown")
+            _score = _risk.get("score", 0)
+            with get_conn(firm_id) as conn:
+                conn.execute(
+                    "UPDATE cases SET risk_level = %s WHERE id = %s",
+                    (_level, case_id))
+        except Exception:
             _level = "unknown"
             _score = 0
 
@@ -611,32 +588,31 @@ async def extract_timeline_ai(case_id: int):
         raise HTTPException(500, "AI extraction failed: " + str(e))
 
 
-# ═══════════════════════════════════════════════════════════════════════════
+# ══════════════════════════════════════════════════════════════════════════════
 # INTELLIGENCE ENGINE ENDPOINTS
-# ═══════════════════════════════════════════════════════════════════════════
+# Note: get_case_contradictions / mark_reviewed / generate_case_brief
+# are in intelligence.py which still uses SQLite — migrate separately.
+# ══════════════════════════════════════════════════════════════════════════════
 
 @router.get("/{case_id}/contradictions")
 async def list_contradictions(case_id: int):
-    """Return all contradictions detected for this case."""
     items = get_case_contradictions(case_id)
     return {
-        "case_id":       case_id,
-        "count":         len(items),
-        "unreviewed":    sum(1 for i in items if not i["reviewed"]),
+        "case_id":        case_id,
+        "count":          len(items),
+        "unreviewed":     sum(1 for i in items if not i["reviewed"]),
         "contradictions": items,
     }
 
 
 @router.patch("/{case_id}/contradictions/{c_id}/review")
 async def review_contradiction(case_id: int, c_id: int):
-    """Mark a specific contradiction as reviewed."""
     mark_reviewed(c_id)
     return {"success": True}
 
 
 @router.post("/{case_id}/brief")
 async def case_brief(case_id: int):
-    """Generate an AI case brief (2-page legal memo) for this case."""
     try:
         brief = generate_case_brief(case_id)
         return {"success": True, "case_id": case_id, "brief": brief}

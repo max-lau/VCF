@@ -86,4 +86,11 @@ const isActive = computed(() =>
 .nav-item__badge--gold { background: var(--gold-glow);  color: var(--gold); }
 .nav-item__badge--dim  { background: var(--bg-overlay); color: var(--text-tertiary); }
 .nav-item__badge--blue { background: var(--blue-dim);   color: var(--blue-bright); }
+@media (max-width: 899px) {
+  .nav-item {
+    padding: 10px 18px;
+    font-size: 14px;
+    min-height: 44px;
+  }
+}
 </style>
