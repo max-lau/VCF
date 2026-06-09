@@ -58,6 +58,8 @@ def _parse_gmail_message(raw: dict, account: dict) -> Optional[EmailMessage]:
         body_html = ""
         attachment_names = []
 
+        attachment_parts = []   # [(filename, attachment_id)]
+
         def extract_parts(parts_list):
             nonlocal body_text, body_html
             for part in parts_list:
@@ -73,6 +75,9 @@ def _parse_gmail_message(raw: dict, account: dict) -> Optional[EmailMessage]:
                         body_html = decoded
                 if part.get("filename"):
                     attachment_names.append(part["filename"])
+                    att_id = part.get("body", {}).get("attachmentId")
+                    if att_id:
+                        attachment_parts.append((part["filename"], att_id))
                 if part.get("parts"):
                     extract_parts(part["parts"])
 
@@ -91,7 +96,7 @@ def _parse_gmail_message(raw: dict, account: dict) -> Optional[EmailMessage]:
         except Exception:
             received_at = datetime.now(timezone.utc)
 
-        return EmailMessage(
+        msg = EmailMessage(
             provider_message_id=raw["id"],
             provider="gmail",
             attorney_id=str(account["attorney_id"]),
@@ -107,6 +112,9 @@ def _parse_gmail_message(raw: dict, account: dict) -> Optional[EmailMessage]:
             headers=headers,
             attachment_names=attachment_names,
         )
+        msg._attachment_parts = attachment_parts  # [(filename, gmail_attachment_id)]
+        msg._gmail_msg_id     = raw["id"]
+        return msg
     except Exception as e:
         logger.error(f"Failed to parse Gmail message {raw.get('id')}: {e}")
         return None
@@ -176,6 +184,31 @@ def _save_to_db(msg: EmailMessage, result, firm_id: str):
                  msg.received_at)
             )
         # ─────────────────────────────────────────────────────────────────
+        # -- Attachment vault --
+        if (intake_id and result.routing_decision == "intake"
+                and getattr(msg, '_attachment_parts', [])):
+            try:
+                from .attachment_handler import process_attachments
+                import base64, requests as _req
+                att_list = []
+                access_token = getattr(msg, '_access_token', None)
+                gmail_msg_id = getattr(msg, '_gmail_msg_id', None)
+                for fname, att_id in msg._attachment_parts:
+                    if not access_token or not gmail_msg_id:
+                        continue
+                    try:
+                        url = (f"https://gmail.googleapis.com/gmail/v1/users/me"
+                               f"/messages/{gmail_msg_id}/attachments/{att_id}")
+                        resp = _req.get(url, headers={"Authorization": f"Bearer {access_token}"}, timeout=15)
+                        if resp.status_code == 200:
+                            data = base64.urlsafe_b64decode(resp.json().get("data", "") + "==")
+                            att_list.append({"filename": fname, "data": data})
+                    except Exception as ae:
+                        logger.warning(f"[Vault] Failed to fetch attachment {fname}: {ae}")
+                if att_list:
+                    process_attachments(att_list, msg.firm_id, result.case_id_matched, intake_id, conn)
+            except Exception as ve:
+                logger.error(f"[Vault] Attachment processing error: {ve}")
     return intake_id
 
 

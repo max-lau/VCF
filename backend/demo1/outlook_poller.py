@@ -247,6 +247,50 @@ def _save_to_db(msg: EmailMessage, result, firm_id: str):
                  msg.received_at)
             )
         # ─────────────────────────────────────────────────────────────────
+        # -- Attachment vault (Outlook) --
+        if (intake_id and result.routing_decision == "intake"
+                and msg.attachment_names):
+            try:
+                from .attachment_handler import process_attachments
+                import requests as _req
+                att_list = []
+                access_token = getattr(msg, '_access_token', None)
+                graph_msg_id = getattr(msg, '_graph_msg_id', None)
+                if access_token and graph_msg_id:
+                    url = f"https://graph.microsoft.com/v1.0/me/messages/{graph_msg_id}/attachments"
+                    resp = _req.get(url, headers={"Authorization": f"Bearer {access_token}"}, timeout=15)
+                    if resp.status_code == 200:
+                        for att in resp.json().get("value", []):
+                            if att.get("@odata.type") == "#microsoft.graph.fileAttachment":
+                                import base64
+                                data = base64.b64decode(att.get("contentBytes", ""))
+                                att_list.append({"filename": att.get("name", "attachment"), "data": data})
+                if att_list:
+                    process_attachments(att_list, msg.firm_id, result.case_id_matched, intake_id, conn)
+            except Exception as ve:
+                logger.error(f"[Vault] Outlook attachment processing error: {ve}")
+        # -- Attachment vault (Outlook) --
+        if (intake_id and result.routing_decision == "intake"
+                and msg.attachment_names):
+            try:
+                from .attachment_handler import process_attachments
+                import requests as _req
+                att_list = []
+                access_token = getattr(msg, '_access_token', None)
+                graph_msg_id = getattr(msg, '_graph_msg_id', None)
+                if access_token and graph_msg_id:
+                    url = f"https://graph.microsoft.com/v1.0/me/messages/{graph_msg_id}/attachments"
+                    resp = _req.get(url, headers={"Authorization": f"Bearer {access_token}"}, timeout=15)
+                    if resp.status_code == 200:
+                        for att in resp.json().get("value", []):
+                            if att.get("@odata.type") == "#microsoft.graph.fileAttachment":
+                                import base64
+                                data = base64.b64decode(att.get("contentBytes", ""))
+                                att_list.append({"filename": att.get("name", "attachment"), "data": data})
+                if att_list:
+                    process_attachments(att_list, msg.firm_id, result.case_id_matched, intake_id, conn)
+            except Exception as ve:
+                logger.error(f"[Vault] Outlook attachment processing error: {ve}")
     return intake_id
 
 
