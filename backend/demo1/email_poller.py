@@ -156,6 +156,26 @@ def _save_to_db(msg: EmailMessage, result, firm_id: str):
              result.case_id_matched, result.routing_decision,
              result.discard_reason, intake_id)
         )
+
+        # ── Case Binder auto-link ─────────────────────────────────────────
+        if (intake_id and result.routing_decision == "intake"
+                and result.case_id_matched):
+            conn.execute(
+                """INSERT INTO case_documents
+                       (firm_id, case_id, document_name, source, source_type,
+                        source_ref, doc_text, entities_json, upload_date)
+                   VALUES (%s, %s, %s, %s, 'email', %s, %s, %s, %s)
+                   ON CONFLICT DO NOTHING""",
+                (msg.firm_id,
+                 result.case_id_matched,
+                 f"Email: {msg.subject[:100]} [from: {msg.from_address[:60]}]",
+                 'email',
+                 intake_id,
+                 msg.body_text[:4000] if msg.body_text else None,
+                 json.dumps(result.extracted_entities),
+                 msg.received_at)
+            )
+        # ─────────────────────────────────────────────────────────────────
     return intake_id
 
 

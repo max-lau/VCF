@@ -619,3 +619,118 @@ async def case_brief(case_id: int):
     except Exception as exc:
         raise HTTPException(status_code=500,
                             detail=f"Brief generation failed: {str(exc)}")
+
+# ── Case Binder ───────────────────────────────────────────────────────────────
+@router.get("/{case_id}/binder")
+async def case_binder(
+    case_id: int,
+    firm_id: str = Depends(get_current_firm_id),
+):
+    """Return all materials linked to a case in a unified chronological feed."""
+    with get_conn(firm_id) as conn:
+        # 1. Uploaded documents + email-linked records
+        docs = conn.execute("""
+            SELECT
+                cd.id,
+                cd.document_name,
+                cd.source,
+                cd.source_type,
+                cd.source_ref,
+                cd.summary,
+                cd.risk_score,
+                cd.sentiment,
+                cd.entities_json,
+                cd.upload_date,
+                ei.from_address,
+                ei.priority          AS email_priority,
+                ei.extracted_entities AS email_entities,
+                ei.deadline_dates    AS email_deadlines,
+                el.stage4_final_score AS email_score
+            FROM case_documents cd
+            LEFT JOIN email_intakes ei
+                ON ei.id::text = cd.source_ref
+                AND cd.source_type = 'email'
+            LEFT JOIN email_processing_log el
+                ON el.intake_id = ei.id
+                AND cd.source_type = 'email'
+            WHERE cd.case_id = %s
+            ORDER BY cd.upload_date DESC
+        """, (case_id,)).fetchall()
+
+        # 2. AI drafts
+        drafts = conn.execute("""
+            SELECT id, doc_type, doc_label, created_at, created_by
+            FROM ai_drafts
+            WHERE case_id = %s
+            ORDER BY created_at DESC
+        """, (case_id,)).fetchall()
+
+        # 3. Research notes
+        notes = conn.execute("""
+            SELECT id, title, summary, created_at
+            FROM research_notes
+            WHERE matter_id = %s
+            ORDER BY created_at DESC
+        """, (case_id,)).fetchall()
+
+    # Build unified feed
+    items = []
+
+    for d in docs:
+        row = dict(d)
+        items.append({
+            "binder_type": row.get("source_type") or "upload",
+            "id":          row["id"],
+            "title":       row["document_name"],
+            "source":      row.get("from_address") or row.get("source") or "upload",
+            "date":        row["upload_date"].isoformat() if row.get("upload_date") else None,
+            "risk_score":  row.get("risk_score"),
+            "sentiment":   row.get("sentiment"),
+            "summary":     row.get("summary"),
+            "email_priority": row.get("email_priority"),
+            "email_score": row.get("email_score"),
+            "entities":    row.get("email_entities") or row.get("entities_json"),
+            "deadlines":   row.get("email_deadlines"),
+            "source_ref":  row.get("source_ref"),
+        })
+
+    for d in drafts:
+        row = dict(d)
+        items.append({
+            "binder_type": "ai_draft",
+            "id":          row["id"],
+            "title":       row.get("doc_label") or row.get("doc_type", "AI Draft"),
+            "source":      row.get("created_by") or "AI",
+            "date":        row["created_at"].isoformat() if row.get("created_at") else None,
+            "risk_score":  None,
+            "sentiment":   None,
+            "summary":     None,
+            "email_priority": None,
+            "email_score": None,
+            "entities":    None,
+            "deadlines":   None,
+            "source_ref":  None,
+        })
+
+    for n in notes:
+        row = dict(n)
+        items.append({
+            "binder_type": "research",
+            "id":          row["id"],
+            "title":       f"Research: {row.get('title', '')[:80]}",
+            "source":      "CourtListener",
+            "date":        row["created_at"].isoformat() if row.get("created_at") else None,
+            "risk_score":  None,
+            "sentiment":   None,
+            "summary":     row.get("summary"),
+            "email_priority": None,
+            "email_score": None,
+            "entities":    None,
+            "deadlines":   None,
+            "source_ref":  None,
+        })
+
+    # Sort all items newest first
+    items.sort(key=lambda x: x["date"] or "", reverse=True)
+
+    return {"case_id": case_id, "total": len(items), "items": items}

@@ -27,6 +27,9 @@ const correspondence = ref([])
 const contracts      = ref([])
 const motions        = ref([])
 const calendarEvents = ref([])
+const binderItems    = ref([])
+const binderLoading  = ref(false)
+const binderFilter   = ref('')
 const loadingMod     = ref(false)
 const timeline       = ref([])
 const intelligence   = ref({ signals: [] })
@@ -50,6 +53,7 @@ const TABS = [
   { key: 'contracts',      label: 'Contracts',      icon: '📋' },
   { key: 'motions',        label: 'Motions',        icon: '⚖️'  },
   { key: 'calendar',       label: 'Calendar',       icon: '🗓'  },
+  { key: 'binder',         label: 'Binder',         icon: '🗂️'  },
 ]
 
 const PIPELINE_COLORS = {
@@ -99,8 +103,25 @@ function switchTab(key) {
   if (key === 'discovery'    && !discoveryQ.value.length)          fetchDiscovery()
   if (key === 'timeline'     && !timeline.value.length)            fetchTimeline()
   if (key === 'intelligence' && !intelligence.value.signals?.length) fetchIntelligence()
+  if (key === 'binder')                                            fetchBinder()
   if (MOD_KEYS.includes(key)) fetchModule(key)
 }
+async function fetchBinder() {
+  binderLoading.value = true
+  try {
+    const { data } = await axios.get(`/cases/${caseId.value}/binder`, { headers: authHdr() })
+    binderItems.value = data.items || []
+  } catch { binderItems.value = [] }
+  finally { binderLoading.value = false }
+}
+function binderTypeLabel(type) {
+  return { email: '📧 Email', upload: '📄 Upload', ai_draft: '🤖 AI Draft', research: '🔬 Research' }[type] || type
+}
+const filteredBinderItems = computed(() =>
+  binderFilter.value
+    ? binderItems.value.filter(i => i.binder_type === binderFilter.value)
+    : binderItems.value
+)
 
 async function fetchModule(key) {
   loadingMod.value = true
@@ -286,6 +307,7 @@ onMounted(fetchMatter)
           <span v-if="t.key==='contracts'      && contracts.length"      class="tab-count">{{ contracts.length }}</span>
           <span v-if="t.key==='motions'        && motions.length"        class="tab-count">{{ motions.length }}</span>
           <span v-if="t.key==='calendar'       && calendarEvents.length" class="tab-count">{{ calendarEvents.length }}</span>
+          <span v-if="t.key==='binder'         && binderItems.length"   class="tab-count">{{ binderItems.length }}</span>
         </button>
       </div>
       <!-- Kanban -->
@@ -590,6 +612,53 @@ onMounted(fetchMatter)
         </div>
       </div>
 
+      <div v-else-if="activeTab === 'binder'" class="mod-pane">
+        <div class="tab-toolbar">
+          <span class="dim sm">{{ binderItems.length }} item{{ binderItems.length !== 1 ? 's' : '' }}</span>
+          <select v-model="binderFilter" class="piq-input" style="width:140px;padding:4px 8px;">
+            <option value="">All types</option>
+            <option value="email">Emails</option>
+            <option value="upload">Uploads</option>
+            <option value="ai_draft">AI Drafts</option>
+            <option value="research">Research</option>
+          </select>
+        </div>
+        <div v-if="binderLoading" class="state-msg">Loading binder…</div>
+        <div v-else-if="!binderItems.length" class="empty-tab">
+          <div class="empty-tab__icon">🗂️</div>
+          <div class="empty-tab__title">No binder items yet</div>
+          <div class="empty-tab__sub">Emails, documents, drafts and research will appear here automatically.</div>
+        </div>
+        <div v-else class="table-wrap">
+          <table class="piq-table">
+            <thead>
+              <tr><th>Type</th><th>Title</th><th>Source</th><th>Date</th><th>Score</th><th>Sentiment</th></tr>
+            </thead>
+            <tbody>
+              <tr v-for="item in filteredBinderItems" :key="item.id + item.binder_type">
+                <td>
+                  <span :class="['type-pill', 'binder-type--' + item.binder_type]">
+                    {{ binderTypeLabel(item.binder_type) }}
+                  </span>
+                </td>
+                <td class="doc-name">{{ item.title }}</td>
+                <td class="dim">{{ item.source || '—' }}</td>
+                <td class="dim nowrap">{{ item.date ? fmtDate(item.date) : '—' }}</td>
+                <td>
+                  <span v-if="item.email_score" :class="['score-pill', item.email_score >= 70 ? 'score-pill--high' : 'score-pill--mid']">
+                    {{ item.email_score }}
+                  </span>
+                  <span v-else class="dim">—</span>
+                </td>
+                <td>
+                  <span v-if="item.sentiment" :class="['sentiment-pill', 'sentiment--' + item.sentiment]">{{ item.sentiment }}</span>
+                  <span v-else class="dim">—</span>
+                </td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
     </template>
 
     <!-- ── Add Modal (shared) ── -->
@@ -808,4 +877,12 @@ onMounted(fetchMatter)
 .sig-chip--high   { background: rgba(252,129,129,.15); color: #fc8181; }
 .sig-chip--medium { background: rgba(236,201,75,.15);  color: #ecc94b; }
 .sig-chip--low    { background: rgba(113,128,150,.15); color: #718096; }
+.binder-type--email    { background: #1a3a5c; color: #7ec8e3; }
+.binder-type--upload   { background: #2a2a1a; color: #c8b96e; }
+.binder-type--ai_draft { background: #1a2a1a; color: #7ec87e; }
+.binder-type--research { background: #2a1a2a; color: #c87ec8; }
+.score-pill            { padding: 2px 7px; border-radius: 10px; font-size: 11px; font-weight: 600; }
+.score-pill--high      { background: #1a3a1a; color: #7ec87e; }
+.score-pill--mid       { background: #3a2a1a; color: #c8a06e; }
+.empty-tab__sub        { font-size: 12px; color: var(--dim); margin-top: 4px; }
 </style>
