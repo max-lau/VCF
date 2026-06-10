@@ -27,20 +27,21 @@ def init_audit_table():
 
 
 def log_request(method, endpoint, status_code, response_time_ms,
-                client_ip, body_size, error=None):
+                client_ip, body_size, error=None, user_id=None):
     try:
         with get_conn("default") as conn:
             conn.execute("""
                 INSERT INTO audit_log
                   (timestamp, method, endpoint, status_code,
-                   response_time_ms, client_ip, body_size_bytes, error)
-                VALUES (%s,%s,%s,%s,%s,%s,%s,%s)
+                   response_time_ms, client_ip, body_size_bytes, error, user_id)
+                VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s)
             """, (
                 datetime.now(timezone.utc).isoformat(),
                 method, endpoint, status_code,
                 round(response_time_ms, 2),
                 client_ip, body_size,
                 str(error) if error else None,
+                user_id,
             ))
     except Exception as e:
         print(f"[AuditTrail] Log error: {e}")
@@ -62,6 +63,17 @@ class AuditMiddleware(BaseHTTPMiddleware):
 
         start     = time.perf_counter()
         client_ip = request.client.host if request.client else "unknown"
+        # Extract user_id from JWT if present
+        user_id   = None
+        auth_hdr  = request.headers.get("authorization", "")
+        if auth_hdr.startswith("Bearer "):
+            try:
+                from jose import jwt as _jwt, JWTError as _JWTError
+                import os as _os
+                _payload = _jwt.decode(auth_hdr[7:], _os.environ.get("JWT_SECRET_KEY","nlp-portfolio-secret-change-in-production"), algorithms=["HS256"])
+                user_id  = int(_payload["sub"]) if _payload.get("sub") else None
+            except Exception:
+                pass
         body      = await request.body()
         body_size = len(body)
 
@@ -88,6 +100,7 @@ class AuditMiddleware(BaseHTTPMiddleware):
             client_ip        = client_ip,
             body_size        = body_size,
             error            = error,
+            user_id          = user_id,
         )
 
         return response

@@ -19,7 +19,7 @@ Token expiry: 24 hours (configurable via .env JWT_EXPIRE_HOURS).
 import bcrypt
 import os
 from datetime import datetime, timezone, timedelta
-from fastapi import APIRouter, HTTPException, Depends
+from fastapi import APIRouter, HTTPException, Depends, Request
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from pydantic import BaseModel
 from typing import Optional
@@ -28,6 +28,33 @@ from backend.demo1.pg import get_conn
 
 router = APIRouter()
 bearer = HTTPBearer(auto_error=False)
+
+# ---------------------------------------------------------------------------
+# In-memory login rate limiter: 5 failures per IP per 15 min -> 429
+# ---------------------------------------------------------------------------
+from collections import defaultdict
+import threading as _threading
+_login_failures: dict = defaultdict(list)
+_login_lock = _threading.Lock()
+_RATE_LIMIT_MAX    = 5
+_RATE_LIMIT_WINDOW = 900  # seconds
+
+def _check_rate_limit(ip: str):
+    now = __import__("datetime").datetime.now(__import__("datetime").timezone.utc).timestamp()
+    with _login_lock:
+        _login_failures[ip] = [t for t in _login_failures[ip] if now - t < _RATE_LIMIT_WINDOW]
+        if len(_login_failures[ip]) >= _RATE_LIMIT_MAX:
+            raise HTTPException(429, "Too many failed login attempts. Try again in 15 minutes.")
+
+def _record_failure(ip: str):
+    now = __import__("datetime").datetime.now(__import__("datetime").timezone.utc).timestamp()
+    with _login_lock:
+        _login_failures[ip].append(now)
+
+def _clear_failures(ip: str):
+    with _login_lock:
+        _login_failures.pop(ip, None)
+
 
 # ── Config ─────────────────────────────────────────────────────────────────────
 SECRET_KEY   = os.getenv("JWT_SECRET_KEY", "nlp-portfolio-secret-change-in-production")
@@ -266,8 +293,10 @@ def register(body: RegisterBody):
 
 
 @router.post("/login")
-def login(body: LoginBody):
+def login(body: LoginBody, request: Request):
     """Authenticate and receive a JWT token + permission snapshot."""
+    ip = request.client.host if request.client else "unknown"
+    _check_rate_limit(ip)
     with get_conn("default") as conn:
         user = conn.execute(
             "SELECT * FROM users WHERE (username = %s OR email = %s) AND active = TRUE",
@@ -275,8 +304,10 @@ def login(body: LoginBody):
         ).fetchone()
 
         if not user or not verify_password(body.password, user["password_hash"]):
+            _record_failure(ip)
             raise HTTPException(401, "Invalid username or password")
 
+        _clear_failures(ip)
         conn.execute(
             "UPDATE users SET last_login = %s WHERE id = %s",
             (datetime.now(timezone.utc).isoformat(), user["id"])
