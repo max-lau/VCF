@@ -641,6 +641,7 @@ async def case_binder(
                 cd.sentiment,
                 cd.entities_json,
                 cd.upload_date,
+                cd.source_url,
                 ei.from_address,
                 ei.priority          AS email_priority,
                 ei.extracted_entities AS email_entities,
@@ -692,6 +693,7 @@ async def case_binder(
             "entities":    row.get("email_entities") or row.get("entities_json"),
             "deadlines":   row.get("email_deadlines"),
             "source_ref":  row.get("source_ref"),
+            "source_url":  row.get("source_url"),
         })
 
     for d in drafts:

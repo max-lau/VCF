@@ -641,7 +641,10 @@ onMounted(fetchMatter)
                     {{ binderTypeLabel(item.binder_type) }}
                   </span>
                 </td>
-                <td class="doc-name">{{ item.title }}</td>
+                <td class="doc-name">
+                  <a v-if="item.source_url" :href="item.source_url" target="_blank" rel="noopener" class="binder-link">{{ item.title }} ↗</a>
+                  <span v-else>{{ item.title }}</span>
+                </td>
                 <td class="dim">{{ item.source || '—' }}</td>
                 <td class="dim nowrap">{{ item.date ? fmtDate(item.date) : '—' }}</td>
                 <td>
@@ -879,6 +882,8 @@ onMounted(fetchMatter)
 .sig-chip--low    { background: rgba(113,128,150,.15); color: #718096; }
 .binder-type--email    { background: #1a3a5c; color: #7ec8e3; }
 .binder-type--upload   { background: #2a2a1a; color: #c8b96e; }
+.binder-link           { color: var(--gold, #c9a84c); text-decoration: none; font-weight: 500; }
+.binder-link:hover     { text-decoration: underline; }
 .binder-type--ai_draft { background: #1a2a1a; color: #7ec87e; }
 .binder-type--research { background: #2a1a2a; color: #c87ec8; }
 .score-pill            { padding: 2px 7px; border-radius: 10px; font-size: 11px; font-weight: 600; }

@@ -155,6 +155,7 @@ def _parse_graph_message(raw: dict, account: dict) -> Optional[EmailMessage]:
             body_html=body_html,
             received_at=received_at,
             headers={},
+            source_url=raw.get("webLink", ""),
             attachment_names=[],
         )
     except Exception as e:
@@ -234,8 +235,8 @@ def _save_to_db(msg: EmailMessage, result, firm_id: str):
             conn.execute(
                 """INSERT INTO case_documents
                        (firm_id, case_id, document_name, source, source_type,
-                        source_ref, doc_text, entities_json, upload_date)
-                   VALUES (%s, %s, %s, %s, 'email', %s, %s, %s, %s)
+                        source_ref, doc_text, entities_json, upload_date, source_url)
+                   VALUES (%s, %s, %s, %s, 'email', %s, %s, %s, %s, %s)
                    ON CONFLICT DO NOTHING""",
                 (msg.firm_id,
                  result.case_id_matched,
@@ -244,7 +245,8 @@ def _save_to_db(msg: EmailMessage, result, firm_id: str):
                  intake_id,
                  msg.body_text[:4000] if msg.body_text else None,
                  json.dumps(result.extracted_entities),
-                 msg.received_at)
+                 msg.received_at,
+                 getattr(msg, 'source_url', None))
             )
         # ─────────────────────────────────────────────────────────────────
         # -- Attachment vault (Outlook) --

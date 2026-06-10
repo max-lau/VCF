@@ -114,6 +114,7 @@ def _parse_gmail_message(raw: dict, account: dict) -> Optional[EmailMessage]:
         )
         msg._attachment_parts = attachment_parts  # [(filename, gmail_attachment_id)]
         msg._gmail_msg_id     = raw["id"]
+        msg.source_url        = f"https://mail.google.com/mail/u/0/#all/{raw['id']}"
         return msg
     except Exception as e:
         logger.error(f"Failed to parse Gmail message {raw.get('id')}: {e}")
@@ -171,8 +172,8 @@ def _save_to_db(msg: EmailMessage, result, firm_id: str):
             conn.execute(
                 """INSERT INTO case_documents
                        (firm_id, case_id, document_name, source, source_type,
-                        source_ref, doc_text, entities_json, upload_date)
-                   VALUES (%s, %s, %s, %s, 'email', %s, %s, %s, %s)
+                        source_ref, doc_text, entities_json, upload_date, source_url)
+                   VALUES (%s, %s, %s, %s, 'email', %s, %s, %s, %s, %s)
                    ON CONFLICT DO NOTHING""",
                 (msg.firm_id,
                  result.case_id_matched,
@@ -181,7 +182,8 @@ def _save_to_db(msg: EmailMessage, result, firm_id: str):
                  intake_id,
                  msg.body_text[:4000] if msg.body_text else None,
                  json.dumps(result.extracted_entities),
-                 msg.received_at)
+                 msg.received_at,
+                 getattr(msg, 'source_url', None))
             )
         # ─────────────────────────────────────────────────────────────────
         # -- Attachment vault --

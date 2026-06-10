@@ -55,6 +55,7 @@ class EmailMessage:
     received_at: datetime
     headers: dict = field(default_factory=dict)
     attachment_names: list = field(default_factory=list)
+    source_url: str = ""
 
 
 @dataclass
