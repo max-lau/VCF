@@ -78,3 +78,5 @@ redaction.py
 *.wav
 *.zip
 *.tar.gz
+.env.voice_bot
+logs/
