@@ -74,9 +74,6 @@
         <NavItem v-if="g.billing"      to="/admin/billing" icon="credit-card" label="Billing" />
       </NavGroup>
 
-      <NavGroup label="Voice">
-        <NavItem to="/voice-shortcuts" icon="microphone-2" label="Voice Shortcuts" />
-      </NavGroup>
 
       <NavGroup v-if="!isFirmAdmin && g.billing" label="Account">
         <NavItem to="/admin/billing" icon="credit-card" label="Billing" />
