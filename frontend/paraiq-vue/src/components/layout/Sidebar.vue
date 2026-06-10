@@ -63,6 +63,10 @@
         <NavItem to="/portal" icon="door-enter" label="Portal View" />
       </NavGroup>
 
+      <NavGroup label="Voice">
+        <NavItem to="/voice-shortcuts" icon="microphone-2" label="Voice Shortcuts" />
+      </NavGroup>
+
       <NavGroup v-if="isFirmAdmin" label="Firm Admin">
         <NavItem v-if="g.users_roles"  to="/admin"         icon="users"       label="Users & Roles" />
         <NavItem v-if="g.audit_log"    to="/admin/audit"   icon="list-check"  label="Audit Log" />
