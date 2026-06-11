@@ -70,7 +70,7 @@ class AuditMiddleware(BaseHTTPMiddleware):
             try:
                 from jose import jwt as _jwt, JWTError as _JWTError
                 import os as _os
-                _payload = _jwt.decode(auth_hdr[7:], _os.environ.get("JWT_SECRET_KEY","nlp-portfolio-secret-change-in-production"), algorithms=["HS256"])
+                _payload = _jwt.decode(auth_hdr[7:], _os.environ.get("JWT_SECRET_KEY","nlp-portfolio-secret-change-in-production"), algorithms=["HS256"], options={"verify_exp": False})
                 user_id  = int(_payload["sub"]) if _payload.get("sub") else None
             except Exception:
                 pass

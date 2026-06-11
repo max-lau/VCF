@@ -16,6 +16,7 @@ import psutil
 from anthropic import Anthropic
 from backend.demo1.hermes_kanban import run_hermes_kanban
 from backend.demo1.notifications_router import generate_notifications
+from backend.demo1.routers.morning_brief_router import run_all_firms_brief
 
 log = logging.getLogger("risk_watcher")
 
@@ -86,32 +87,30 @@ def collect_system_signals():
 
     # API error rate (last hour)
     try:
-        conn = sqlite3.connect(DB_PATH)
-        since = (datetime.now(timezone.utc) - timedelta(hours=1)).isoformat()
-        total = conn.execute(
-            "SELECT COUNT(*) FROM audit_log WHERE timestamp > ?", (since,)
-        ).fetchone()[0]
-        errors = conn.execute(
-            "SELECT COUNT(*) FROM audit_log WHERE timestamp > ? AND status_code >= 500",
-            (since,)
-        ).fetchone()[0]
-        avg_ms = conn.execute(
-            "SELECT AVG(response_time_ms) FROM audit_log WHERE timestamp > ? AND response_time_ms IS NOT NULL",
-            (since,)
-        ).fetchone()[0]
+        from backend.demo1.pg import get_conn as _get_conn
+        since = (datetime.now(timezone.utc) - timedelta(hours=1))
+        recent_since = (datetime.now(timezone.utc) - timedelta(minutes=10))
+        with _get_conn("default") as pg:
+            total = pg.execute(
+                "SELECT COUNT(*) AS n FROM audit_log WHERE timestamp > %s", (since,)
+            ).fetchone()["n"]
+            errors = pg.execute(
+                "SELECT COUNT(*) AS n FROM audit_log WHERE timestamp > %s AND status_code >= 500",
+                (since,)
+            ).fetchone()["n"]
+            avg_ms = pg.execute(
+                "SELECT AVG(response_time_ms) AS a FROM audit_log WHERE timestamp > %s AND response_time_ms IS NOT NULL",
+                (since,)
+            ).fetchone()["a"]
+            recent_errors = pg.execute(
+                "SELECT COUNT(*) AS n FROM audit_log WHERE timestamp > %s AND status_code >= 500",
+                (recent_since,)
+            ).fetchone()["n"]
         signals["api_requests_1h"]  = total
         signals["api_errors_1h"]    = errors
         signals["api_error_rate"]   = round(errors / total * 100, 2) if total else 0
-        signals["api_avg_ms"]       = round(avg_ms, 1) if avg_ms else None
-
-        # Spike detection: compare last 10 min vs previous 50 min
-        recent_since = (datetime.now(timezone.utc) - timedelta(minutes=10)).isoformat()
-        recent_errors = conn.execute(
-            "SELECT COUNT(*) FROM audit_log WHERE timestamp > ? AND status_code >= 500",
-            (recent_since,)
-        ).fetchone()[0]
+        signals["api_avg_ms"]       = round(float(avg_ms), 1) if avg_ms else None
         signals["api_errors_10min"] = recent_errors
-        conn.close()
     except Exception as e:
         signals["db_error"] = str(e)
 
@@ -389,6 +388,10 @@ def start_scheduler(app):
     scheduler.add_job(
         lambda: [generate_notifications(firm) for firm in ["default", "firm_abc", "meridian_legal"]],
         "interval", minutes=30, id="notifications_gen", replace_existing=True,
+    )
+    scheduler.add_job(
+        run_all_firms_brief,
+        'cron', hour=8, minute=0, id='morning_brief', replace_existing=True,
     )
     scheduler.start()
     log.info("[RiskWatcher] Scheduler started — running every 30 minutes")
