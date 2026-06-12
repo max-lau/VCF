@@ -127,6 +127,50 @@
           </div>
         </div>
       </div>
+      <!-- Automation Spec (Fable 5 corrections) -->
+      <div class="widget widget--wide">
+        <div class="widget__header">
+          <span class="widget__title">⚙️ Automation Levels</span>
+          <span class="widget__badge">Fable 5</span>
+        </div>
+        <div class="autospec-table">
+          <div class="autospec-row autospec-row--header">
+            <span class="autospec-feature">Feature</span>
+            <span class="autospec-level">Level</span>
+            <span class="autospec-guard">Guard / Constraint</span>
+          </div>
+          <div class="autospec-row">
+            <span class="autospec-feature">📅 SoL Tracker</span>
+            <span class="autospec-badge autospec-badge--assist">assist</span>
+            <span class="autospec-guard">Attorney verification stamp required before any deadline is set</span>
+          </div>
+          <div class="autospec-row">
+            <span class="autospec-feature">🗄️ Data Retention Purge</span>
+            <span class="autospec-badge autospec-badge--semi">semi</span>
+            <span class="autospec-guard">Litigation hold check gate must clear before purge executes</span>
+          </div>
+          <div class="autospec-row">
+            <span class="autospec-feature">💳 Billing Cap Auto-Pause</span>
+            <span class="autospec-badge autospec-badge--assist">alerts only</span>
+            <span class="autospec-guard">Never pause deadline-adjacent work — alert only</span>
+          </div>
+          <div class="autospec-row">
+            <span class="autospec-feature">⚖️ Conflict Check</span>
+            <span class="autospec-badge autospec-badge--semi">semi</span>
+            <span class="autospec-guard">No hard block — routes to waiver workflow for attorney review</span>
+          </div>
+          <div class="autospec-row">
+            <span class="autospec-feature">📂 Matter Status Progression</span>
+            <span class="autospec-badge autospec-badge--semi">semi</span>
+            <span class="autospec-guard">One-tap confirm required with trigger evidence shown</span>
+          </div>
+          <div class="autospec-row">
+            <span class="autospec-feature">💬 Client FAQ Auto-Responder</span>
+            <span class="autospec-badge autospec-badge--assist">assist</span>
+            <span class="autospec-guard">Structured data lookups only — no generated prose on merits</span>
+          </div>
+        </div>
+      </div>
 
     </div>
 
@@ -460,4 +504,16 @@ const visibleCards = computed(() => ALL_CARDS.filter(c => !c.gate || g.value[c.g
   .dashboard__widgets { grid-template-columns: 1fr; }
   .widget--wide { grid-column: span 1; }
 }
+
+/* Automation Spec Widget */
+.autospec-table       { display: flex; flex-direction: column; gap: 4px; margin-top: 4px; }
+.autospec-row         { display: grid; grid-template-columns: 220px 100px 1fr; align-items: center; gap: 12px; padding: 7px 10px; border-radius: 6px; font-size: 13px; }
+.autospec-row--header { font-size: 11px; color: var(--text-tertiary); text-transform: uppercase; letter-spacing: .04em; padding-bottom: 2px; }
+.autospec-row:not(.autospec-row--header):hover { background: var(--surface-hover, rgba(255,255,255,.04)); }
+.autospec-feature     { font-weight: 500; color: var(--text-primary); }
+.autospec-guard       { color: var(--text-secondary); font-size: 12px; }
+.autospec-badge       { display: inline-block; padding: 2px 8px; border-radius: 10px; font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacing: .04em; text-align: center; }
+.autospec-badge--semi   { background: rgba(99,102,241,.18); color: #818cf8; }
+.autospec-badge--assist { background: rgba(16,185,129,.15); color: #34d399; }
+
 </style>

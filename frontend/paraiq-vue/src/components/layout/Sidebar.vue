@@ -37,6 +37,7 @@
         <NavItem v-if="g.scorer"         to="/scorer"       icon="chart-bar"         label="Summary Scorer" />
         <NavItem v-if="g.insights"       to="/insights"     icon="bulb"              label="Insights" />
         <NavItem v-if="g.reports"        to="/reports"      icon="report"            label="Reports" />
+        <NavItem                          to="/morning-brief" icon="sun"               label="Morning Brief" />
         <NavItem v-if="g.exports"        to="/exports"      icon="download"          label="Exports" />
         <NavItem v-if="g.ai_config"      to="/ai-config"    icon="settings"          label="AI Config"
           badge="Admin" badge-variant="gold" />
@@ -61,6 +62,10 @@
 
       <NavGroup v-if="g.client_portal" label="Client Portal">
         <NavItem to="/portal" icon="door-enter" label="Portal View" />
+      </NavGroup>
+
+      <NavGroup label="Workflow">
+        <NavItem to="/approvals" icon="checks" label="Approval Queue" />
       </NavGroup>
 
       <NavGroup label="Voice">

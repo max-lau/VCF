@@ -32,6 +32,8 @@ const AiConfigView       = () => import('@/views/ai-config/AiConfigView.vue')
 const SuperAdminMonitorView = () => import('@/views/monitor/SuperAdminMonitorView.vue')
 const ClientPortalView   = () => import('@/views/portal/ClientPortalView.vue')
 const VoiceShortcutsView  = () => import('@/views/voice/VoiceShortcutsView.vue')
+const MorningBriefView    = () => import('@/views/brief/MorningBriefView.vue')
+const ApprovalQueueView   = () => import('@/views/approvals/ApprovalQueueView.vue')
 const ClientPortalAccess  = () => import('@/views/portal/ClientPortalAccess.vue')
 const LegalResearchView  = () => import('@/views/research/LegalResearchView.vue')
 const RiskView           = () => import('@/views/risk/RiskView.vue')
@@ -234,6 +236,16 @@ const routes = [
         path: 'voice-shortcuts',
         name: 'voice_shortcuts',
         component: VoiceShortcutsView,
+      },
+      {
+        path: 'morning-brief',
+        name: 'morning_brief',
+        component: MorningBriefView,
+      },
+      {
+        path: 'approvals',
+        name: 'approval_queue',
+        component: ApprovalQueueView,
       },
       // ── Firm Admin ────────────────────────────────────────────────
         { path: 'admin', component: AdminView },
