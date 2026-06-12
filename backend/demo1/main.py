@@ -73,7 +73,8 @@ from backend.demo1.routers.misc_routers import (
 from backend.demo1.kanban_router import router as kanban_router
 from backend.demo1.drafting_router import router as drafting_router
 from backend.demo1.routers.approval_router import router as approval_router
-from backend.demo1.routers.morning_brief_router import router as brief_router, run_all_firms_brief
+from backend.demo1.routers.morning_brief_router import router as brief_router
+from backend.demo1.routers.docketing_router import router as docketing_router
 from backend.demo1.notifications_router import router as notifications_router
 
 load_dotenv()
@@ -184,6 +185,7 @@ app.include_router(drafting_router, prefix="/draft", tags=["drafting"])
 app.include_router(notifications_router, prefix="", tags=["notifications"])
 app.include_router(approval_router, prefix="/approvals", tags=["approvals"])
 app.include_router(brief_router, prefix="/brief", tags=["brief"])
+app.include_router(docketing_router, prefix="/docketing", tags=["docketing"])
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],

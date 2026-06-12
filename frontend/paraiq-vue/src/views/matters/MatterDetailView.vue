@@ -1,5 +1,5 @@
 <script setup>
-import { ref, computed, onMounted } from 'vue'
+import { ref, computed, onMounted, watch} from "vue"
 import { useRoute, useRouter } from 'vue-router'
 import axios from 'axios'
 import DiscoveryUpload from '@/components/DiscoveryUpload.vue'
@@ -54,6 +54,7 @@ const TABS = [
   { key: 'motions',        label: 'Motions',        icon: '⚖️'  },
   { key: 'calendar',       label: 'Calendar',       icon: '🗓'  },
   { key: 'binder',         label: 'Binder',         icon: '🗂️'  },
+  { key: 'docketing',      label: 'Docketing',      icon: '⚖️'  },
 ]
 
 const PIPELINE_COLORS = {
@@ -231,6 +232,133 @@ async function fetchIntelligence() {
 }
 
 onMounted(fetchMatter)
+
+// ── Docketing ─────────────────────────────────────────────────────────────
+const docketingChains      = ref([])
+const docketingLoading     = ref(false)
+const showServiceModal     = ref(false)
+const docketingJurisdiction = ref('SDNY')
+const docketingTriggerDate  = ref(new Date().toISOString().slice(0,10))
+const selectedServiceMethod = ref('personal')
+const docketingPreviews     = ref({})
+const docketingDisclaimer   = ref('')
+const docketingTriggering   = ref(false)
+
+const SERVICE_METHODS = [
+  { key: 'personal',    label: 'Personal Service',    warning: true  },
+  { key: 'substituted', label: 'Substituted Service', warning: false },
+  { key: 'mail',        label: 'Service by Mail',     warning: false },
+  { key: 'waiver',      label: 'Waiver of Service',   warning: false },
+]
+const JURISDICTIONS = ['SDNY','EDNY','NYSCEF','NJ_SUPERIOR','MA_SUPERIOR']
+
+async function fetchDocketing() {
+  if (!matter.value?.id) return
+  docketingLoading.value = true
+  try {
+    const res = await fetch(`/docketing/matter/${matter.value.id}`, {
+      headers: authHdr()
+    })
+    if (!res.ok) throw new Error(res.status)
+    const data = await res.json()
+    docketingChains.value = data.chains || []
+    docketingDisclaimer.value = data.disclaimer || ''
+  } catch (e) {
+    console.error('Docketing fetch failed:', e)
+  } finally {
+    docketingLoading.value = false
+  }
+}
+
+async function openDocketingModal() {
+  selectedServiceMethod.value = 'personal'
+  docketingPreviews.value = {}
+  await previewChain()
+  showServiceModal.value = true
+}
+
+async function previewChain() {
+  if (!docketingJurisdiction.value || !docketingTriggerDate.value) return
+  try {
+    const params = new URLSearchParams({
+      matter_id: matter.value.id,
+      jurisdiction: docketingJurisdiction.value,
+      trigger_date: docketingTriggerDate.value,
+      service_method: selectedServiceMethod.value,
+    })
+    const res = await fetch(`/docketing/preview?${params}`, {
+      headers: authHdr()
+    })
+    if (!res.ok) throw new Error(res.status)
+    const data = await res.json()
+    docketingPreviews.value = data.previews || {}
+    docketingDisclaimer.value = data.disclaimer || ''
+  } catch (e) {
+    console.error('Preview failed:', e)
+  }
+}
+
+async function triggerDocketing() {
+  if (!confirm('I confirm I have read and understood the disclaimer. Proceed to generate docketing chain?')) return
+  docketingTriggering.value = true
+  try {
+    const res = await fetch('/docketing/trigger', {
+      method: 'POST',
+      headers: { ...authHdr(), 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        matter_id: matter.value.id,
+        jurisdiction: docketingJurisdiction.value,
+        trigger_event: 'complaint_filed',
+        trigger_date: docketingTriggerDate.value,
+        service_method: selectedServiceMethod.value,
+      })
+    })
+    if (!res.ok) throw new Error(res.status)
+    showServiceModal.value = false
+    await fetchDocketing()
+  } catch (e) {
+    alert('Failed to generate chain: ' + e.message)
+  } finally {
+    docketingTriggering.value = false
+  }
+}
+
+async function confirmDocketingEvent(eventId, confirmedDate, note) {
+  const ack = confirm('I acknowledge: ' + docketingDisclaimer.value.slice(0, 120) + '... Confirm this deadline?')
+  if (!ack) return
+  try {
+    const res = await fetch(`/docketing/events/${eventId}/confirm`, {
+      method: 'POST',
+      headers: { ...authHdr(), 'Content-Type': 'application/json' },
+      body: JSON.stringify({ confirmed_date: confirmedDate || null, note: note || null, disclaimer_ack: true })
+    })
+    if (!res.ok) throw new Error(res.status)
+    await fetchDocketing()
+  } catch (e) {
+    alert('Confirm failed: ' + e.message)
+  }
+}
+
+function docketStatePill(state, postponed) {
+  if (postponed) return { label: 'POSTPONED', cls: 'dock-pill--modified dock-pill--postponed' }
+  const map = {
+    pending:             { label: 'PENDING',   cls: 'dock-pill--pending' },
+    confirmed:           { label: 'CONFIRMED', cls: 'dock-pill--confirmed' },
+    modified:            { label: 'MODIFIED',  cls: 'dock-pill--modified' },
+    overdue_unconfirmed: { label: 'OVERDUE!',  cls: 'dock-pill--overdue' },
+  }
+  return map[state] || { label: state, cls: '' }
+}
+
+function daysLapLabel(days) {
+  if (!days || days < 1) return ''
+  return `${days}d unconfirmed`
+}
+
+watch(() => activeTab.value, (tab) => {
+  if (tab === 'docketing') fetchDocketing()
+})
+
 </script>
 
 <template>
@@ -612,6 +740,134 @@ onMounted(fetchMatter)
         </div>
       </div>
 
+      <!-- ── Docketing ── -->
+      <div v-else-if="activeTab === 'docketing'" class="mod-pane">
+
+        <!-- Service Method Modal -->
+        <div v-if="showServiceModal" class="dock-modal-overlay">
+          <div class="dock-modal">
+            <div class="dock-modal__header">
+              <span class="dock-modal__title">⚖️ Start Docketing Chain</span>
+              <button class="dock-modal__close" @click="showServiceModal=false">✕</button>
+            </div>
+
+            <div class="dock-modal__row">
+              <label class="dock-modal__label">Jurisdiction</label>
+              <select v-model="docketingJurisdiction" class="piq-input" @change="previewChain">
+                <option v-for="j in JURISDICTIONS" :key="j" :value="j">{{ j.replace('_',' ') }}</option>
+              </select>
+            </div>
+
+            <div class="dock-modal__row">
+              <label class="dock-modal__label">Complaint Filed / Trigger Date</label>
+              <input type="date" v-model="docketingTriggerDate" class="piq-input" @change="previewChain" />
+            </div>
+
+            <div class="dock-modal__service-title">How was the complaint served?</div>
+            <div class="dock-modal__service-subtitle">Select service method to calculate answer deadline</div>
+
+            <div class="dock-modal__methods">
+              <div v-for="m in SERVICE_METHODS" :key="m.key"
+                class="dock-method-row"
+                :class="{ 'dock-method-row--shortest': m.warning, 'dock-method-row--selected': selectedServiceMethod === m.key }"
+                @click="selectedServiceMethod = m.key">
+                <div class="dock-method-row__check">
+                  <input type="radio" :value="m.key" v-model="selectedServiceMethod"
+                    :class="m.warning ? 'dock-radio--large' : 'dock-radio--normal'" />
+                </div>
+                <div class="dock-method-row__body">
+                  <span class="dock-method-row__label" :class="{ 'dock-method-row__label--bold': m.warning }">
+                    {{ m.label }}
+                    <span v-if="m.warning" class="dock-shortest-tag">SHORTEST DEADLINE</span>
+                  </span>
+                  <span class="dock-method-row__date">
+                    Answer due: <strong>{{ docketingPreviews[m.key]?.[0]?.calculated_date || '…' }}</strong>
+                    <span v-if="docketingPreviews[m.key]?.[0]?.is_business_day_adj" class="dock-rolled-note">*rolled</span>
+                  </span>
+                </div>
+              </div>
+            </div>
+
+            <div v-if="selectedServiceMethod !== 'personal'" class="dock-non-shortest-warn">
+              ⚠ You are selecting a longer deadline. Confirm you have independently verified the service method.
+            </div>
+
+            <div class="dock-disclaimer">
+              ⚠ {{ docketingDisclaimer }}
+            </div>
+
+            <div class="dock-modal__footer">
+              <button class="piq-btn piq-btn--ghost" @click="showServiceModal=false">Cancel</button>
+              <button class="piq-btn piq-btn--primary" @click="triggerDocketing" :disabled="docketingTriggering">
+                {{ docketingTriggering ? 'Generating…' : 'Confirm & Generate Chain' }}
+              </button>
+            </div>
+          </div>
+        </div>
+
+        <!-- Chain view -->
+        <div class="tab-toolbar">
+          <span class="dim sm">{{ docketingChains.length }} chain{{ docketingChains.length !== 1 ? 's' : '' }}</span>
+          <button class="btn-gold sm" @click="openDocketingModal">+ Start Docketing Chain</button>
+        </div>
+
+        <div v-if="docketingLoading" class="state-msg">Loading…</div>
+        <div v-else-if="!docketingChains.length" class="empty-tab">
+          <div class="empty-tab__icon">⚖️</div>
+          <div class="empty-tab__title">No docketing chains yet</div>
+          <div class="empty-tab__sub">Click "Start Docketing Chain" to auto-generate deadlines from court rules.</div>
+        </div>
+
+        <div v-else>
+          <div v-for="chain in docketingChains" :key="chain.id" class="dock-chain">
+            <div class="dock-chain__header">
+              <span class="dock-chain__juris">{{ chain.jurisdiction.replace('_',' ') }}</span>
+              <span class="dock-chain__trigger">{{ chain.trigger_event }} · {{ chain.trigger_date?.slice(0,10) }}</span>
+              <span class="dock-chain__service">Service: {{ chain.service_method }}</span>
+            </div>
+
+            <div class="dock-events">
+              <div v-for="ev in chain.events" :key="ev.id" class="dock-event"
+                :class="{ 'dock-event--court': ev.is_court_date }">
+                <div class="dock-event__left">
+                  <span class="dock-date-pill"
+                    :class="[
+                      ev.confirmation_state === 'pending'   ? 'dock-date-pill--pending' :
+                      ev.confirmation_state === 'confirmed' ? 'dock-date-pill--confirmed' :
+                      ev.confirmation_state === 'modified'  ? (ev.postponed ? 'dock-date-pill--postponed' : 'dock-date-pill--modified') :
+                      'dock-date-pill--overdue'
+                    ]">
+                    {{ (ev.confirmed_date || ev.calculated_date)?.slice(0,10) }}
+                  </span>
+                  <div class="dock-event__info">
+                    <span class="dock-event__title">{{ ev.title }}</span>
+                    <span v-if="ev.rule_reference" class="dock-event__rule">{{ ev.rule_reference }}</span>
+                    <span v-if="ev.is_business_day_adj" class="dock-rolled-note">{{ ev.business_day_note }}</span>
+                    <span v-if="ev.postponement_note" class="dock-postpone-note">📌 {{ ev.postponement_note }}</span>
+                  </div>
+                </div>
+                <div class="dock-event__right">
+                  <span class="dock-state-pill" :class="docketStatePill(ev.confirmation_state, ev.postponed).cls">
+                    {{ docketStatePill(ev.confirmation_state, ev.postponed).label }}
+                  </span>
+                  <span v-if="ev.confirmation_state === 'pending' && ev.days_unconfirmed > 0"
+                    class="dock-lap-counter">
+                    {{ daysLapLabel(ev.days_unconfirmed) }}
+                  </span>
+                  <button v-if="ev.confirmation_state === 'pending'"
+                    class="piq-btn piq-btn--success piq-btn--sm"
+                    @click="confirmDocketingEvent(ev.id, null, null)">
+                    ✓ Confirm
+                  </button>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <div class="dock-disclaimer dock-disclaimer--bottom">⚠ {{ docketingDisclaimer }}</div>
+        </div>
+      </div>
+
       <div v-else-if="activeTab === 'binder'" class="mod-pane">
         <div class="tab-toolbar">
           <span class="dim sm">{{ binderItems.length }} item{{ binderItems.length !== 1 ? 's' : '' }}</span>
@@ -890,4 +1146,63 @@ onMounted(fetchMatter)
 .score-pill--high      { background: #1a3a1a; color: #7ec87e; }
 .score-pill--mid       { background: #3a2a1a; color: #c8a06e; }
 .empty-tab__sub        { font-size: 12px; color: var(--dim); margin-top: 4px; }
+
+/* ── Docketing ─────────────────────────────────────────── */
+.dock-modal-overlay    { position:fixed;inset:0;background:rgba(0,0,0,.85);z-index:1000;display:flex;align-items:center;justify-content:center;backdrop-filter:blur(4px); }
+.dock-modal            { background:var(--surface-card);border:1px solid var(--border);border-radius:12px;padding:24px;width:560px;max-width:95vw;max-height:90vh;overflow-y:auto; }
+.dock-modal__header    { display:flex;align-items:center;justify-content:space-between;margin-bottom:16px; }
+.dock-modal__title     { font-size:15px;font-weight:700;color:var(--text-primary); }
+.dock-modal__close     { background:none;border:none;color:var(--text-tertiary);cursor:pointer;font-size:16px; }
+.dock-modal__row       { display:flex;align-items:center;gap:12px;margin-bottom:12px; }
+.dock-modal__label     { font-size:12px;color:var(--text-tertiary);width:160px;flex-shrink:0; }
+.dock-modal__service-title   { font-size:13px;font-weight:600;color:var(--text-primary);margin:16px 0 4px; }
+.dock-modal__service-subtitle { font-size:12px;color:var(--text-tertiary);margin-bottom:10px; }
+.dock-modal__methods   { display:flex;flex-direction:column;gap:8px;margin-bottom:12px; }
+.dock-modal__footer    { display:flex;justify-content:flex-end;gap:10px;margin-top:16px;padding-top:12px;border-top:1px solid var(--border); }
+.dock-method-row       { display:flex;align-items:center;gap:12px;padding:10px 12px;border-radius:8px;border:1px solid var(--border);cursor:pointer;transition:background .15s; }
+.dock-method-row:hover { background:var(--surface-hover); }
+.dock-method-row--shortest  { background:rgba(16,185,129,.08);border-color:rgba(16,185,129,.3); }
+.dock-method-row--selected  { border-color:var(--accent); }
+.dock-method-row__check     { flex-shrink:0; }
+.dock-radio--large     { width:20px;height:20px;accent-color:#34d399; }
+.dock-radio--normal    { width:14px;height:14px; }
+.dock-method-row__body      { display:flex;flex-direction:column;gap:2px;flex:1; }
+.dock-method-row__label     { font-size:13px;color:var(--text-primary); }
+.dock-method-row__label--bold { font-weight:700;font-size:14px; }
+.dock-shortest-tag     { font-size:10px;font-weight:700;color:#f59e0b;margin-left:8px;letter-spacing:.04em; }
+.dock-method-row__date { font-size:12px;color:var(--text-secondary); }
+.dock-rolled-note      { font-size:11px;color:#f59e0b;margin-left:4px; }
+.dock-non-shortest-warn { background:rgba(245,158,11,.1);border:1px solid rgba(245,158,11,.3);border-radius:6px;padding:8px 12px;font-size:12px;color:#fbbf24;margin-bottom:10px; }
+.dock-disclaimer       { background:rgba(239,68,68,.07);border:1px solid rgba(239,68,68,.2);border-radius:6px;padding:10px 12px;font-size:11px;color:#fca5a5;line-height:1.6; }
+.dock-disclaimer--bottom { margin-top:16px; }
+.dock-chain            { margin-bottom:20px;border:1px solid var(--border);border-radius:10px;overflow:hidden; }
+.dock-chain__header    { display:flex;align-items:center;gap:12px;padding:10px 14px;background:var(--surface-hover);font-size:12px; }
+.dock-chain__juris     { font-weight:700;color:var(--text-primary); }
+.dock-chain__trigger   { color:var(--text-secondary); }
+.dock-chain__service   { color:var(--text-tertiary);margin-left:auto; }
+.dock-events           { display:flex;flex-direction:column; }
+.dock-event            { display:flex;align-items:flex-start;justify-content:space-between;gap:12px;padding:10px 14px;border-top:1px solid var(--border);font-size:13px; }
+.dock-event--court     { background:rgba(99,102,241,.04); }
+.dock-event:hover      { background:var(--surface-hover); }
+.dock-event__left      { display:flex;align-items:flex-start;gap:10px;flex:1;min-width:0; }
+.dock-event__right     { display:flex;align-items:center;gap:8px;flex-shrink:0; }
+.dock-event__info      { display:flex;flex-direction:column;gap:2px; }
+.dock-event__title     { color:var(--text-primary);font-weight:500; }
+.dock-event__rule      { font-size:11px;color:var(--text-tertiary); }
+.dock-postpone-note    { font-size:11px;color:#fbbf24; }
+.dock-lap-counter      { font-size:11px;color:#f87171;font-weight:600; }
+.dock-date-pill        { display:inline-block;padding:3px 10px;border-radius:12px;font-size:12px;font-weight:600;white-space:nowrap;flex-shrink:0; }
+.dock-date-pill--pending   { background:rgba(245,158,11,.15);color:#fbbf24;border:1px solid rgba(245,158,11,.3); }
+.dock-date-pill--confirmed { background:rgba(16,185,129,.15);color:#34d399;border:1px solid rgba(16,185,129,.3); }
+.dock-date-pill--modified  { background:rgba(16,185,129,.15);color:#34d399;border:2px solid #34d399; }
+.dock-date-pill--postponed { background:rgba(16,185,129,.15);color:#34d399;border:2px solid #34d399;outline:2px solid rgba(16,185,129,.3);outline-offset:1px; }
+.dock-date-pill--overdue   { background:rgba(239,68,68,.15);color:#f87171;border:1px solid rgba(239,68,68,.3);animation:pulse 1.5s infinite; }
+.dock-state-pill       { display:inline-block;padding:2px 8px;border-radius:8px;font-size:10px;font-weight:700;letter-spacing:.04em; }
+.dock-pill--pending    { background:rgba(245,158,11,.15);color:#fbbf24; }
+.dock-pill--confirmed  { background:rgba(16,185,129,.15);color:#34d399; }
+.dock-pill--modified   { background:rgba(16,185,129,.15);color:#34d399;border:2px solid #34d399; }
+.dock-pill--postponed  { background:rgba(16,185,129,.15);color:#34d399;border:2px solid #34d399;outline:2px solid rgba(16,185,129,.3);outline-offset:1px; }
+.dock-pill--overdue    { background:rgba(239,68,68,.15);color:#f87171; }
+@keyframes pulse { 0%,100%{opacity:1} 50%{opacity:.5} }
+
 </style>
