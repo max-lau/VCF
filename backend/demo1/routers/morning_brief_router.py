@@ -42,6 +42,7 @@ def generate_morning_brief(firm_id: str) -> dict:
         "matter_changes": [],
         "risk_snapshot":  None,
         "urgent_notifications": [],
+        "unconfirmed_docketing": [],
     }
 
     with get_conn("default") as conn:
@@ -143,6 +144,27 @@ def generate_morning_brief(firm_id: str) -> dict:
         except Exception as e:
             log.warning(f"[MorningBrief] Notifications error: {e}")
 
+        # 6. Unconfirmed docketing events
+        try:
+            dock_items = conn.execute("""
+                SELECT de.id, de.title, de.calculated_date, de.jurisdiction,
+                       de.rule_reference, de.event_type, de.matter_id,
+                       EXTRACT(DAY FROM NOW() - de.created_at)::INTEGER AS days_unconfirmed,
+                       c.case_number, c.client_name
+                FROM docketing_events de
+                JOIN cases c ON c.id = de.matter_id
+                WHERE de.firm_id=%s AND de.confirmation_state='pending'
+                ORDER BY de.calculated_date ASC
+                LIMIT 10
+            """, (firm_id,)).fetchall()
+            for d in dock_items:
+                d = dict(d)
+                if d.get("calculated_date") and hasattr(d["calculated_date"], "isoformat"):
+                    d["calculated_date"] = d["calculated_date"].isoformat()
+                brief["unconfirmed_docketing"].append(d)
+        except Exception as e:
+            log.warning(f"[MorningBrief] Docketing events error: {e}")
+
     # Build plain-text summary for voice/email
     lines = [f"Good morning. Here is your ParaIQ brief for {today.strftime('%A, %B %d')}."]
 
@@ -161,11 +183,19 @@ def generate_morning_brief(firm_id: str) -> dict:
         for c in brief["matter_changes"][:3]:
             lines.append(f"  - {c['client_name']} ({c['case_number']}) — now {c['status']}")
 
+    if brief["unconfirmed_docketing"]:
+        lines.append(f"\n⚠ {len(brief['unconfirmed_docketing'])} docketing deadline{'s' if len(brief['unconfirmed_docketing']) != 1 else ''} awaiting attorney confirmation:")
+        for d in brief["unconfirmed_docketing"][:5]:
+            days = d.get("days_unconfirmed") or 0
+            lap = f" — {days}d unconfirmed" if days > 0 else ""
+            lines.append(f"  - {d['title']} ({d['jurisdiction']}) · {d['calculated_date']}{lap}")
+            lines.append(f"    Confirm at: https://app.para-iq.com/matters/{d.get('matter_id', '')}")
+
     if brief["risk_snapshot"]:
         r = brief["risk_snapshot"]
         lines.append(f"\nSystem status: {r['risk_level'].upper()} — {r['summary']}")
 
-    if not brief["deadlines"] and not brief["approval_queue"]:
+    if not brief["deadlines"] and not brief["approval_queue"] and not brief["unconfirmed_docketing"]:
         lines.append("\nNo urgent items today. Clear schedule.")
 
     summary_text = "\n".join(lines)
@@ -186,7 +216,7 @@ def generate_morning_brief(firm_id: str) -> dict:
     except Exception as e:
         log.error(f"[MorningBrief] Save failed: {e}")
 
-    log.info(f"[MorningBrief] Generated for {firm_id}: {len(brief['deadlines'])} deadlines, {len(brief['approval_queue'])} approvals")
+    log.info(f"[MorningBrief] Generated for {firm_id}: {len(brief['deadlines'])} deadlines, {len(brief['approval_queue'])} approvals, {len(brief['unconfirmed_docketing'])} unconfirmed docketing")
     return {"brief": brief, "summary_text": summary_text}
 
 

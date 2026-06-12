@@ -69,6 +69,26 @@
           </div>
         </div>
       </div>
+      <div class="brief-card brief-card--warn" v-if="unconfirmedDock.length">
+        <div class="brief-card__header">
+          <span class="brief-card__title">⚠️ Docketing — Awaiting Confirmation</span>
+          <span class="brief-badge brief-badge--warn">{{ unconfirmedDock.length }}</span>
+        </div>
+        <div class="brief-list">
+          <div v-for="d in unconfirmedDock" :key="d.id" class="brief-item">
+            <div class="brief-item__left">
+              <span class="brief-type-chip">{{ d.jurisdiction }}</span>
+              <div style="display:flex;flex-direction:column;gap:2px">
+                <span class="brief-item__title">{{ d.title }}</span>
+                <span class="brief-item__meta">{{ d.calculated_date?.slice(0,10) }} · {{ d.rule_reference }}</span>
+                <span v-if="d.days_unconfirmed > 0" style="font-size:11px;color:#f87171;font-weight:600">{{ d.days_unconfirmed }}d unconfirmed</span>
+              </div>
+            </div>
+            <a :href="`/matters/${d.matter_id}`" class="brief-item__action">Confirm →</a>
+          </div>
+        </div>
+      </div>
+
       <div class="brief-card" v-if="urgentNotifs.length">
         <div class="brief-card__header">
           <span class="brief-card__title">🔔 Urgent Notifications</span>
@@ -100,7 +120,8 @@ const deadlines     = computed(() => brief.value?.deadlines || [])
 const approvals     = computed(() => brief.value?.approval_queue || [])
 const riskSnapshot  = computed(() => brief.value?.risk_snapshot || null)
 const matterChanges = computed(() => brief.value?.matter_changes || [])
-const urgentNotifs  = computed(() => brief.value?.urgent_notifications || [])
+const urgentNotifs      = computed(() => brief.value?.urgent_notifications || [])
+const unconfirmedDock   = computed(() => brief.value?.unconfirmed_docketing || [])
 const briefDate     = computed(() => {
   if (!brief.value?.generated_at) return ""
   return new Date(brief.value.generated_at).toLocaleDateString("en-US", { weekday: "long", month: "long", day: "numeric" })
@@ -167,6 +188,7 @@ onMounted(fetchBrief)
 .brief-badge--warning { background: rgba(245,158,11,.15); color: #fbbf24; }
 .brief-badge--critical { background: rgba(239,68,68,.15); color: #f87171; }
 .brief-badge--low     { background: rgba(16,185,129,.15); color: #34d399; }
+.brief-card--warn     { border-color: rgba(245,158,11,.4); }
 .brief-urgency        { font-size: 11px; font-weight: 600; text-transform: uppercase; padding: 1px 6px; border-radius: 8px; white-space: nowrap; }
 .urgency--today       { background: rgba(239,68,68,.15); color: #f87171; }
 .urgency--tomorrow    { background: rgba(245,158,11,.15); color: #fbbf24; }
