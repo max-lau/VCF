@@ -1,5 +1,5 @@
 <script setup>
-import { ref, computed, onMounted, watch} from "vue"
+import { ref, computed, onMounted, watch, onUnmounted} from "vue"
 import { useRoute, useRouter } from 'vue-router'
 import axios from 'axios'
 import DiscoveryUpload from '@/components/DiscoveryUpload.vue'
@@ -357,6 +357,63 @@ function daysLapLabel(days) {
 
 watch(() => activeTab.value, (tab) => {
   if (tab === 'docketing') fetchDocketing()
+})
+
+
+// ── Passive Time Capture — Heartbeat ─────────────────────────────────────
+let _heartbeatInterval = null
+let _currentActivityType = 'viewing'
+
+function _sendHeartbeat() {
+  if (!matter.value?.id) return
+  fetch('/time/heartbeat', {
+    method: 'POST',
+    headers: { ...authHdr(), 'Content-Type': 'application/json' },
+    body: JSON.stringify({ matter_id: matter.value.id, activity_type: _currentActivityType })
+  }).catch(() => {})
+}
+
+function _flushSessions() {
+  if (!matter.value?.id) return
+  fetch(`/time/flush/${matter.value.id}`, {
+    method: 'POST',
+    headers: authHdr()
+  }).catch(() => {})
+}
+
+function _startHeartbeat() {
+  _stopHeartbeat()
+  _sendHeartbeat()
+  _heartbeatInterval = setInterval(_sendHeartbeat, 30000)
+}
+
+function _stopHeartbeat() {
+  if (_heartbeatInterval) {
+    clearInterval(_heartbeatInterval)
+    _heartbeatInterval = null
+  }
+}
+
+// Update activity type based on active tab
+watch(activeTab, (tab) => {
+  const map = {
+    drafting:       'drafting',
+    documents:      'reviewing',
+    discovery:      'research',
+    research:       'research',
+    correspondence: 'correspondence',
+    binder:         'reviewing',
+  }
+  _currentActivityType = map[tab] || 'viewing'
+})
+
+onMounted(() => {
+  _startHeartbeat()
+})
+
+onUnmounted(() => {
+  _stopHeartbeat()
+  _flushSessions()
 })
 
 </script>

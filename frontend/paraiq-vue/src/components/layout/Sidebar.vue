@@ -65,7 +65,8 @@
       </NavGroup>
 
       <NavGroup label="Workflow">
-        <NavItem to="/approvals" icon="checks" label="Approval Queue" />
+        <NavItem to="/approvals"    icon="checks"   label="Approval Queue" />
+        <NavItem to="/time-capture" icon="clock"    label="Time Capture" />
       </NavGroup>
 
       <NavGroup label="Voice">

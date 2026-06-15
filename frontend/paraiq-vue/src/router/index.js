@@ -33,6 +33,7 @@ const SuperAdminMonitorView = () => import('@/views/monitor/SuperAdminMonitorVie
 const ClientPortalView   = () => import('@/views/portal/ClientPortalView.vue')
 const VoiceShortcutsView  = () => import('@/views/voice/VoiceShortcutsView.vue')
 const MorningBriefView    = () => import('@/views/brief/MorningBriefView.vue')
+const TimeCaptureView     = () => import('@/views/time/TimeCaptureView.vue')
 const ApprovalQueueView   = () => import('@/views/approvals/ApprovalQueueView.vue')
 const ClientPortalAccess  = () => import('@/views/portal/ClientPortalAccess.vue')
 const LegalResearchView  = () => import('@/views/research/LegalResearchView.vue')
@@ -241,6 +242,11 @@ const routes = [
         path: 'morning-brief',
         name: 'morning_brief',
         component: MorningBriefView,
+      },
+      {
+        path: 'time-capture',
+        name: 'time_capture',
+        component: TimeCaptureView,
       },
       {
         path: 'approvals',
