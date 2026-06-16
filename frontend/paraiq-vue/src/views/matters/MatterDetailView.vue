@@ -55,6 +55,7 @@ const TABS = [
   { key: 'calendar',       label: 'Calendar',       icon: '🗓'  },
   { key: 'binder',         label: 'Binder',         icon: '🗂️'  },
   { key: 'docketing',      label: 'Docketing',      icon: '⚖️'  },
+  { key: 'billing',        label: 'Billing',        icon: '💳'  },
 ]
 
 const PIPELINE_COLORS = {
@@ -414,6 +415,49 @@ onMounted(() => {
 onUnmounted(() => {
   _stopHeartbeat()
   _flushSessions()
+})
+
+
+// ── Billing Ledger ────────────────────────────────────────────────────────
+const billingLedger  = ref(null)
+const billingLoading = ref(false)
+
+async function fetchBillingLedger() {
+  if (!matter.value?.id) return
+  billingLoading.value = true
+  try {
+    const res = await fetch(`/billing/matter/${matter.value.id}/ledger`, {
+      headers: authHdr()
+    })
+    if (!res.ok) throw new Error(res.status)
+    billingLedger.value = await res.json()
+  } catch(e) {
+    console.error('Billing ledger fetch failed:', e)
+  } finally {
+    billingLoading.value = false
+  }
+}
+
+async function downloadInvoicePdf(invoiceId, invoiceNumber) {
+  const res = await fetch(`/billing/invoices/${invoiceId}/pdf`, { headers: authHdr() })
+  if (!res.ok) return alert('PDF generation failed')
+  const blob = await res.blob()
+  const url  = URL.createObjectURL(blob)
+  const a    = document.createElement('a')
+  a.href = url; a.download = `invoice_${invoiceNumber}.pdf`; a.click()
+  URL.revokeObjectURL(url)
+}
+
+async function previewInvoicePdf(invoiceId) {
+  const res = await fetch(`/billing/invoices/${invoiceId}/pdf?inline=true`, { headers: authHdr() })
+  if (!res.ok) return alert('PDF generation failed')
+  const blob = await res.blob()
+  const url  = URL.createObjectURL(blob)
+  window.open(url, '_blank')
+}
+
+watch(() => activeTab.value, (tab) => {
+  if (tab === 'billing') fetchBillingLedger()
 })
 
 </script>
@@ -925,6 +969,122 @@ onUnmounted(() => {
         </div>
       </div>
 
+      <!-- ── Billing Ledger ── -->
+      <div v-else-if="activeTab === 'billing'" class="mod-pane">
+        <div v-if="billingLoading" class="state-msg">Loading billing ledger…</div>
+        <div v-else-if="!billingLedger" class="empty-tab">
+          <div class="empty-tab__icon">💳</div>
+          <div class="empty-tab__title">No billing data yet</div>
+        </div>
+        <div v-else>
+
+          <!-- Summary bar -->
+          <div class="bl-ledger-summary">
+            <div class="bl-ledger-stat">
+              <span class="bl-ledger-stat__label">Total Billed</span>
+              <span class="bl-ledger-stat__value">${{ billingLedger.total_billed?.toFixed(2) }}</span>
+            </div>
+            <div class="bl-ledger-stat">
+              <span class="bl-ledger-stat__label">Total Paid</span>
+              <span class="bl-ledger-stat__value bl-ledger-stat__value--paid">${{ billingLedger.total_paid?.toFixed(2) }}</span>
+            </div>
+            <div class="bl-ledger-stat">
+              <span class="bl-ledger-stat__label">Balance Due</span>
+              <span class="bl-ledger-stat__value" :class="billingLedger.balance_due > 0 ? 'bl-ledger-stat__value--due' : 'bl-ledger-stat__value--paid'">
+                ${{ billingLedger.balance_due?.toFixed(2) }}
+              </span>
+            </div>
+            <div v-if="billingLedger.unbilled_total > 0" class="bl-ledger-stat">
+              <span class="bl-ledger-stat__label">Unbilled Time</span>
+              <span class="bl-ledger-stat__value bl-ledger-stat__value--warn">${{ billingLedger.unbilled_total?.toFixed(2) }}</span>
+            </div>
+          </div>
+
+          <!-- Unbilled entries warning -->
+          <div v-if="billingLedger.unbilled_entries?.length" class="bl-unbilled-warn">
+            ⚠ {{ billingLedger.unbilled_entries.length }} certified time
+            {{ billingLedger.unbilled_entries.length === 1 ? 'entry' : 'entries' }}
+            (${{ billingLedger.unbilled_total?.toFixed(2) }}) not yet invoiced.
+            <a href="/client-billing" class="bl-link">Go to Client Billing →</a>
+          </div>
+
+          <!-- Invoice cards -->
+          <div v-if="!billingLedger.invoices?.length" class="empty-tab" style="padding:16px 0">
+            <div class="empty-tab__icon">📄</div>
+            <div class="empty-tab__title">No invoices yet</div>
+            <div class="empty-tab__sub">Generate invoices from the <a href="/client-billing" class="bl-link">Client Billing Dashboard</a></div>
+          </div>
+
+          <div v-for="inv in billingLedger.invoices" :key="inv.id" class="bl-invoice-card">
+            <!-- Invoice header -->
+            <div class="bl-invoice-card__header">
+              <div class="bl-invoice-card__left">
+                <span class="bl-inv-number">{{ inv.invoice_number }}</span>
+                <span class="bl-inv-status" :class="`bl-inv-status--${inv.status}`">
+                  {{ inv.status?.replace(/_/g,' ').toUpperCase() }}
+                </span>
+                <span v-if="inv.running_balance > 0" class="bl-inv-balance">
+                  Balance: ${{ inv.running_balance?.toFixed(2) }}
+                </span>
+                <span v-else class="bl-inv-paid">✓ PAID</span>
+              </div>
+              <div class="bl-invoice-card__right">
+                <span class="bl-inv-meta">Issued: {{ inv.issue_date?.slice(0,10) }}</span>
+                <span class="bl-inv-meta">Due: {{ inv.due_date?.slice(0,10) }}</span>
+                <button class="bl-pdf-btn" @click="previewInvoicePdf(inv.id)" title="Preview PDF">👁 Preview</button>
+                <button class="bl-pdf-btn" @click="downloadInvoicePdf(inv.id, inv.invoice_number)" title="Download PDF">⬇ PDF</button>
+              </div>
+            </div>
+
+            <!-- Line items -->
+            <table class="piq-table bl-items-table">
+              <thead>
+                <tr><th>Date</th><th>Description</th><th>Activity</th><th>Hrs</th><th>Rate</th><th>Amount</th></tr>
+              </thead>
+              <tbody>
+                <tr v-for="item in inv.items" :key="item.id">
+                  <td class="dim nowrap">{{ item.date?.slice(0,10) }}</td>
+                  <td>{{ item.description }}</td>
+                  <td><span class="type-pill">{{ item.activity_type || '—' }}</span></td>
+                  <td class="dim">{{ parseFloat(item.quantity || 0).toFixed(2) }}</td>
+                  <td class="dim">${{ parseFloat(item.rate || 0).toFixed(2) }}/hr</td>
+                  <td class="dim">${{ parseFloat(item.amount || 0).toFixed(2) }}</td>
+                </tr>
+              </tbody>
+              <tfoot>
+                <tr class="bl-totals-row">
+                  <td colspan="4"></td>
+                  <td class="dim">Subtotal</td>
+                  <td>${{ parseFloat(inv.subtotal || 0).toFixed(2) }}</td>
+                </tr>
+                <tr v-if="parseFloat(inv.tax_amount) > 0" class="bl-totals-row">
+                  <td colspan="4"></td>
+                  <td class="dim">Tax</td>
+                  <td>${{ parseFloat(inv.tax_amount || 0).toFixed(2) }}</td>
+                </tr>
+                <tr class="bl-totals-row bl-totals-row--total">
+                  <td colspan="4"></td>
+                  <td>Total</td>
+                  <td>${{ parseFloat(inv.total || 0).toFixed(2) }}</td>
+                </tr>
+              </tfoot>
+            </table>
+
+            <!-- Payments -->
+            <div v-if="inv.payments?.length" class="bl-payments">
+              <div class="bl-payments__title">Payments Received</div>
+              <div v-for="pay in inv.payments" :key="pay.id" class="bl-payment-row">
+                <span class="dim">{{ pay.payment_date?.slice(0,10) }}</span>
+                <span class="dim">{{ pay.method }}</span>
+                <span class="dim">{{ pay.reference || '—' }}</span>
+                <span class="bl-payment-amt">+${{ parseFloat(pay.amount || 0).toFixed(2) }}</span>
+              </div>
+            </div>
+            <div v-else class="bl-no-payments">No payments recorded yet.</div>
+          </div>
+        </div>
+      </div>
+
       <div v-else-if="activeTab === 'binder'" class="mod-pane">
         <div class="tab-toolbar">
           <span class="dim sm">{{ binderItems.length }} item{{ binderItems.length !== 1 ? 's' : '' }}</span>
@@ -1261,5 +1421,45 @@ onUnmounted(() => {
 .dock-pill--postponed  { background:rgba(16,185,129,.15);color:#34d399;border:2px solid #34d399;outline:2px solid rgba(16,185,129,.3);outline-offset:1px; }
 .dock-pill--overdue    { background:rgba(239,68,68,.15);color:#f87171; }
 @keyframes pulse { 0%,100%{opacity:1} 50%{opacity:.5} }
+
+
+/* ── Billing Ledger Tab ───────────────────────────── */
+.bl-ledger-summary        { display:flex;gap:16px;flex-wrap:wrap;margin-bottom:14px;padding:12px 14px;background:var(--surface-hover);border-radius:8px; }
+.bl-ledger-stat           { display:flex;flex-direction:column;gap:2px; }
+.bl-ledger-stat__label    { font-size:11px;color:var(--text-tertiary);text-transform:uppercase;letter-spacing:.04em; }
+.bl-ledger-stat__value    { font-size:18px;font-weight:700;color:var(--text-primary); }
+.bl-ledger-stat__value--paid { color:#34d399; }
+.bl-ledger-stat__value--due  { color:#fbbf24; }
+.bl-ledger-stat__value--warn { color:#f59e0b; }
+.bl-unbilled-warn         { background:rgba(245,158,11,.1);border:1px solid rgba(245,158,11,.3);border-radius:6px;padding:8px 12px;font-size:12px;color:#fbbf24;margin-bottom:12px; }
+.bl-link                  { color:var(--accent);text-decoration:none;margin-left:6px; }
+.bl-invoice-card          { border:1px solid var(--border);border-radius:10px;overflow:hidden;margin-bottom:14px; }
+.bl-invoice-card__header  { display:flex;align-items:center;justify-content:space-between;gap:12px;padding:10px 14px;background:var(--surface-hover);flex-wrap:wrap; }
+.bl-invoice-card__left    { display:flex;align-items:center;gap:10px;flex-wrap:wrap; }
+.bl-invoice-card__right   { display:flex;align-items:center;gap:8px;flex-shrink:0; }
+.bl-inv-number            { font-size:13px;font-weight:700;color:var(--text-primary);font-family:monospace; }
+.bl-inv-status            { font-size:10px;font-weight:700;padding:2px 8px;border-radius:8px;text-transform:uppercase;letter-spacing:.04em; }
+.bl-inv-status--draft              { background:rgba(107,114,128,.15);color:#9ca3af; }
+.bl-inv-status--pending_certification { background:rgba(245,158,11,.15);color:#fbbf24; }
+.bl-inv-status--certified          { background:rgba(99,102,241,.15);color:#818cf8; }
+.bl-inv-status--sent               { background:rgba(59,130,246,.15);color:#60a5fa; }
+.bl-inv-status--viewed             { background:rgba(139,92,246,.15);color:#a78bfa; }
+.bl-inv-status--partially_paid     { background:rgba(16,185,129,.1);color:#34d399; }
+.bl-inv-status--paid               { background:rgba(16,185,129,.2);color:#34d399; }
+.bl-inv-status--overdue            { background:rgba(239,68,68,.15);color:#f87171; }
+.bl-inv-status--void               { background:rgba(107,114,128,.1);color:#6b7280; }
+.bl-inv-balance           { font-size:12px;color:#fbbf24;font-weight:600; }
+.bl-inv-paid              { font-size:12px;color:#34d399;font-weight:700; }
+.bl-inv-meta              { font-size:11px;color:var(--text-tertiary); }
+.bl-pdf-btn               { padding:3px 8px;font-size:11px;border-radius:5px;border:1px solid var(--border);background:var(--surface);color:var(--text-secondary);cursor:pointer; }
+.bl-pdf-btn:hover         { background:var(--surface-hover); }
+.bl-items-table           { margin:0; }
+.bl-totals-row td         { font-size:12px;color:var(--text-secondary); }
+.bl-totals-row--total td  { font-weight:700;color:var(--text-primary);border-top:1px solid var(--border); }
+.bl-payments              { padding:10px 14px;border-top:1px solid var(--border); }
+.bl-payments__title       { font-size:11px;color:var(--text-tertiary);text-transform:uppercase;letter-spacing:.04em;margin-bottom:6px; }
+.bl-payment-row           { display:flex;gap:16px;align-items:center;font-size:12px;padding:3px 0; }
+.bl-payment-amt           { color:#34d399;font-weight:700;margin-left:auto; }
+.bl-no-payments           { padding:8px 14px;font-size:12px;color:var(--text-tertiary);border-top:1px solid var(--border); }
 
 </style>

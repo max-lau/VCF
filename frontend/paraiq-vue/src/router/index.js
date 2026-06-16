@@ -57,6 +57,7 @@ const EnclaveView        = () => import('@/views/enclave/EnclaveManagementView.v
 const UsersView       = () => import('@/views/admin/UsersView.vue')
 const AdminView       = () => import('@/views/admin/AdminView.vue')
 const BillingView     = () => import('@/views/admin/BillingView.vue')
+const ClientBillingView = () => import('@/views/admin/BillingView.vue')
 
 const routes = [
   {
@@ -247,6 +248,11 @@ const routes = [
         path: 'time-capture',
         name: 'time_capture',
         component: TimeCaptureView,
+      },
+      {
+        path: 'client-billing',
+        name: 'client_billing',
+        component: ClientBillingView,
       },
       {
         path: 'approvals',

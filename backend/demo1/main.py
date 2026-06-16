@@ -76,6 +76,7 @@ from backend.demo1.routers.approval_router import router as approval_router
 from backend.demo1.routers.morning_brief_router import router as brief_router
 from backend.demo1.routers.docketing_router import router as docketing_router
 from backend.demo1.routers.time_router import router as time_router
+from backend.demo1.routers.billing_router import router as billing_router
 from backend.demo1.notifications_router import router as notifications_router
 
 load_dotenv()
@@ -188,6 +189,7 @@ app.include_router(approval_router, prefix="/approvals", tags=["approvals"])
 app.include_router(brief_router, prefix="/brief", tags=["brief"])
 app.include_router(docketing_router, prefix="/docketing", tags=["docketing"])
 app.include_router(time_router, prefix="/time", tags=["time"])
+app.include_router(billing_router, prefix="/billing", tags=["billing"])
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],

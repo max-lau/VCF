@@ -65,8 +65,9 @@
       </NavGroup>
 
       <NavGroup label="Workflow">
-        <NavItem to="/approvals"    icon="checks"   label="Approval Queue" />
-        <NavItem to="/time-capture" icon="clock"    label="Time Capture" />
+        <NavItem to="/approvals"      icon="checks"      label="Approval Queue" />
+        <NavItem to="/time-capture"   icon="clock"       label="Time Capture" />
+        <NavItem to="/client-billing" icon="credit-card" label="Client Billing" />
       </NavGroup>
 
       <NavGroup label="Voice">
@@ -82,7 +83,7 @@
 
 
       <NavGroup v-if="!isFirmAdmin && g.billing" label="Account">
-        <NavItem to="/admin/billing" icon="credit-card" label="Billing" />
+        <NavItem to="/admin/billing" icon="credit-card" label="SaaS Billing" />
       </NavGroup>
 
       <NavGroup v-if="role === 'paraiq_super'" label="Super Admin">

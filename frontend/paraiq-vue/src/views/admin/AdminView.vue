@@ -39,7 +39,7 @@ const TABS = [
   { id: 'roles',  label: 'Roles'     },
   { id: 'audit',  label: 'Audit Log' },
   { id: 'system',  label: 'System'   },
-  { id: 'billing', label: 'Billing'  },
+  { id: 'billing', label: 'SaaS Billing' },
 ]
 
 // ── Computed ──────────────────────────────────────────────────────────────────
