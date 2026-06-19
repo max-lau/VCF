@@ -1,11 +1,14 @@
 """
-Cross-document entity linking using FAISS vector similarity search.
+Cross-document entity linking.
+find_linked_entities: uses persisted ChromaDB vector store (swappable via VECTOR_BACKEND).
+link_documents_by_entity: uses in-memory FAISS for pairwise doc comparison (stateless, kept as-is).
 """
 import json
 import numpy as np
 import faiss
 from sentence_transformers import SentenceTransformer
 from backend.demo1.database import get_connection
+from backend.demo1.retrieval.factory import get_vector_store
 from typing import List, Dict
 
 _EMBEDDER = None
@@ -43,43 +46,42 @@ def get_all_entities() -> List[Dict]:
 
 def find_linked_entities(query_entity: str, top_k: int = 5,
                           threshold: float = 0.75) -> List[Dict]:
-    all_entities = get_all_entities()
-    if not all_entities:
+    """
+    Find entities semantically similar to query_entity across all documents.
+    Uses persisted ChromaDB index (or Pinecone if VECTOR_BACKEND=pinecone).
+    Replaces the previous pattern that rebuilt a FAISS index on every call.
+    """
+    embedder  = get_embedder()
+    store     = get_vector_store(collection="paraiq_entities")
+
+    if store.count() == 0:
         return []
 
-    texts      = [e["text"] for e in all_entities]
-    embedder   = get_embedder()
-    embeddings = embedder.encode(texts, convert_to_numpy=True)
-    embeddings = embeddings / np.linalg.norm(embeddings, axis=1, keepdims=True)
+    query_vec = embedder.encode([query_entity], convert_to_numpy=True)[0].tolist()
+    raw       = store.query(query_vec, top_k=top_k + 1)
 
-    dim   = embeddings.shape[1]
-    index = faiss.IndexFlatIP(dim)
-    index.add(embeddings.astype(np.float32))
-
-    query_vec = embedder.encode([query_entity], convert_to_numpy=True)
-    query_vec = query_vec / np.linalg.norm(query_vec, axis=1, keepdims=True)
-
-    scores, indices = index.search(query_vec.astype(np.float32), top_k + 1)
-
+    # ChromaDB cosine distance: 0 = identical, 2 = opposite
+    # Convert to similarity score: 1 - (distance / 2), filter by threshold
     results    = []
     seen_texts = set()
-    for score, idx in zip(scores[0], indices[0]):
-        if idx < 0 or float(score) < threshold:
+    for doc_id, distance, meta in raw:
+        similarity = 1.0 - (distance / 2.0)
+        if similarity < threshold:
             continue
-        ent = all_entities[idx]
-        if ent["text"].lower() == query_entity.lower():
+        preview = meta.get("preview", "")
+        if preview.lower() == query_entity.lower():
             continue
-        if ent["text"].lower() in seen_texts:
+        if preview.lower() in seen_texts:
             continue
-        seen_texts.add(ent["text"].lower())
+        seen_texts.add(preview.lower())
         results.append({
-            "entity":        ent["text"],
-            "type":          ent["type"],
-            "similarity":    round(float(score), 4),
-            "analysis_id":   ent["analysis_id"],
-            "doc_preview":   ent["doc_preview"],
-            "doc_sentiment": ent["doc_sentiment"],
-            "created_at":    ent["created_at"]
+            "entity":        preview[:80],
+            "type":          meta.get("type", "DOCUMENT"),
+            "similarity":    round(similarity, 4),
+            "analysis_id":   meta.get("analysis_id", ""),
+            "doc_preview":   preview,
+            "doc_sentiment": meta.get("sentiment", ""),
+            "created_at":    meta.get("created_at", "")
         })
     return results
 
