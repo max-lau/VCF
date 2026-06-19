@@ -1,0 +1,26 @@
+{
+  "timestamp": "2026-06-19T16:33:05.178900+00:00",
+  "overall": {
+    "faithfulness": 0.9311111111111111,
+    "answer_relevancy": 0.7611699469447399,
+    "context_precision": 0.9577777777501386,
+    "context_recall": 0.9333333333333333
+  },
+  "weakest": [
+    {
+      "question": "What did the court do with all charges in the dismissal case?",
+      "faithfulness": 0.5,
+      "context_precision": 0.999999999975
+    },
+    {
+      "question": "What type of document is marked as confidential attorney work product?",
+      "faithfulness": 0.6666666666666666,
+      "context_precision": 0.99999999995
+    },
+    {
+      "question": "What court issued the indictment in the Southern District of New York case?",
+      "faithfulness": 0.8,
+      "context_precision": 0.4166666666458333
+    }
+  ]
+}

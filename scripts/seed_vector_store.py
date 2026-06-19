@@ -46,7 +46,7 @@ def migrate(dry_run: bool, backend: str):
         metadata = {
             "analysis_id": str(row['id']),
             "sentiment":   str(row['sentiment'] or ''),
-            "preview":     text[:100],
+            "preview":     text[:300],
             "created_at":  str(row['created_at'] or '')
         }
         if dry_run:
