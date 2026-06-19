@@ -16,6 +16,8 @@ from typing import Optional
 
 import anthropic
 from backend.demo1.observability.tracer import trace_claude_call
+from backend.demo1.ab_testing.variants import assign_variant, build_brief_prompt, EXPERIMENT_ID
+from backend.demo1.ab_testing.logger import log_experiment_result
 from dotenv import load_dotenv
 
 load_dotenv()
@@ -272,44 +274,39 @@ def generate_case_brief(case_id: int) -> dict:
     today_str    = datetime.now().strftime("%B %d, %Y")
     risk_json    = json.dumps(avg_risk)
 
-    prompt = (
-        "You are a senior litigation paralegal at a U.S. law firm. "
-        "Generate a complete, structured case brief based on the data below.\n\n"
-        f"CASE: {case['case_number']} | {case['client_name']}\n"
-        f"Court: {case['court'] or 'Not specified'} | "
-        f"Judge: {case['judge'] or 'Not specified'}\n"
-        f"Filing Date: {case['filing_date'] or 'Not specified'} | "
-        f"Status: {case['status']}\n"
-        f"Aggregate Risk Score: {avg_risk}/10\n\n"
-        f"DOCUMENTS IN FILE ({len(docs)} total):\n{doc_context}\n\n"
-        f"KEY EVENTS:\n{events_ctx}\n\n"
-        f"COUNSEL NOTES:\n{notes_text}\n\n"
-        f"KEY ENTITIES: {entities_str}\n\n"
-        "RESPOND ONLY WITH VALID JSON. No markdown, no backticks.\n\n"
-        "{\n"
-        f'  "case_number": "{case["case_number"]}",\n'
-        f'  "matter": "{case["client_name"]}",\n'
-        f'  "generated_at": "{today_str}",\n'
-        f'  "risk_score": {risk_json},\n'
-        '  "sections": {\n'
-        '    "parties":      {"title": "I. PARTIES",                 "content": "2-3 sentences identifying all parties and their roles in the matter."},\n'
-        '    "facts":        {"title": "II. STATEMENT OF FACTS",     "content": "4-6 sentences summarizing the key facts based on available documents."},\n'
-        '    "legal_issues": {"title": "III. LEGAL ISSUES",          "content": "Numbered list of 2-4 primary legal issues presented by this matter."},\n'
-        '    "key_evidence": {"title": "IV. KEY EVIDENCE",           "content": "3-5 items of significant documentary evidence and their relevance."},\n'
-        '    "risk":         {"title": "V. RISK ASSESSMENT",         "content": "2-3 sentences on case strengths, weaknesses, and overall risk posture."},\n'
-        '    "next_steps":   {"title": "VI. RECOMMENDED NEXT STEPS", "content": "3-5 numbered concrete action items for counsel to pursue immediately."},\n'
-        '    "deadlines":    {"title": "VII. CRITICAL DEADLINES",    "content": "Any date-sensitive items extracted from documents, or No imminent deadlines identified."}\n'
-        '  }\n'
-        '}'
+    # A/B test: deterministic variant assignment per case_id
+    variant = assign_variant(case_id, EXPERIMENT_ID)
+    prompt  = build_brief_prompt(
+        variant=variant,
+        case=dict(case),
+        doc_context=doc_context,
+        events_ctx=events_ctx,
+        notes_text=notes_text,
+        entities_str=entities_str,
+        avg_risk=risk_json,
+        today_str=today_str,
     )
 
+    import time as _time
+    _t0 = _time.time()
     msg, _tid = trace_claude_call(
         client=_client,
-        name="matter_intelligence",
-        model="claude-sonnet-4-20250514",
+        name=f"matter_intelligence_{variant.value}",
+        model="claude-sonnet-4-6",
         max_tokens=2000,
         messages=[{"role": "user", "content": prompt}],
-        tags=["paraiq", "sonnet", "intelligence"]
+        tags=["paraiq", "sonnet", "intelligence", variant.value]
+    )
+    _latency_ms = (_time.time() - _t0) * 1000
+    log_experiment_result(
+        experiment_id=EXPERIMENT_ID,
+        case_id=case_id,
+        variant=variant,
+        input_tokens=msg.usage.input_tokens,
+        output_tokens=msg.usage.output_tokens,
+        latency_ms=_latency_ms,
+        output_text=msg.content[0].text,
+        trace_id=_tid,
     )
     raw = msg.content[0].text.strip()
     raw = re.sub(r'^```json\s*', '', raw)
