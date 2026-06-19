@@ -9,6 +9,7 @@ import faiss
 from sentence_transformers import SentenceTransformer
 from backend.demo1.database import get_connection
 import anthropic
+from backend.demo1.observability.tracer import trace_claude_call
 from dotenv import load_dotenv
 
 load_dotenv()
@@ -117,10 +118,13 @@ Rules: max 4 contradictions, shared_entities max 5.
 If no contradictions, return has_contradictions: false and empty array."""
 
     try:
-        message = client.messages.create(
+        message, _tid = trace_claude_call(
+            client=client,
+            name="cross_doc_contradiction",
             model="claude-haiku-4-5-20251001",
             max_tokens=1000,
-            messages=[{"role": "user", "content": prompt}]
+            messages=[{"role": "user", "content": prompt}],
+            tags=["paraiq", "haiku", "contradiction"]
         )
         raw    = message.content[0].text
         result = json.loads(clean_json(raw))

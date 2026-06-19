@@ -15,6 +15,7 @@ from datetime import datetime, date
 from typing import Optional
 
 import anthropic
+from backend.demo1.observability.tracer import trace_claude_call
 from dotenv import load_dotenv
 
 load_dotenv()
@@ -143,10 +144,13 @@ def _detect_contradictions(doc_a: dict, doc_b: dict) -> dict:
         "If none exist, return has_contradictions: false and empty array."
     )
     try:
-        msg = _client.messages.create(
+        msg, _tid = trace_claude_call(
+            client=_client,
+            name="contradiction_detection",
             model="claude-haiku-4-5-20251001",
             max_tokens=900,
-            messages=[{"role": "user", "content": prompt}]
+            messages=[{"role": "user", "content": prompt}],
+            tags=["paraiq", "haiku", "contradiction"]
         )
         raw = msg.content[0].text.strip()
         raw = re.sub(r'^```json\s*', '', raw)
@@ -299,10 +303,13 @@ def generate_case_brief(case_id: int) -> dict:
         '}'
     )
 
-    msg = _client.messages.create(
+    msg, _tid = trace_claude_call(
+        client=_client,
+        name="matter_intelligence",
         model="claude-sonnet-4-20250514",
         max_tokens=2000,
-        messages=[{"role": "user", "content": prompt}]
+        messages=[{"role": "user", "content": prompt}],
+        tags=["paraiq", "sonnet", "intelligence"]
     )
     raw = msg.content[0].text.strip()
     raw = re.sub(r'^```json\s*', '', raw)
