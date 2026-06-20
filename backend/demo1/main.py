@@ -85,9 +85,12 @@ from backend.demo1.pg import init_pool, make_tenant_middleware
 # ── API Key Auth Middleware ───────────────────────────────────────────────────
 
 PARAIQ_API_KEY = os.getenv("PARAIQ_API_KEY", "")
+if not PARAIQ_API_KEY:
+    raise SystemExit("FATAL: PARAIQ_API_KEY is not set. Refusing to start with open API.")
+
 
 EXEMPT_PATHS = {"/health", "/openapi.json", "/docs", "/redoc", "/favicon.ico", "/dashboard/deadlines", "/dashboard/stats"}
-EXEMPT_PREFIXES = ("/auth/", "/api/auth/", "/docs/", "/redoc/", "/cases/", "/research/", "/audit/", "/export/client-letter/", "/export/privilege-log/", "/export/timeline/", "/export/case/", "/export/brief/", "/dashboard/", "/client-portal/view/")
+EXEMPT_PREFIXES = ("/auth/", "/api/auth/", "/docs/", "/redoc/", "/client-portal/view/")
 STATIC_EXTS = (".html", ".js", ".css", ".ico", ".png", ".svg", ".woff", ".woff2", ".json")
 
 class APIKeyMiddleware(BaseHTTPMiddleware):
@@ -103,7 +106,14 @@ class APIKeyMiddleware(BaseHTTPMiddleware):
         # Check key OR valid Bearer JWT
         key = request.headers.get("X-API-Key", "")
         auth = request.headers.get("Authorization", "")
-        has_bearer = auth.startswith("Bearer ") and len(auth) > 10
+        has_bearer = False
+        if auth.startswith("Bearer "):
+            try:
+                import jwt as _jwt
+                _jwt.decode(auth[7:], os.getenv("JWT_SECRET_KEY", ""), algorithms=["HS256"])
+                has_bearer = True
+            except Exception:
+                has_bearer = False
         if not PARAIQ_API_KEY or (key != PARAIQ_API_KEY and not has_bearer):
             return JSONResponse(
                 status_code=401,
@@ -117,8 +127,6 @@ app = FastAPI(title="NLP Text Analyzer API")
 async def _startup():
     init_pool()
 
-app.add_middleware(APIKeyMiddleware)
-app.add_middleware(make_tenant_middleware())
 app.include_router(intake_router, prefix="/intake", tags=["OCR Intake"])
 app.include_router(model_router, prefix="/model", tags=["Fine-Tuned Model"])
 app.include_router(notify_router, prefix="/notify", tags=["Slack & Teams"])
@@ -128,7 +136,6 @@ app.include_router(webhook_router, prefix="/webhooks", tags=["Webhooks"])
 app.include_router(pdf_router, prefix="/export", tags=["PDF Export"])
 app.include_router(module_pdf_router, prefix="/export", tags=["PDF Export"])
 app.include_router(interrogation_export_router, tags=["Interrogation Export"])
-app.add_middleware(AuditMiddleware)
 app.include_router(audit_router, prefix="/audit", tags=["Audit Trail"])
 app.include_router(risk_router, prefix="/risk", tags=["Risk Scoring"])
 app.include_router(comparison_router, prefix="/documents", tags=["Document Comparison"])
@@ -190,11 +197,17 @@ app.include_router(brief_router, prefix="/brief", tags=["brief"])
 app.include_router(docketing_router, prefix="/docketing", tags=["docketing"])
 app.include_router(time_router, prefix="/time", tags=["time"])
 app.include_router(billing_router, prefix="/billing", tags=["billing"])
+# ── Middleware (added in reverse; Starlette executes outermost-first) ─────────
+# Execution order: CORS → APIKey → Tenant → Audit
+app.add_middleware(AuditMiddleware)
+app.add_middleware(make_tenant_middleware())
+app.add_middleware(APIKeyMiddleware)
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
-    allow_methods=["*"],
+    allow_origins=[os.getenv("ALLOWED_ORIGINS", "https://app.para-iq.com")],
+    allow_methods=["GET", "POST", "PUT", "DELETE", "OPTIONS", "PATCH"],
     allow_headers=["*"],
+    allow_credentials=True,
 )
 
 init_db()
