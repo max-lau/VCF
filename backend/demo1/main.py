@@ -88,6 +88,23 @@ PARAIQ_API_KEY = os.getenv("PARAIQ_API_KEY", "")
 if not PARAIQ_API_KEY:
     raise SystemExit("FATAL: PARAIQ_API_KEY is not set. Refusing to start with open API.")
 
+def save_work_product(endpoint: str, result: dict, firm_id: str, case_id=None, user_id=None, input_preview: str = ""):
+    """Persist AI work product to ai_work_product table. Non-fatal on failure."""
+    try:
+        from backend.demo1.pg import get_conn
+        import json as _json
+        with get_conn(firm_id) as conn:
+            conn.execute(
+                """INSERT INTO ai_work_product (firm_id, case_id, user_id, endpoint, input_preview, result_json)
+                   VALUES (%s, %s, %s, %s, %s, %s)""",
+                (firm_id, case_id, user_id, endpoint, input_preview[:500], _json.dumps(result))
+            )
+            conn.commit()
+    except Exception as _e:
+        import logging
+        logging.warning(f"save_work_product failed for {endpoint}: {_e}")
+
+
 
 EXEMPT_PATHS = {"/health", "/openapi.json", "/docs", "/redoc", "/favicon.ico", "/dashboard/deadlines", "/dashboard/stats"}
 EXEMPT_PREFIXES = ("/auth/", "/api/auth/", "/docs/", "/redoc/", "/client-portal/view/")
@@ -524,9 +541,10 @@ def summary_score_auto(body: TextInput):
 
 class InterrogationInput(BaseModel):
     transcript: str
+    case_id: int = None
 
 @app.post("/interrogate")
-def interrogate(body: InterrogationInput):
+def interrogate(body: InterrogationInput, request: Request):
     if not body.transcript or len(body.transcript.strip()) < 20:
         raise HTTPException(status_code=400, detail="Transcript too short")
     prompt = f"""You are a legal transcript analyst. Analyze the following interrogation or deposition transcript for contradictions and evasions.
@@ -563,6 +581,7 @@ Transcript:
         )
         raw = message.content[0].text
         cleaned = clean_json(raw)
+        save_work_product("/interrogate", {}, getattr(request.state, "firm_id", "default"), body.case_id, input_preview=body.transcript[:100])
         return json.loads(cleaned)
     except json.JSONDecodeError as e:
         raise HTTPException(status_code=500, detail=f"JSON parse error: {str(e)}")
@@ -573,10 +592,11 @@ Transcript:
 
 class LeaseDiffInput(BaseModel):
     doc_a: str
+    case_id: int = None
     doc_b: str
 
 @app.post("/documents/lease-diff")
-def lease_diff(body: LeaseDiffInput):
+def lease_diff(body: LeaseDiffInput, request: Request):
     da = body.doc_a[:4000]
     db = body.doc_b[:4000]
     prompt = "\n".join([
@@ -595,6 +615,7 @@ def lease_diff(body: LeaseDiffInput):
             max_tokens=1500,
             messages=[{"role": "user", "content": prompt}]
         )
+        save_work_product("/documents/lease-diff", {}, getattr(request.state, "firm_id", "default"), body.case_id, input_preview=body.doc_a[:100])
         return json.loads(clean_json(msg.content[0].text))
     except json.JSONDecodeError as e:
         raise HTTPException(status_code=500, detail="JSON parse error: " + str(e))
@@ -605,12 +626,13 @@ def lease_diff(body: LeaseDiffInput):
 
 class CredibilityInput(BaseModel):
     transcript: str
+    case_id: int = None
     witness_name: str = "Witness"
     role: str = "Witness"
     case_name: str = ""
 
 @app.post("/credibility/score")
-def credibility_score(body: CredibilityInput):
+def credibility_score(body: CredibilityInput, request: Request):
     t = body.transcript[:6000]
     w = body.witness_name
     lines = [
@@ -652,6 +674,7 @@ def credibility_score(body: CredibilityInput):
             messages=[{"role": "user", "content": prompt}]
         )
         raw = msg.content[0].text
+        save_work_product("/credibility/score", {}, getattr(request.state, "firm_id", "default"), body.case_id, input_preview=body.witness_name)
         return json.loads(clean_json(raw))
     except json.JSONDecodeError as e:
         raise HTTPException(status_code=500, detail="JSON parse error: " + str(e))
@@ -663,13 +686,14 @@ def credibility_score(body: CredibilityInput):
 
 class DepositionInput(BaseModel):
     transcript: str
+    case_id: int = None
     case_name: str = "Untitled Matter"
     deponent: str = "Witness"
     exam_counsel: str = ""
     depos_date: str = ""
 
 @app.post("/deposition/summarize")
-def deposition_summarize(body: DepositionInput):
+def deposition_summarize(body: DepositionInput, request: Request):
     t = body.transcript[:7000]
     lines = [
         "You are an expert legal analyst. Analyze this deposition transcript and extract a structured summary.",
@@ -727,7 +751,7 @@ def deposition_summarize(body: DepositionInput):
 # ── Feature 26: Legal Entity Extraction ──────────────────────────────────────
 
 @app.post("/entities/legal")
-def legal_entities(body: TextInput):
+def legal_entities(body: TextInput, request: Request):
     """Extract legal-specific entities: parties, amounts, dates, deadlines, jurisdictions."""
     if not body.text or len(body.text.strip()) < 20:
         raise HTTPException(status_code=400, detail="Text too short")
@@ -766,6 +790,7 @@ Document:
             messages=[{"role": "user", "content": prompt}]
         )
         raw = msg.content[0].text.strip().replace("```json","").replace("```","").strip()
+        save_work_product("/entities/legal", {}, getattr(request.state, "firm_id", "default"), getattr(body, "case_id", None), input_preview=body.text[:100])
         return {"success": True, **json.loads(raw)}
     except json.JSONDecodeError as e:
         raise HTTPException(status_code=500, detail=f"JSON parse error: {e}")
