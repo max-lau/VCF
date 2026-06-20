@@ -260,7 +260,7 @@ IMPORTANT: Your entire response must be ONLY a raw JSON object.
 Do NOT use markdown. Do NOT use backticks. Do NOT add any explanation.
 Start your response with {{ and end with }}
 
-Text: \"\"\"{text[:2000]}\"\"\"
+Text: \"\"\"{text[:2000] if len(text) <= 2000 else text[:2000] + "... [TRUNCATED: input was " + str(len(text)) + " chars; analysis covers opening 2000 only]"}\"\"\"
 
 Return exactly this structure:
 {{
@@ -421,7 +421,7 @@ IMPORTANT: Your entire response must be ONLY a raw JSON object.
 Do NOT use markdown. Do NOT use backticks. Do NOT add any explanation.
 Start your response with {{ and end with }}
 
-Text: \"\"\"{body.text[:3000]}\"\"\"
+Text: \"\"\"{body.text[:3000] if len(body.text) <= 3000 else body.text[:3000] + "... [TRUNCATED: input was " + str(len(body.text)) + " chars; timeline covers opening 3000 only]"}\"\"\"
 
 Return exactly this structure:
 {{
@@ -757,7 +757,7 @@ Return ONLY valid JSON, no markdown:
 }}
 
 Document:
-{body.text[:5000]}"""
+{body.text[:5000] if len(body.text) <= 5000 else body.text[:5000] + chr(10) + "[TRUNCATED: input was " + str(len(body.text)) + " chars; analysis covers opening 5000 only]"}"""
 
     try:
         msg = client.messages.create(
