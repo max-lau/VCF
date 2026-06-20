@@ -106,7 +106,7 @@ def save_work_product(endpoint: str, result: dict, firm_id: str, case_id=None, u
 
 
 
-EXEMPT_PATHS = {"/health", "/openapi.json", "/docs", "/redoc", "/favicon.ico", "/dashboard/deadlines", "/dashboard/stats"}
+EXEMPT_PATHS = {"/health", "/openapi.json", "/docs", "/redoc", "/favicon.ico"}
 EXEMPT_PREFIXES = ("/auth/", "/api/auth/", "/docs/", "/redoc/", "/client-portal/view/")
 STATIC_EXTS = (".html", ".js", ".css", ".ico", ".png", ".svg", ".woff", ".woff2", ".json")
 
@@ -141,8 +141,34 @@ class APIKeyMiddleware(BaseHTTPMiddleware):
 
 app = FastAPI(title="NLP Text Analyzer API")
 @app.on_event("startup")
-async def _startup():
+async def startup_event():
+    import asyncio, logging
+    # 1. DB pool — must be first
     init_pool()
+    # 2. Poller tasks — keep references so GC cannot collect them
+    from backend.demo1.email_poller import GmailPollerService
+    from backend.demo1.outlook_poller import OutlookPollerService
+    _poller_tasks: set = set()
+
+    def _make_poller(cls):
+        async def _run():
+            while True:
+                try:
+                    await cls().run()
+                except Exception as exc:
+                    logging.warning(f"[Poller] {cls.__name__} crashed: {exc}. Restarting in 60s.")
+                    await asyncio.sleep(60)
+        return _run
+
+    for cls in (GmailPollerService, OutlookPollerService):
+        task = asyncio.create_task(_make_poller(cls)())
+        _poller_tasks.add(task)
+        task.add_done_callback(_poller_tasks.discard)
+
+    app.state.poller_tasks = _poller_tasks
+    # 3. Scheduler
+    global _scheduler
+    _scheduler = start_scheduler(app)
 
 app.include_router(intake_router, prefix="/intake", tags=["OCR Intake"])
 app.include_router(model_router, prefix="/model", tags=["Fine-Tuned Model"])
@@ -181,16 +207,6 @@ app.include_router(monitor_router)
 
 # ── Risk watcher scheduler ─────────────────────────────────────────────────────
 _scheduler = None
-
-@app.on_event("startup")
-async def startup_event():
-    from backend.demo1.email_poller import GmailPollerService
-    import asyncio
-    asyncio.create_task(GmailPollerService().run())
-    from backend.demo1.outlook_poller import OutlookPollerService
-    asyncio.create_task(OutlookPollerService().run())
-    global _scheduler
-    _scheduler = start_scheduler(app)
 
 @app.on_event("shutdown")
 async def shutdown_event():
@@ -801,51 +817,67 @@ Document:
 # ── Home Dashboard Stats ──────────────────────────────────────────────────────
 
 @app.get("/dashboard/stats")
-def dashboard_stats():
+def dashboard_stats(request: Request):
     """Aggregate live stats for the home dashboard."""
-    import sqlite3
-    from datetime import date
-
+    from datetime import date, timezone, datetime
+    from backend.demo1.pg import get_conn
+    firm_id = getattr(request.state, "firm_id", "default")
     out = {
-        "modules_live": 21,
-        "languages": 13,
+        "modules_live": 0,
+        "languages": 0,
         "total_cases": 0,
         "open_cases": 0,
         "high_risk_cases": 0,
         "total_analyses": 0,
         "requests_today": 0,
     }
-
     try:
-        s = get_stats()
-        out["total_analyses"] = s.get("total_analyses", 0)
-    except Exception:
-        pass
+        with get_conn(firm_id) as conn:
+            # Real case counts from Supabase
+            r = conn.execute(
+                "SELECT COUNT(*) as n FROM cases WHERE deleted = false"
+            ).fetchone()
+            out["total_cases"] = r["n"] if r else 0
 
-    try:
-        con = sqlite3.connect("analyses.db")
-        cur = con.cursor()
-        cur.execute("SELECT COUNT(*) FROM cases")
-        out["total_cases"] = cur.fetchone()[0]
-        cur.execute("SELECT COUNT(*) FROM cases WHERE status = 'open'")
-        out["open_cases"] = cur.fetchone()[0]
-        cur.execute("SELECT COUNT(*) FROM cases WHERE risk_level = 'high'")
-        out["high_risk_cases"] = cur.fetchone()[0]
-        con.close()
-    except Exception:
-        pass
+            r = conn.execute(
+                "SELECT COUNT(*) as n FROM cases WHERE deleted = false AND status = 'open'"
+            ).fetchone()
+            out["open_cases"] = r["n"] if r else 0
 
-    today = date.today().isoformat()
-    for db_path in ["analyses.db", "backend/demo1/paraiq.db"]:
-        try:
-            con = sqlite3.connect(db_path)
-            cur = con.cursor()
-            cur.execute("SELECT COUNT(*) FROM audit_log WHERE timestamp LIKE ?", (today + "%",))
-            out["requests_today"] = cur.fetchone()[0]
-            con.close()
-            break
-        except Exception:
-            continue
+            r = conn.execute(
+                "SELECT COUNT(*) as n FROM cases WHERE deleted = false AND risk_level = 'high'"
+            ).fetchone()
+            out["high_risk_cases"] = r["n"] if r else 0
+
+            # Requests today from audit_log
+            today = date.today().isoformat()
+            r = conn.execute(
+                "SELECT COUNT(*) as n FROM audit_log WHERE timestamp::date = %s",
+                (today,)
+            ).fetchone()
+            out["requests_today"] = r["n"] if r else 0
+
+            # AI analyses persisted
+            r = conn.execute(
+                "SELECT COUNT(*) as n FROM ai_work_product"
+            ).fetchone()
+            out["total_analyses"] = r["n"] if r else 0
+
+            # Live module count from module_permissions
+            r = conn.execute(
+                "SELECT COUNT(DISTINCT module) as n FROM module_permissions"
+            ).fetchone()
+            out["modules_live"] = r["n"] if r else 0
+
+            # Languages: count distinct languages from case_documents
+            r = conn.execute(
+                "SELECT COUNT(DISTINCT language) as n FROM case_documents WHERE language IS NOT NULL"
+            ).fetchone()
+            out["languages"] = r["n"] if r else 0
+
+    except Exception as e:
+        import logging
+        logging.warning(f"dashboard_stats DB error: {e}")
 
     return out
 
