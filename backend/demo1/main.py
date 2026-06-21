@@ -542,7 +542,7 @@ async def analyze_batch_csv(body: BatchInput):
     )
 
 @app.post("/timeline")
-def timeline(body: TextInput):
+def timeline(body: TextInput, request: Request):
     if not body.text or len(body.text.strip()) < 20:
         raise HTTPException(status_code=400, detail="Text too short")
     prompt = f"""Extract a chronological timeline from this text.
@@ -587,12 +587,14 @@ Rules: extract ALL dates in chronological order, max 20 events."""
         )
         raw     = message.content[0].text
         cleaned = clean_json(raw)
-        return json.loads(cleaned)
+        _timeline_result = json.loads(cleaned)
+        save_work_product('/timeline', _timeline_result, getattr(request.state, 'firm_id', 'default'), getattr(body, 'case_id', None), input_preview=body.text[:100])
+        return _timeline_result
     except json.JSONDecodeError as e:
         raise HTTPException(status_code=500, detail=f"JSON parse error: {str(e)}")
     except Exception as e:
         import logging
-        logging.error(f'[{request.__class__.__name__ if hasattr(locals(), "request") else "endpoint"}] Unhandled error: {e}')
+        logging.error(f'[paraiq-api] Unhandled error: {e}')
         raise HTTPException(status_code=500, detail='An internal error occurred. Please try again.')
 
 # feedback endpoints → routers/feedback_router.py
@@ -707,7 +709,7 @@ Transcript:
         raise HTTPException(status_code=500, detail=f"JSON parse error: {str(e)}")
     except Exception as e:
         import logging
-        logging.error(f'[{request.__class__.__name__ if hasattr(locals(), "request") else "endpoint"}] Unhandled error: {e}')
+        logging.error(f'[paraiq-api] Unhandled error: {e}')
         raise HTTPException(status_code=500, detail='An internal error occurred. Please try again.')
 
 # -- Lease Clause Diff --
@@ -746,7 +748,7 @@ def lease_diff(body: LeaseDiffInput, request: Request):
         raise HTTPException(status_code=500, detail="JSON parse error: " + str(e))
     except Exception as e:
         import logging
-        logging.error(f'[{request.__class__.__name__ if hasattr(locals(), "request") else "endpoint"}] Unhandled error: {e}')
+        logging.error(f'[paraiq-api] Unhandled error: {e}')
         raise HTTPException(status_code=500, detail='An internal error occurred. Please try again.')
 
 # ── Witness Credibility Scorer ────────────────────────────────────────────────
@@ -810,7 +812,7 @@ def credibility_score(body: CredibilityInput, request: Request):
         raise HTTPException(status_code=500, detail="JSON parse error: " + str(e))
     except Exception as e:
         import logging
-        logging.error(f'[{request.__class__.__name__ if hasattr(locals(), "request") else "endpoint"}] Unhandled error: {e}')
+        logging.error(f'[paraiq-api] Unhandled error: {e}')
         raise HTTPException(status_code=500, detail='An internal error occurred. Please try again.')
 
 
@@ -874,12 +876,14 @@ def deposition_summarize(body: DepositionInput, request: Request):
             messages=[{"role": "user", "content": prompt}]
         )
         raw = msg.content[0].text
-        return json.loads(clean_json(raw))
+        _depo_result = json.loads(clean_json(raw))
+        save_work_product('/deposition/summarize', _depo_result, getattr(request.state, 'firm_id', 'default'), body.case_id, input_preview=body.deponent)
+        return _depo_result
     except json.JSONDecodeError as e:
         raise HTTPException(status_code=500, detail="JSON parse error: " + str(e))
     except Exception as e:
         import logging
-        logging.error(f'[{request.__class__.__name__ if hasattr(locals(), "request") else "endpoint"}] Unhandled error: {e}')
+        logging.error(f'[paraiq-api] Unhandled error: {e}')
         raise HTTPException(status_code=500, detail='An internal error occurred. Please try again.')
 
 
@@ -935,7 +939,7 @@ Document:
         raise HTTPException(status_code=500, detail=f"JSON parse error: {e}")
     except Exception as e:
         import logging
-        logging.error(f'[{request.__class__.__name__ if hasattr(locals(), "request") else "endpoint"}] Unhandled error: {e}')
+        logging.error(f'[paraiq-api] Unhandled error: {e}')
         raise HTTPException(status_code=500, detail='An internal error occurred. Please try again.')
 
 

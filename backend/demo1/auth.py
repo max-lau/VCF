@@ -23,7 +23,7 @@ from fastapi import APIRouter, HTTPException, Depends, Request
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from pydantic import BaseModel
 from typing import Optional
-from jose import jwt, JWTError
+import jwt
 from backend.demo1.pg import get_conn
 
 router = APIRouter()
@@ -195,8 +195,10 @@ def get_current_firm_id(credentials: HTTPAuthorizationCredentials = Depends(bear
 def decode_token(token: str) -> dict:
     try:
         return jwt.decode(token, SECRET_KEY, algorithms=[ALGORITHM])
-    except JWTError as e:
-        raise HTTPException(401, f"Invalid or expired token: {e}")
+    except jwt.ExpiredSignatureError:
+        raise HTTPException(401, "Token has expired")
+    except jwt.InvalidTokenError as e:
+        raise HTTPException(401, f"Invalid token: {e}")
 
 
 def get_current_user(credentials: HTTPAuthorizationCredentials = Depends(bearer)) -> dict:
