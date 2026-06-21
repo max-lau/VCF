@@ -15,8 +15,8 @@ def init_db() -> None:
     pass
 
 
-def save_analysis(text: str, result: dict) -> int:
-    with get_conn() as conn:
+def save_analysis(text: str, result: dict, firm_id: str = "default") -> int:
+    with get_conn(firm_id) as conn:
         cur = conn.execute("""
             INSERT INTO analyses
                 (created_at, text, word_count, sentiment, score, tone, entities, keywords, summary)
@@ -39,8 +39,8 @@ def save_analysis(text: str, result: dict) -> int:
 
 def save_feedback(analysis_id: int, text: str, predicted: str,
                   predicted_score: float, corrected: str,
-                  feedback_type: str, notes: str = "") -> int:
-    with get_conn() as conn:
+                  feedback_type: str, notes: str = "", firm_id: str = "default") -> int:
+    with get_conn(firm_id) as conn:
         cur = conn.execute("""
             INSERT INTO feedback
                 (created_at, analysis_id, text, predicted, predicted_score,
@@ -56,8 +56,8 @@ def save_feedback(analysis_id: int, text: str, predicted: str,
         return row["id"]
 
 
-def get_feedback_queue(reviewed: bool = False) -> list:
-    with get_conn() as conn:
+def get_feedback_queue(reviewed: bool = False, firm_id: str = "default") -> list:
+    with get_conn(firm_id) as conn:
         rows = conn.execute(
             "SELECT * FROM feedback WHERE reviewed = %s ORDER BY created_at DESC",
             (reviewed,)
@@ -65,13 +65,13 @@ def get_feedback_queue(reviewed: bool = False) -> list:
         return [dict(r) for r in rows]
 
 
-def mark_reviewed(feedback_id: int) -> None:
-    with get_conn() as conn:
+def mark_reviewed(feedback_id: int, firm_id: str = "default") -> None:
+    with get_conn(firm_id) as conn:
         conn.execute("UPDATE feedback SET reviewed = TRUE WHERE id = %s", (feedback_id,))
 
 
-def get_retraining_data() -> list:
-    with get_conn() as conn:
+def get_retraining_data(firm_id: str = "default") -> list:
+    with get_conn(firm_id) as conn:
         rows = conn.execute("""
             SELECT text, corrected AS label FROM feedback
             WHERE corrected IS NOT NULL AND corrected != ''
@@ -80,7 +80,7 @@ def get_retraining_data() -> list:
         return [dict(r) for r in rows]
 
 
-def query_analyses(sentiment=None, keyword=None, limit=20) -> list:
+def query_analyses(sentiment=None, keyword=None, limit=20, firm_id: str = "default") -> list:
     sql = "SELECT * FROM analyses WHERE TRUE"
     params = []
     if sentiment:
@@ -92,7 +92,7 @@ def query_analyses(sentiment=None, keyword=None, limit=20) -> list:
     sql += " ORDER BY created_at DESC LIMIT %s"
     params.append(limit)
 
-    with get_conn() as conn:
+    with get_conn(firm_id) as conn:
         rows = conn.execute(sql, params).fetchall()
 
     results = []
@@ -113,8 +113,8 @@ def query_analyses(sentiment=None, keyword=None, limit=20) -> list:
     return results
 
 
-def get_stats() -> dict:
-    with get_conn() as conn:
+def get_stats(firm_id: str = "default") -> dict:
+    with get_conn(firm_id) as conn:
         total = conn.execute("SELECT COUNT(*) AS n FROM analyses").fetchone()["n"]
         sentiment_rows = conn.execute("""
             SELECT sentiment, COUNT(*) AS count

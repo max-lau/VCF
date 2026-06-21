@@ -87,6 +87,11 @@ PARAIQ_API_KEY = os.getenv("PARAIQ_API_KEY", "")
 if not PARAIQ_API_KEY:
     raise SystemExit("FATAL: PARAIQ_API_KEY is not set. Refusing to start with open API.")
 
+JWT_SECRET_KEY = os.getenv("JWT_SECRET_KEY", "")
+if not JWT_SECRET_KEY:
+    raise SystemExit("FATAL: JWT_SECRET_KEY is not set. Refusing to start.")
+
+
 def save_work_product(endpoint: str, result: dict, firm_id: str, case_id=None, user_id=None, input_preview: str = ""):
     """Persist AI work product to ai_work_product table. Non-fatal on failure."""
     try:
@@ -374,7 +379,7 @@ def claude_with_retry(func, *args, max_retries=3, **kwargs):
                 raise
     raise HTTPException(status_code=503, detail="AI service temporarily unavailable. Please try again.")
 
-def run_analysis(text: str, label: str = "") -> dict:
+def run_analysis(text: str, label: str = "", firm_id: str = "default") -> dict:
     prompt = f"""Analyze this text for NLP tasks.
 
 IMPORTANT: Your entire response must be ONLY a raw JSON object.
@@ -416,7 +421,7 @@ Max 8 entities, max 10 keywords, max 3 tone items."""
         raw     = message.content[0].text
         cleaned = clean_json(raw)
         parsed  = json.loads(cleaned)
-        row_id  = save_analysis(text, parsed)
+        row_id  = save_analysis(text, parsed, firm_id=firm_id)
         parsed["id"]           = row_id
 	# Score entities with confidence and salience
         if parsed.get("entities"):
@@ -437,7 +442,8 @@ Max 8 entities, max 10 keywords, max 3 tone items."""
                 predicted_score = score,
                 corrected       = "",
                 feedback_type   = "low_confidence",
-                notes           = f"Auto-flagged: confidence {score:.2f} below threshold 0.70"
+                notes           = f"Auto-flagged: confidence {score:.2f} below threshold 0.70",
+                firm_id         = firm_id,
             )
             parsed["flagged"] = True
             parsed["flag_reason"] = f"Low confidence ({score:.0%}) — queued for human review"
@@ -458,10 +464,10 @@ def health():
     return {"status": "ok", "model": LLM_FAST}
 
 @app.post("/analyze")
-def analyze(body: TextInput):
+def analyze(body: TextInput, request: Request):
     if not body.text or len(body.text.strip()) < 20:
         raise HTTPException(status_code=400, detail="Text too short")
-    return run_analysis(body.text)
+    return run_analysis(body.text, firm_id=getattr(request.state, 'firm_id', 'default'))
 
 @app.post("/analyze/batch")
 async def analyze_batch(body: BatchInput):
@@ -593,11 +599,12 @@ Rules: extract ALL dates in chronological order, max 20 events."""
 
 @app.get("/history")
 def history(
+    request:   Request,
     sentiment: str = Query(None),
     keyword:   str = Query(None),
     limit:     int = Query(20)
 ):
-    results = query_analyses(sentiment=sentiment, keyword=keyword, limit=limit)
+    results = query_analyses(sentiment=sentiment, keyword=keyword, limit=limit, firm_id=getattr(request.state, 'firm_id', 'default'))
     return {"count": len(results), "results": results}
 
 # disambiguate + coreference → routers/nlp_router.py

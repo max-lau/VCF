@@ -157,7 +157,7 @@ def make_tenant_middleware():
     import jwt as pyjwt
     from starlette.middleware.base import BaseHTTPMiddleware
 
-    SECRET = os.environ.get("SECRET_KEY", "change_me")
+    SECRET = os.environ.get("JWT_SECRET_KEY", "nlp-portfolio-secret-change-in-production")
 
     class TenantMiddleware(BaseHTTPMiddleware):
         async def dispatch(self, request: Request, call_next):
@@ -169,9 +169,15 @@ def make_tenant_middleware():
                         auth[7:], SECRET, algorithms=["HS256"]
                     )
                     firm_id = payload.get("firm_id") or "default"
+                    request.state.role    = payload.get("role", "")
+                    request.state.user_id = payload.get("sub", None)
                 except Exception:
                     pass
             request.state.firm_id = firm_id
+            if not hasattr(request.state, "role"):
+                request.state.role = ""
+            if not hasattr(request.state, "user_id"):
+                request.state.user_id = None
             return await call_next(request)
 
     return TenantMiddleware

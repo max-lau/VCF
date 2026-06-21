@@ -70,7 +70,7 @@ class AuditMiddleware(BaseHTTPMiddleware):
             try:
                 from jose import jwt as _jwt, JWTError as _JWTError
                 import os as _os
-                _payload = _jwt.decode(auth_hdr[7:], _os.environ.get("JWT_SECRET_KEY","nlp-portfolio-secret-change-in-production"), algorithms=["HS256"], options={"verify_exp": False})
+                _payload = _jwt.decode(auth_hdr[7:], _os.environ.get("JWT_SECRET_KEY","nlp-portfolio-secret-change-in-production"), algorithms=["HS256"])
                 user_id  = int(_payload["sub"]) if _payload.get("sub") else None
             except Exception:
                 pass
@@ -110,6 +110,7 @@ class AuditMiddleware(BaseHTTPMiddleware):
 
 @router.get("/logs")
 def get_audit_logs(
+    request:  Request,
     endpoint: Optional[str] = None,
     method:   Optional[str] = None,
     status:   Optional[int] = None,
@@ -132,15 +133,17 @@ def get_audit_logs(
     sql += " ORDER BY id DESC LIMIT %s"
     params.append(limit)
 
-    with get_conn("default") as conn:
+    firm_id = getattr(request.state, "firm_id", "default")
+    with get_conn(firm_id) as conn:
         rows = conn.execute(sql, params).fetchall()
 
     return {"success": True, "count": len(rows), "logs": [dict(r) for r in rows]}
 
 
 @router.get("/stats")
-def audit_stats():
-    with get_conn("default") as conn:
+def audit_stats(request: Request):
+    firm_id = getattr(request.state, "firm_id", "default")
+    with get_conn(firm_id) as conn:
         total = conn.execute(
             "SELECT COUNT(*) AS n FROM audit_log"
         ).fetchone()["n"]
@@ -189,9 +192,15 @@ def audit_stats():
 
 
 @router.delete("/logs/clear")
-def clear_audit_logs():
-    with get_conn("default") as conn:
-        conn.execute("DELETE FROM audit_log")
+def clear_audit_logs(request: Request):
+    # Only paraiq_super may clear audit logs
+    role = getattr(request.state, "role", "")
+    if role != "paraiq_super":
+        from fastapi import HTTPException
+        raise HTTPException(status_code=403, detail="Only super admins may clear audit logs")
+    firm_id = getattr(request.state, "firm_id", "default")
+    with get_conn(firm_id) as conn:
+        conn.execute("DELETE FROM audit_log WHERE TRUE")
     return {"success": True, "message": "Audit log cleared"}
 
 

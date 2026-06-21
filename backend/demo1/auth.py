@@ -333,7 +333,7 @@ def login(body: LoginBody, request: Request):
         "email":            user["email"],
         "role":             perms["role"],
         "tier":             perms["tier"],
-        "firm_id":          token.split(".")[1] and __import__("base64").b64decode(token.split(".")[1] + "==").decode() and firm_id,
+        "firm_id":          firm_id,
         "permissions":      perms,
     }
 
