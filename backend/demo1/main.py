@@ -260,7 +260,44 @@ client = anthropic.Anthropic(api_key=os.getenv("ANTHROPIC_API_KEY"))
 
 LLM_FAST   = os.getenv("LLM_FAST",  "claude-haiku-4-5-20251001")  # high-volume tasks
 LLM_STRONG = os.getenv("LLM_STRONG", "claude-opus-4-5")            # deep analysis
-LLM_STRONG = os.getenv("LLM_STRONG", LLM_STRONG)            # deep analysis
+
+# ── Legal AI system prompt ────────────────────────────────────────────────────
+LEGAL_SYSTEM_PROMPT = (
+    "You are ParaIQ, an expert AI legal analyst assisting attorneys at boutique law firms. "
+    "You produce precise, structured legal analysis. "
+    "Always respond with valid JSON only — no markdown, no backticks, no preamble. "
+    "Be legally rigorous, cite relevant facts from the provided text, and flag uncertainty explicitly."
+)
+
+
+# ── Jurisdiction answer-window rules (days) ───────────────────────────────────
+JURISDICTION_ANSWER_DAYS = {
+    # Federal courts — FRCP Rule 12(a): 21 days
+    "sdny": 21, "s.d.n.y.": 21, "edny": 21, "e.d.n.y.": 21,
+    "sdca": 21, "ndca": 21, "cdca": 21, "edca": 21,
+    "ndil": 21, "sdil": 21, "ndtx": 21, "sdtx": 21,
+    "federal": 21, "frcp": 21, "u.s. district": 21,
+    # New York state — CPLR 320(a): 20 days personal, 30 days mail
+    "nyscef": 30, "new york supreme": 30, "ny sup": 30,
+    "new york civil": 30, "ny county": 30,
+    # New Jersey Superior — NJ R. 4:6-1: 35 days
+    "nj superior": 35, "new jersey superior": 35,
+    # Massachusetts Superior — Mass. R. Civ. P. 12(a): 20 days
+    "ma superior": 20, "massachusetts superior": 20,
+    # Default fallback
+    "default": 30,
+}
+
+def get_answer_days(court: str) -> tuple[int, str]:
+    """Return (days, rule_note) for the given court string."""
+    if not court:
+        return 30, "30-day default (court not specified)"
+    key = court.lower().strip()
+    for pattern, days in JURISDICTION_ANSWER_DAYS.items():
+        if pattern in key:
+            return days, f"{days}-day window ({court})"
+    return 30, f"30-day default (unrecognized court: {court})"
+
 
 executor = ThreadPoolExecutor(max_workers=3)
 
@@ -284,11 +321,58 @@ class ReviewInput(BaseModel):
     feedback_id: int
 
 def clean_json(raw: str) -> str:
+    """Extract the first valid JSON object or array from raw LLM output.
+    Robust against markdown fences, preamble text, and nested backticks in legal content."""
     raw = raw.strip()
-    raw = re.sub(r'^```json\s*', '', raw)
-    raw = re.sub(r'^```\s*', '', raw)
-    raw = re.sub(r'\s*```$', '', raw)
+    # Find the first { or [ and the matching closing bracket
+    for start_char, end_char in [('{', '}'), ('[', ']')]:
+        idx = raw.find(start_char)
+        if idx == -1:
+            continue
+        depth = 0
+        in_string = False
+        escape = False
+        for j in range(idx, len(raw)):
+            c = raw[j]
+            if escape:
+                escape = False
+                continue
+            if c == '\\' and in_string:
+                escape = True
+                continue
+            if c == '"' and not escape:
+                in_string = not in_string
+            if not in_string:
+                if c == start_char:
+                    depth += 1
+                elif c == end_char:
+                    depth -= 1
+                    if depth == 0:
+                        return raw[idx:j+1]
+    # Fallback: strip markdown fences only
+    raw = re.sub(r'^```(?:json)?\s*', '', raw, flags=re.MULTILINE)
+    raw = re.sub(r'\s*```$', '', raw, flags=re.MULTILINE)
     return raw.strip()
+
+def claude_with_retry(func, *args, max_retries=3, **kwargs):
+    """Call a Claude API function with exponential backoff on 429/500."""
+    import time
+    import logging
+    for attempt in range(max_retries):
+        try:
+            return func(*args, **kwargs)
+        except anthropic.RateLimitError:
+            wait = 2 ** attempt
+            logging.warning(f"Anthropic rate limit hit, retrying in {wait}s (attempt {attempt+1}/{max_retries})")
+            time.sleep(wait)
+        except anthropic.APIStatusError as e:
+            if e.status_code >= 500:
+                wait = 2 ** attempt
+                logging.warning(f"Anthropic server error {e.status_code}, retrying in {wait}s (attempt {attempt+1}/{max_retries})")
+                time.sleep(wait)
+            else:
+                raise
+    raise HTTPException(status_code=503, detail="AI service temporarily unavailable. Please try again.")
 
 def run_analysis(text: str, label: str = "") -> dict:
     prompt = f"""Analyze this text for NLP tasks.
@@ -322,9 +406,11 @@ Entity types: PERSON ORG GPE LOC DATE TIME MONEY PERCENT LAW PRODUCT OTHER
 Max 8 entities, max 10 keywords, max 3 tone items."""
 
     try:
-        message = client.messages.create(
+        message = claude_with_retry(
+            client.messages.create,
             model=LLM_FAST,
             max_tokens=1000,
+            system=LEGAL_SYSTEM_PROMPT,
             messages=[{"role": "user", "content": prompt}]
         )
         raw     = message.content[0].text
@@ -486,9 +572,11 @@ Return exactly this structure:
 Rules: extract ALL dates in chronological order, max 20 events."""
 
     try:
-        message = client.messages.create(
+        message = claude_with_retry(
+            client.messages.create,
             model=LLM_FAST,
             max_tokens=1500,
+            system=LEGAL_SYSTEM_PROMPT,
             messages=[{"role": "user", "content": prompt}]
         )
         raw     = message.content[0].text
@@ -597,9 +685,11 @@ Transcript:
 {body.transcript[:6000]}"""
 
     try:
-        message = client.messages.create(
+        message = claude_with_retry(
+            client.messages.create,
             model=LLM_FAST,
             max_tokens=1500,
+            system=LEGAL_SYSTEM_PROMPT,
             messages=[{"role": "user", "content": prompt}]
         )
         raw = message.content[0].text
@@ -635,9 +725,11 @@ def lease_diff(body: LeaseDiffInput, request: Request):
         "", "Lease A:", da, "", "Lease B:", db
     ])
     try:
-        msg = client.messages.create(
+        msg = claude_with_retry(
+            client.messages.create,
             model=LLM_FAST,
             max_tokens=1500,
+            system=LEGAL_SYSTEM_PROMPT,
             messages=[{"role": "user", "content": prompt}]
         )
         save_work_product("/documents/lease-diff", {}, getattr(request.state, "firm_id", "default"), body.case_id, input_preview=body.doc_a[:100])
@@ -695,9 +787,11 @@ def credibility_score(body: CredibilityInput, request: Request):
     prompt = chr(10).join(lines)
 
     try:
-        msg = client.messages.create(
+        msg = claude_with_retry(
+            client.messages.create,
             model=LLM_FAST,
             max_tokens=2000,
+            system=LEGAL_SYSTEM_PROMPT,
             messages=[{"role": "user", "content": prompt}]
         )
         raw = msg.content[0].text
@@ -763,9 +857,11 @@ def deposition_summarize(body: DepositionInput, request: Request):
     prompt = chr(10).join(lines)
 
     try:
-        msg = client.messages.create(
+        msg = claude_with_retry(
+            client.messages.create,
             model=LLM_FAST,
             max_tokens=3000,
+            system=LEGAL_SYSTEM_PROMPT,
             messages=[{"role": "user", "content": prompt}]
         )
         raw = msg.content[0].text
@@ -815,9 +911,11 @@ Document:
 {body.text[:5000] if len(body.text) <= 5000 else body.text[:5000] + chr(10) + "[TRUNCATED: input was " + str(len(body.text)) + " chars; analysis covers opening 5000 only]"}"""
 
     try:
-        msg = client.messages.create(
+        msg = claude_with_retry(
+            client.messages.create,
             model=LLM_FAST,
             max_tokens=2000,
+            system=LEGAL_SYSTEM_PROMPT,
             messages=[{"role": "user", "content": prompt}]
         )
         raw = msg.content[0].text.strip().replace("```json","").replace("```","").strip()
@@ -1002,181 +1100,182 @@ async def case_wall(case_id: int):
 
 
 @app.get("/cases/{case_id}/intelligence", tags=["Cases"])
-async def case_intelligence(case_id: int):
+async def case_intelligence(case_id: int, request: Request):
     """Aggregate all intelligence signals for a case."""
-    import sqlite3, re
+    import re
     from datetime import date, datetime, timedelta
-
-    DB = "/root/nlp-portfolio/analyses.db"
-    conn = sqlite3.connect(DB)
-    conn.row_factory = sqlite3.Row
-    cur = conn.cursor()
+    from backend.demo1.pg import get_conn
+    firm_id = getattr(request.state, "firm_id", "default")
     signals = []
     today = date.today()
 
     try:
-        # ── 1. Case metadata ───────────────────────────────────────────
-        cur.execute("SELECT * FROM cases WHERE id=? AND deleted=0", (case_id,))
-        case = cur.fetchone()
-        if not case:
-            return {"signals": [], "error": "Case not found"}
+        with get_conn(firm_id) as conn:
+            # ── 1. Case metadata ───────────────────────────────────────
+            case_rows = conn.execute(
+                "SELECT * FROM cases WHERE id=%s AND deleted=false", (case_id,)
+            ).fetchall()
+            if not case_rows:
+                return {"signals": [], "error": "Case not found"}
+            case = case_rows[0]
 
-        filing_date_str = case["filing_date"]
-        case_number     = case["case_number"]
-        client_name     = case["client_name"]
-        description     = case["description"] or ""
+            filing_date_str = str(case["filing_date"]) if case["filing_date"] else None
+            case_number     = case["case_number"]
+            client_name     = case["client_name"]
+            description     = case["description"] or ""
 
-        # ── 2. Deadline signal (30-day answer window) ──────────────────
-        if filing_date_str:
-            try:
-                fd = datetime.strptime(filing_date_str[:10], "%Y-%m-%d").date()
-                answer_dl = fd + timedelta(days=30)
-                diff = (answer_dl - today).days
-                if 0 <= diff <= 30:
-                    sev = "critical" if diff <= 7 else "warning" if diff <= 14 else "watch"
-                    signals.append({
-                        "severity": sev,
-                        "title": f"Answer deadline in {diff} day{'s' if diff!=1 else ''} — {answer_dl.strftime('%B %d, %Y')}",
-                        "description": f"30-day answer window closes on {answer_dl.strftime('%B %d, %Y')} based on filing date {filing_date_str[:10]}. Immediate action may be required."
-                    })
-                elif diff < 0:
-                    signals.append({
-                        "severity": "critical",
-                        "title": f"Answer deadline may have passed ({answer_dl.strftime('%B %d, %Y')})",
-                        "description": "The 30-day answer window based on the filing date appears to have elapsed. Verify current status with the court immediately."
-                    })
-            except Exception:
-                pass
-
-        # ── 3. Dates in documents ──────────────────────────────────────
-        cur.execute("""SELECT doc_text, document_name FROM case_documents
-                       WHERE case_id=? AND doc_text IS NOT NULL AND doc_text!=''""", (case_id,))
-        docs = cur.fetchall()
-
-        doc_dates = []
-        for doc in docs:
-            found = re.findall(r'\b(\d{4}-\d{2}-\d{2})\b', doc["doc_text"] or "")
-            for ds in found:
+            # ── 2. Deadline signal (jurisdiction-aware answer window) ───
+            court_str = case["court"] or ""
+            answer_days, rule_note = get_answer_days(court_str)
+            if filing_date_str:
                 try:
-                    dl = datetime.strptime(ds, "%Y-%m-%d").date()
-                    diff = (dl - today).days
-                    if 0 <= diff <= 30:
-                        doc_dates.append((dl, diff, doc["document_name"]))
+                    fd = datetime.strptime(filing_date_str[:10], "%Y-%m-%d").date()
+                    answer_dl = fd + timedelta(days=answer_days)
+                    diff = (answer_dl - today).days
+                    if 0 <= diff <= answer_days:
+                        sev = "critical" if diff <= 7 else "warning" if diff <= 14 else "watch"
+                        signals.append({
+                            "severity": sev,
+                            "title": f"Answer deadline in {diff} day{'s' if diff!=1 else ''} — {answer_dl.strftime('%B %d, %Y')}",
+                            "description": f"{rule_note} closes on {answer_dl.strftime('%B %d, %Y')} based on filing date {filing_date_str[:10]}. Immediate action may be required."
+                        })
+                    elif diff < 0:
+                        signals.append({
+                            "severity": "critical",
+                            "title": f"Answer deadline may have passed ({answer_dl.strftime('%B %d, %Y')})",
+                            "description": f"{rule_note} based on filing date appears to have elapsed. Verify current status with the court immediately."
+                        })
                 except Exception:
                     pass
 
-        for dl, diff, docname in sorted(doc_dates, key=lambda x: x[0])[:3]:
-            sev = "critical" if diff <= 7 else "warning" if diff <= 14 else "watch"
-            signals.append({
-                "severity": sev,
-                "title": f"Upcoming date detected: {dl.strftime('%B %d, %Y')} ({diff}d away)",
-                "description": f"Found in document: {docname}. Review to confirm if this is a filing deadline, hearing date, or contractual milestone."
-            })
+            # ── 3. Dates in documents ──────────────────────────────────
+            docs = conn.execute(
+                "SELECT doc_text, document_name FROM case_documents WHERE case_id=%s AND doc_text IS NOT NULL AND doc_text!=''",
+                (case_id,)
+            ).fetchall()
 
-        # ── 4. Contradictions ──────────────────────────────────────────
-        cur.execute("""SELECT COUNT(*) as cnt FROM case_contradictions
-                       WHERE case_id=?""", (case_id,))
-        row = cur.fetchone()
-        contr_count = row["cnt"] if row else 0
-        if contr_count > 0:
-            signals.append({
-                "severity": "warning",
-                "title": f"{contr_count} contradiction{'s' if contr_count!=1 else ''} detected across documents",
-                "description": "The AI found conflicting statements between linked documents. Open the Contradictions tab to review each conflict and assess impact on case strategy."
-            })
+            doc_dates = []
+            for doc in docs:
+                found = re.findall(r'\b(\d{4}-\d{2}-\d{2})\b', doc["doc_text"] or "")
+                for ds in found:
+                    try:
+                        dl = datetime.strptime(ds, "%Y-%m-%d").date()
+                        diff = (dl - today).days
+                        if 0 <= diff <= 30:
+                            doc_dates.append((dl, diff, doc["document_name"]))
+                    except Exception:
+                        pass
 
-        # ── 5. Document coverage ───────────────────────────────────────
-        doc_count = len(docs)
-        empty_docs = [d["document_name"] for d in docs if len((d["doc_text"] or "").strip()) < 50]
-        rich_docs  = doc_count - len(empty_docs)
-        if doc_count == 0:
-            signals.append({
-                "severity": "info",
-                "title": "No documents linked to this case",
-                "description": "Link documents from the Discovery queue to enable contradiction detection, timeline extraction, and deeper AI analysis."
-            })
-        elif doc_count == 1:
-            signals.append({
-                "severity": "info",
-                "title": "Only 1 document linked — contradiction detection limited",
-                "description": "Contradiction analysis requires at least 2 documents. Link additional filings, depositions, or contracts for full coverage."
-            })
-        if empty_docs:
-            names = ", ".join(empty_docs[:3]) + ("..." if len(empty_docs) > 3 else "")
-            signals.append({
-                "severity": "warning",
-                "title": f"{len(empty_docs)} document(s) not yet analyzed - text not extracted",
-                "description": f"No readable text found in: {names}. Images and audio require OCR/transcription before AI analysis can run."
-            })
-        if rich_docs >= 2:
-            signals.append({
-                "severity": "info",
-                "title": f"{rich_docs} documents fully analyzed and indexed",
-                "description": "All linked documents have been processed. Contradiction detection, timeline extraction, and AI brief generation are available."
-            })
+            for dl, diff, docname in sorted(doc_dates, key=lambda x: x[0])[:3]:
+                sev = "critical" if diff <= 7 else "warning" if diff <= 14 else "watch"
+                signals.append({
+                    "severity": sev,
+                    "title": f"Upcoming date detected: {dl.strftime('%B %d, %Y')} ({diff}d away)",
+                    "description": f"Found in document: {docname}. Review to confirm if this is a filing deadline, hearing date, or contractual milestone."
+                })
 
-        # ── 6. Risk level ──────────────────────────────────────────────
-        risk = case["risk_level"] or "unknown"
-        if risk == "high":
-            signals.append({
-                "severity": "critical",
-                "title": "Case flagged as HIGH RISK",
-                "description": "Document analysis has identified high-risk indicators. Review the AI Case Brief for a full breakdown of risk factors."
-            })
-        elif risk == "unknown" and doc_count > 0:
-            signals.append({
-                "severity": "info",
-                "title": "Risk level not yet assessed",
-                "description": "Generate an AI Case Brief to automatically score this case for risk based on all linked documents."
-            })
-
-        # ── 7. Claude AI Partner Signal ───────────────────────────────
-        rich_texts = []
-        for doc in docs:
-            txt = (doc["doc_text"] or "").strip()
-            if len(txt) >= 50:
-                rich_texts.append(f"[{doc['document_name']}]\n{txt[:3000]}")
-
-        if rich_texts:
-            import anthropic as _anthropic, json as _json
-            _ai = _anthropic.Anthropic(api_key=os.getenv("ANTHROPIC_API_KEY"))
-            combined = "\n\n---\n\n".join(rich_texts)[:8000]
-            case_ctx = (f"Case: {case_number} | Client: {client_name} | "
-                        f"Court: {case['court'] or 'Unknown'} | Filed: {filing_date_str or 'Unknown'}")
-            ai_prompt = (
-                "You are a senior litigation partner reviewing a case file. "
-                "Surface the 2-3 most critical things this attorney MUST know right now.\n\n"
-                "Focus on: statute of limitations risks (calculate from dates), hidden obligations, "
-                "jurisdictional issues, factual gaps, anything requiring immediate action.\n\n"
-                f"Case context: {case_ctx}\n\nDocuments:\n{combined}\n\n"
-                "Return ONLY a JSON array (no markdown) of 2-3 objects with keys: "
-                "severity (critical|warning|watch|info), title (max 12 words), description (2-3 sentences)."
-            )
+            # ── 4. Contradictions ──────────────────────────────────────
             try:
-                ai_resp = _ai.messages.create(
-                    model=LLM_STRONG,
-                    max_tokens=600,
-                    messages=[{"role": "user", "content": ai_prompt}]
-                )
-                raw = ai_resp.content[0].text.strip().replace("```json","").replace("```","").strip()
-                for s in _json.loads(raw)[:3]:
-                    if isinstance(s, dict) and "title" in s:
-                        s.setdefault("severity", "info")
-                        s["ai"] = True
-                        signals.append(s)
+                row = conn.execute(
+                    "SELECT COUNT(*) as cnt FROM case_contradictions WHERE case_id=%s", (case_id,)
+                ).fetchone()
+                contr_count = row["cnt"] if row else 0
+                if contr_count > 0:
+                    signals.append({
+                        "severity": "warning",
+                        "title": f"{contr_count} contradiction{'s' if contr_count!=1 else ''} detected across documents",
+                        "description": "The AI found conflicting statements between linked documents. Open the Contradictions tab to review each conflict and assess impact on case strategy."
+                    })
             except Exception:
                 pass
 
+            # ── 5. Document coverage ───────────────────────────────────
+            doc_count  = len(docs)
+            empty_docs = [d["document_name"] for d in docs if len((d["doc_text"] or "").strip()) < 50]
+            rich_docs  = doc_count - len(empty_docs)
+
+            if doc_count == 0:
+                signals.append({
+                    "severity": "info",
+                    "title": "No documents linked to this case",
+                    "description": "Link documents from the Discovery queue to enable contradiction detection, timeline extraction, and deeper AI analysis."
+                })
+            elif doc_count == 1:
+                signals.append({
+                    "severity": "info",
+                    "title": "Only 1 document linked — contradiction detection limited",
+                    "description": "Contradiction analysis requires at least 2 documents. Link additional filings, depositions, or contracts for full coverage."
+                })
+            if empty_docs:
+                names = ", ".join(empty_docs[:3]) + ("..." if len(empty_docs) > 3 else "")
+                signals.append({
+                    "severity": "warning",
+                    "title": f"{len(empty_docs)} document(s) not yet analyzed - text not extracted",
+                    "description": f"No readable text found in: {names}. Images and audio require OCR/transcription before AI analysis can run."
+                })
+            if rich_docs >= 2:
+                signals.append({
+                    "severity": "info",
+                    "title": f"{rich_docs} documents fully analyzed and indexed",
+                    "description": "All linked documents have been processed. Contradiction detection, timeline extraction, and AI brief generation are available."
+                })
+
+            # ── 6. Risk level ──────────────────────────────────────────
+            risk = case["risk_level"] or "unknown"
+            if risk == "high":
+                signals.append({
+                    "severity": "critical",
+                    "title": "Case flagged as HIGH RISK",
+                    "description": "Document analysis has identified high-risk indicators. Review the AI Case Brief for a full breakdown of risk factors."
+                })
+            elif risk == "unknown" and doc_count > 0:
+                signals.append({
+                    "severity": "info",
+                    "title": "Risk level not yet assessed",
+                    "description": "Generate an AI Case Brief to automatically score this case for risk based on all linked documents."
+                })
+
+            # ── 7. Claude AI Partner Signal ────────────────────────────
+            rich_texts = []
+            for doc in docs:
+                txt = (doc["doc_text"] or "").strip()
+                if len(txt) >= 50:
+                    rich_texts.append(f"[{doc['document_name']}]\n{txt[:3000]}")
+            if rich_texts:
+                import json as _json
+                combined = "\n\n---\n\n".join(rich_texts)[:8000]
+                case_ctx = (f"Case: {case_number} | Client: {client_name} | "
+                            f"Court: {case['court'] or 'Unknown'} | Filed: {filing_date_str or 'Unknown'}")
+                ai_prompt = (
+                    "You are a senior litigation partner reviewing a case file. "
+                    "Surface the 2-3 most critical things this attorney MUST know right now.\n\n"
+                    "Focus on: statute of limitations risks (calculate from dates), hidden obligations, "
+                    "jurisdictional issues, factual gaps, anything requiring immediate action.\n\n"
+                    f"Case context: {case_ctx}\n\nDocuments:\n{combined}\n\n"
+                    "Return ONLY a JSON array (no markdown) of 2-3 objects with keys: "
+                    "severity (critical|warning|watch|info), title (max 12 words), description (2-3 sentences)."
+                )
+                try:
+                    ai_resp = claude_with_retry(
+                        client.messages.create,
+                        model=LLM_STRONG,
+                        max_tokens=600,
+                        system=LEGAL_SYSTEM_PROMPT,
+                        messages=[{"role": "user", "content": ai_prompt}]
+                    )
+                    ai_signals = _json.loads(clean_json(ai_resp.content[0].text))
+                    if isinstance(ai_signals, list):
+                        signals.extend(ai_signals)
+                except Exception as _e:
+                    import logging
+                    logging.warning(f"case_intelligence AI signal failed: {_e}")
+
     except Exception as e:
-        signals.append({"severity": "info", "title": "Analysis error", "description": str(e)})
-    finally:
-        conn.close()
+        import logging
+        logging.error(f"case_intelligence error for case {case_id}: {e}")
+        return {"signals": signals, "error": str(e)}
 
-    # Sort: critical first, then warning, watch, info
-    order = {"critical": 0, "warning": 1, "watch": 2, "info": 3}
-    signals.sort(key=lambda x: order.get(x.get("severity","info"), 3))
-    return {"signals": signals, "case_id": case_id}
-
+    return {"signals": signals}
 
 @app.get("/dashboard/deadlines", tags=["Dashboard"])
 async def dashboard_deadlines():
