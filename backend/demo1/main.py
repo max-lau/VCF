@@ -243,7 +243,7 @@ app.add_middleware(
     CORSMiddleware,
     allow_origins=[os.getenv("ALLOWED_ORIGINS", "https://app.para-iq.com")],
     allow_methods=["GET", "POST", "PUT", "DELETE", "OPTIONS", "PATCH"],
-    allow_headers=["*"],
+    allow_headers=["Authorization", "Content-Type", "X-API-Key", "X-Client-ID"],
     allow_credentials=True,
 )
 
@@ -701,7 +701,7 @@ Transcript:
         )
         raw = message.content[0].text
         cleaned = clean_json(raw)
-        save_work_product("/interrogate", {}, getattr(request.state, "firm_id", "default"), body.case_id, input_preview=body.transcript[:100])
+        save_work_product("/interrogate", json.loads(cleaned), getattr(request.state, "firm_id", "default"), body.case_id, input_preview=body.transcript[:100])
         return json.loads(cleaned)
     except json.JSONDecodeError as e:
         raise HTTPException(status_code=500, detail=f"JSON parse error: {str(e)}")
@@ -739,8 +739,9 @@ def lease_diff(body: LeaseDiffInput, request: Request):
             system=LEGAL_SYSTEM_PROMPT,
             messages=[{"role": "user", "content": prompt}]
         )
-        save_work_product("/documents/lease-diff", {}, getattr(request.state, "firm_id", "default"), body.case_id, input_preview=body.doc_a[:100])
-        return json.loads(clean_json(msg.content[0].text))
+        _lease_result = json.loads(clean_json(msg.content[0].text))
+        save_work_product("/documents/lease-diff", _lease_result, getattr(request.state, "firm_id", "default"), body.case_id, input_preview=body.doc_a[:100])
+        return _lease_result
     except json.JSONDecodeError as e:
         raise HTTPException(status_code=500, detail="JSON parse error: " + str(e))
     except Exception as e:
@@ -802,8 +803,9 @@ def credibility_score(body: CredibilityInput, request: Request):
             messages=[{"role": "user", "content": prompt}]
         )
         raw = msg.content[0].text
-        save_work_product("/credibility/score", {}, getattr(request.state, "firm_id", "default"), body.case_id, input_preview=body.witness_name)
-        return json.loads(clean_json(raw))
+        _cred_result = json.loads(clean_json(raw))
+        save_work_product("/credibility/score", _cred_result, getattr(request.state, "firm_id", "default"), body.case_id, input_preview=body.witness_name)
+        return _cred_result
     except json.JSONDecodeError as e:
         raise HTTPException(status_code=500, detail="JSON parse error: " + str(e))
     except Exception as e:
@@ -926,8 +928,9 @@ Document:
             messages=[{"role": "user", "content": prompt}]
         )
         raw = msg.content[0].text.strip().replace("```json","").replace("```","").strip()
-        save_work_product("/entities/legal", {}, getattr(request.state, "firm_id", "default"), getattr(body, "case_id", None), input_preview=body.text[:100])
-        return {"success": True, **json.loads(raw)}
+        _entities_result = json.loads(raw)
+        save_work_product("/entities/legal", _entities_result, getattr(request.state, "firm_id", "default"), getattr(body, "case_id", None), input_preview=body.text[:100])
+        return {"success": True, **_entities_result}
     except json.JSONDecodeError as e:
         raise HTTPException(status_code=500, detail=f"JSON parse error: {e}")
     except Exception as e:
@@ -1010,101 +1013,107 @@ from fastapi.staticfiles import StaticFiles
 
 
 @app.get("/cases/{case_id}/wall", tags=["Cases"])
-async def case_wall(case_id: int):
+async def case_wall(case_id: int, request: Request):
     """Unified chronological matter dossier — all case activity in one feed."""
-    import sqlite3, json as _json
-    DB = "/root/nlp-portfolio/analyses.db"
-    conn = sqlite3.connect(DB)
-    conn.row_factory = sqlite3.Row
-    cur = conn.cursor()
+    import json as _json
+    from backend.demo1.pg import get_conn
+    firm_id = getattr(request.state, "firm_id", "default")
     items = []
 
     try:
-        # ── Case metadata ──────────────────────────────────────────────
-        cur.execute("SELECT * FROM cases WHERE id=? AND deleted=0", (case_id,))
-        case = cur.fetchone()
-        if not case:
-            return {"items": [], "error": "Case not found"}
+        with get_conn(firm_id) as conn:
+            # ── Case metadata ──────────────────────────────────────────
+            case_rows = conn.execute(
+                "SELECT * FROM cases WHERE id=%s AND deleted=false", (case_id,)
+            ).fetchall()
+            if not case_rows:
+                return {"items": [], "error": "Case not found"}
+            case = case_rows[0]
 
-        # Case opened event
-        items.append({
-            "date": case["filing_date"] or case["created_at"],
-            "type": "case_opened",
-            "title": f"Case opened — {case['case_number']}",
-            "body": (f"Client: {case['client_name']} | Court: {case['court'] or 'TBD'} | "
-                     f"Judge: {case['judge'] or 'TBD'} | Matter: {case['matter_number'] or '—'}"),
-            "meta": {"risk": case["risk_level"], "status": case["status"]}
-        })
-
-        # ── Documents ──────────────────────────────────────────────────
-        cur.execute("""SELECT id, document_name, upload_date, summary, sentiment,
-                              risk_score, events_json, entities_json
-                       FROM case_documents WHERE case_id=? ORDER BY upload_date ASC""", (case_id,))
-        docs = cur.fetchall()
-
-        for doc in docs:
             items.append({
-                "date": doc["upload_date"],
-                "type": "document",
-                "title": doc["document_name"],
-                "body": doc["summary"] or "No summary available.",
-                "meta": {
-                    "sentiment": doc["sentiment"],
-                    "risk_score": doc["risk_score"],
-                    "doc_id": doc["id"]
-                }
-            })
-            # Expand timeline events from this doc
-            if doc["events_json"]:
-                try:
-                    events = _json.loads(doc["events_json"])
-                    for ev in (events if isinstance(events, list) else []):
-                        ev_date = ev.get("date") or ev.get("event_date") or doc["upload_date"]
-                        items.append({
-                            "date": ev_date,
-                            "type": "timeline_event",
-                            "title": ev.get("event") or ev.get("title") or "Event",
-                            "body": ev.get("description") or ev.get("detail") or "",
-                            "meta": {"source_doc": doc["document_name"]}
-                        })
-                except Exception:
-                    pass
-
-        # ── Notes ──────────────────────────────────────────────────────
-        cur.execute("""SELECT note, author, pinned, created_at
-                       FROM case_notes WHERE case_id=? ORDER BY created_at ASC""", (case_id,))
-        for note in cur.fetchall():
-            items.append({
-                "date": note["created_at"],
-                "type": "note",
-                "title": f"Note by {note['author'] or 'Attorney'}",
-                "body": note["note"],
-                "meta": {"pinned": bool(note["pinned"])}
+                "date": str(case["filing_date"]) if case["filing_date"] else str(case["created_at"]),
+                "type": "case_opened",
+                "title": f"Case opened — {case['case_number']}",
+                "body": (f"Client: {case['client_name']} | Court: {case['court'] or 'TBD'} | "
+                         f"Judge: {case['judge'] or 'TBD'} | Matter: {case['matter_number'] or '—'}"),
+                "meta": {"risk": case["risk_level"], "status": case["status"]}
             })
 
-        # ── AI Briefs ──────────────────────────────────────────────────
-        cur.execute("""SELECT generated_at, brief_json FROM case_briefs
-                       WHERE case_id=? ORDER BY generated_at ASC""", (case_id,))
-        for brief in cur.fetchall():
-            items.append({
-                "date": brief["generated_at"],
-                "type": "brief",
-                "title": "AI Case Brief generated",
-                "body": "Full case analysis brief produced by Claude. View in Overview tab.",
-                "meta": {}
-            })
+            # ── Documents ─────────────────────────────────────────────
+            docs = conn.execute("""
+                SELECT id, document_name, upload_date, summary, sentiment,
+                       risk_score, events_json, entities_json
+                FROM case_documents WHERE case_id=%s ORDER BY upload_date ASC
+            """, (case_id,)).fetchall()
 
-    finally:
-        conn.close()
+            for doc in docs:
+                items.append({
+                    "date": str(doc["upload_date"]) if doc["upload_date"] else "",
+                    "type": "document",
+                    "title": doc["document_name"],
+                    "body": doc["summary"] or "No summary available.",
+                    "meta": {
+                        "sentiment": doc["sentiment"],
+                        "risk_score": doc["risk_score"],
+                        "doc_id": doc["id"]
+                    }
+                })
+                if doc["events_json"]:
+                    try:
+                        events = doc["events_json"] if isinstance(doc["events_json"], list) else _json.loads(doc["events_json"])
+                        for ev in (events if isinstance(events, list) else []):
+                            ev_date = ev.get("date") or ev.get("event_date") or str(doc["upload_date"])
+                            items.append({
+                                "date": ev_date,
+                                "type": "timeline_event",
+                                "title": ev.get("event") or ev.get("title") or "Event",
+                                "body": ev.get("description") or ev.get("detail") or "",
+                                "meta": {"source_doc": doc["document_name"]}
+                            })
+                    except Exception:
+                        pass
 
-    # Sort chronologically
+            # ── Notes ─────────────────────────────────────────────────
+            notes = conn.execute("""
+                SELECT note, author, pinned, created_at
+                FROM case_notes WHERE case_id=%s ORDER BY created_at ASC
+            """, (case_id,)).fetchall()
+
+            for note in notes:
+                items.append({
+                    "date": str(note["created_at"]),
+                    "type": "note",
+                    "title": f"Note by {note['author'] or 'Attorney'}",
+                    "body": note["note"],
+                    "meta": {"pinned": bool(note["pinned"])}
+                })
+
+            # ── AI Briefs ─────────────────────────────────────────────
+            briefs = conn.execute("""
+                SELECT generated_at, brief_json FROM case_briefs
+                WHERE case_id=%s ORDER BY generated_at ASC
+            """, (case_id,)).fetchall()
+
+            for brief in briefs:
+                items.append({
+                    "date": str(brief["generated_at"]),
+                    "type": "brief",
+                    "title": "AI Case Brief generated",
+                    "body": "Full case analysis brief produced by Claude. View in Overview tab.",
+                    "meta": {}
+                })
+
+    except Exception as e:
+        import logging
+        logging.error(f"case_wall error for case {case_id}: {e}")
+        return {"items": items, "error": "Failed to load case wall", "case_id": case_id}
+
     def sort_key(x):
         d = x.get("date") or ""
-        return d[:19] if d else "0000"
+        return str(d)[:19] if d else "0000"
     items.sort(key=sort_key)
 
     return {"items": items, "count": len(items), "case_id": case_id}
-
 
 @app.get("/cases/{case_id}/intelligence", tags=["Cases"])
 async def case_intelligence(case_id: int, request: Request):
