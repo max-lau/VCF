@@ -26,10 +26,9 @@ from backend.demo1.media_transcription import router as media_router, init_trans
 from backend.demo1.message_parser import router as messages_router, init_messages_table
 from backend.demo1.email_router import router as email_router
 from backend.demo1.multilingual import analyze_multilingual, detect_language, SUPPORTED_LANGUAGES
-from backend.demo1.summary_scorer import score_summary, batch_score_summaries
+from backend.demo1.summary_scorer import score_summary
 from backend.demo1.entity_confidence import score_entities, get_entity_summary
 from backend.demo1.entity_linker import find_linked_entities, link_documents_by_entity
-from backend.demo1.entity_confidence import score_entities, get_entity_summary
 from backend.demo1.coref_disambig import disambiguate_entities, resolve_coreferences
 from backend.demo1.contradiction import run_contradiction_scan
 from fastapi import FastAPI, HTTPException, Query, Request
@@ -258,6 +257,11 @@ init_transcription_table()
 init_messages_table()
 init_enclave_tables()
 client = anthropic.Anthropic(api_key=os.getenv("ANTHROPIC_API_KEY"))
+
+LLM_FAST   = os.getenv("LLM_FAST",  "claude-haiku-4-5-20251001")  # high-volume tasks
+LLM_STRONG = os.getenv("LLM_STRONG", "claude-opus-4-5")            # deep analysis
+LLM_STRONG = os.getenv("LLM_STRONG", LLM_STRONG)            # deep analysis
+
 executor = ThreadPoolExecutor(max_workers=3)
 
 class TextInput(BaseModel):
@@ -319,7 +323,7 @@ Max 8 entities, max 10 keywords, max 3 tone items."""
 
     try:
         message = client.messages.create(
-            model="claude-haiku-4-5-20251001",
+            model=LLM_FAST,
             max_tokens=1000,
             messages=[{"role": "user", "content": prompt}]
         )
@@ -356,15 +360,16 @@ Max 8 entities, max 10 keywords, max 3 tone items."""
 
         return parsed
     except Exception as e:
+        import logging
+        logging.error(f"run_analysis error for label={label}: {e}")
         return {
-            "status": "error", "error": str(e), "label": label,
+            "status": "error", "error": "Analysis failed. Please try again.", "label": label,
             "text_preview": text[:120] + "..." if len(text) > 120 else text,
             "word_count": len(text.split())
         }
-
 @app.get("/health")
 def health():
-    return {"status": "ok", "model": "claude-haiku-4-5-20251001"}
+    return {"status": "ok", "model": LLM_FAST}
 
 @app.post("/analyze")
 def analyze(body: TextInput):
@@ -482,7 +487,7 @@ Rules: extract ALL dates in chronological order, max 20 events."""
 
     try:
         message = client.messages.create(
-            model="claude-haiku-4-5-20251001",
+            model=LLM_FAST,
             max_tokens=1500,
             messages=[{"role": "user", "content": prompt}]
         )
@@ -492,7 +497,9 @@ Rules: extract ALL dates in chronological order, max 20 events."""
     except json.JSONDecodeError as e:
         raise HTTPException(status_code=500, detail=f"JSON parse error: {str(e)}")
     except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+        import logging
+        logging.error(f'[{request.__class__.__name__ if hasattr(locals(), "request") else "endpoint"}] Unhandled error: {e}')
+        raise HTTPException(status_code=500, detail='An internal error occurred. Please try again.')
 
 # feedback endpoints → routers/feedback_router.py
 
@@ -591,7 +598,7 @@ Transcript:
 
     try:
         message = client.messages.create(
-            model="claude-haiku-4-5-20251001",
+            model=LLM_FAST,
             max_tokens=1500,
             messages=[{"role": "user", "content": prompt}]
         )
@@ -602,7 +609,9 @@ Transcript:
     except json.JSONDecodeError as e:
         raise HTTPException(status_code=500, detail=f"JSON parse error: {str(e)}")
     except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+        import logging
+        logging.error(f'[{request.__class__.__name__ if hasattr(locals(), "request") else "endpoint"}] Unhandled error: {e}')
+        raise HTTPException(status_code=500, detail='An internal error occurred. Please try again.')
 
 # -- Lease Clause Diff --
 
@@ -627,7 +636,7 @@ def lease_diff(body: LeaseDiffInput, request: Request):
     ])
     try:
         msg = client.messages.create(
-            model="claude-haiku-4-5-20251001",
+            model=LLM_FAST,
             max_tokens=1500,
             messages=[{"role": "user", "content": prompt}]
         )
@@ -636,7 +645,9 @@ def lease_diff(body: LeaseDiffInput, request: Request):
     except json.JSONDecodeError as e:
         raise HTTPException(status_code=500, detail="JSON parse error: " + str(e))
     except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+        import logging
+        logging.error(f'[{request.__class__.__name__ if hasattr(locals(), "request") else "endpoint"}] Unhandled error: {e}')
+        raise HTTPException(status_code=500, detail='An internal error occurred. Please try again.')
 
 # ── Witness Credibility Scorer ────────────────────────────────────────────────
 
@@ -685,7 +696,7 @@ def credibility_score(body: CredibilityInput, request: Request):
 
     try:
         msg = client.messages.create(
-            model="claude-haiku-4-5-20251001",
+            model=LLM_FAST,
             max_tokens=2000,
             messages=[{"role": "user", "content": prompt}]
         )
@@ -695,7 +706,9 @@ def credibility_score(body: CredibilityInput, request: Request):
     except json.JSONDecodeError as e:
         raise HTTPException(status_code=500, detail="JSON parse error: " + str(e))
     except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+        import logging
+        logging.error(f'[{request.__class__.__name__ if hasattr(locals(), "request") else "endpoint"}] Unhandled error: {e}')
+        raise HTTPException(status_code=500, detail='An internal error occurred. Please try again.')
 
 
 # ── Deposition Summary Generator ─────────────────────────────────────────────
@@ -751,7 +764,7 @@ def deposition_summarize(body: DepositionInput, request: Request):
 
     try:
         msg = client.messages.create(
-            model="claude-haiku-4-5-20251001",
+            model=LLM_FAST,
             max_tokens=3000,
             messages=[{"role": "user", "content": prompt}]
         )
@@ -760,7 +773,9 @@ def deposition_summarize(body: DepositionInput, request: Request):
     except json.JSONDecodeError as e:
         raise HTTPException(status_code=500, detail="JSON parse error: " + str(e))
     except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+        import logging
+        logging.error(f'[{request.__class__.__name__ if hasattr(locals(), "request") else "endpoint"}] Unhandled error: {e}')
+        raise HTTPException(status_code=500, detail='An internal error occurred. Please try again.')
 
 
 
@@ -801,7 +816,7 @@ Document:
 
     try:
         msg = client.messages.create(
-            model="claude-haiku-4-5-20251001",
+            model=LLM_FAST,
             max_tokens=2000,
             messages=[{"role": "user", "content": prompt}]
         )
@@ -811,7 +826,9 @@ Document:
     except json.JSONDecodeError as e:
         raise HTTPException(status_code=500, detail=f"JSON parse error: {e}")
     except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+        import logging
+        logging.error(f'[{request.__class__.__name__ if hasattr(locals(), "request") else "endpoint"}] Unhandled error: {e}')
+        raise HTTPException(status_code=500, detail='An internal error occurred. Please try again.')
 
 
 # ── Home Dashboard Stats ──────────────────────────────────────────────────────
@@ -1137,7 +1154,7 @@ async def case_intelligence(case_id: int):
             )
             try:
                 ai_resp = _ai.messages.create(
-                    model="claude-opus-4-5",
+                    model=LLM_STRONG,
                     max_tokens=600,
                     messages=[{"role": "user", "content": ai_prompt}]
                 )
