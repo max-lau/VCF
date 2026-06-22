@@ -2,7 +2,7 @@
 discovery_agent_guard.py
 ========================
 ParaIQ — Resource-Safe Discovery Agent (WIRED — VPS edition)
-Cloud VPS path: /root/nlp-portfolio/backend/demo1/discovery_agent_guard.py
+Module: backend.demo1.discovery_agent_guard
 
 Real module names matched to actual VPS layout:
   bates.py        → stamp_document
@@ -28,8 +28,8 @@ from pathlib import Path
 
 logger = logging.getLogger("paraiq.discovery_agent")
 
-UPLOAD_DIR = Path("/root/nlp-portfolio/uploads/discovery")
-DB_PATH    = os.environ.get("PARAIQ_DB", "/root/nlp-portfolio/backend/demo1/analyses.db")
+UPLOAD_DIR = Path(os.environ.get("DISCOVERY_UPLOAD_DIR", str(Path(__file__).parent.parent.parent / "uploads" / "discovery")))
+DB_PATH    = os.environ.get("PARAIQ_DB", str(Path(__file__).parent / "analyses.db"))
 API_KEY    = os.environ.get("PARAIQ_API_KEY", "")
 BASE_URL   = "http://localhost:5003"
 

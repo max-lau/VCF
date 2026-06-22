@@ -7,7 +7,7 @@ import re
 import numpy as np
 import faiss
 from sentence_transformers import SentenceTransformer
-from backend.demo1.database import get_connection
+from backend.demo1.pg import get_conn
 import anthropic
 from backend.demo1.observability.tracer import trace_claude_call
 from dotenv import load_dotenv
@@ -23,12 +23,12 @@ def get_embedder():
         _EMBEDDER = SentenceTransformer("all-MiniLM-L6-v2")
     return _EMBEDDER
 
-def get_all_documents() -> list:
-    conn = get_connection()
-    rows = conn.execute(
-        "SELECT id, text, entities, sentiment, created_at FROM analyses"
-    ).fetchall()
-    conn.close()
+def get_all_documents(firm_id: str = "default") -> list:
+    with get_conn(firm_id) as conn:
+        rows = conn.execute(
+            "SELECT id, text, entities, sentiment, created_at FROM analyses WHERE firm_id = %s",
+            (firm_id,)
+        ).fetchall()
     docs = []
     for row in rows:
         docs.append({
@@ -147,8 +147,8 @@ If no contradictions, return has_contradictions: false and empty array."""
             "doc_b_preview":      doc_b["text"][:100]
         }
 
-def run_contradiction_scan() -> dict:
-    docs = get_all_documents()
+def run_contradiction_scan(firm_id: str = "default",) -> dict:
+    docs = get_all_documents(firm_id=firm_id)
     if len(docs) < 2:
         return {
             "total_docs":           len(docs),

@@ -136,7 +136,15 @@ def get_stats(firm_id: str = "default") -> dict:
     }
 
 
-def get_connection():
-    """Compatibility shim — returns a PgConn using the default firm context."""
+def get_connection(firm_id: str = "default"):
+    """
+    DEPRECATED — passes firm_id to get_conn but defaults to 'default'.
+    All callers should be updated to accept and pass firm_id explicitly.
+    """
+    import warnings
+    warnings.warn(
+        "get_connection() is deprecated; use get_conn(firm_id) directly",
+        DeprecationWarning, stacklevel=2,
+    )
     from backend.demo1.pg import get_conn
-    return get_conn("default")
+    return get_conn(firm_id)

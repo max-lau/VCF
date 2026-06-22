@@ -3,15 +3,15 @@ conftest.py — shared fixtures for all backend tests
 """
 import os
 import sys
-import sqlite3
 import pytest
 
 # ── Environment setup (must happen before app import) ─────────────────────────
-os.chdir('/root/nlp-portfolio')
+_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+os.chdir(_ROOT)
 os.environ['TESTING'] = '1'          # disables APScheduler in risk_watcher
 
 from dotenv import load_dotenv
-load_dotenv('/root/nlp-portfolio/.env')
+load_dotenv(os.path.join(_ROOT, '.env'))
 
 from fastapi.testclient import TestClient
 from backend.demo1.main import app

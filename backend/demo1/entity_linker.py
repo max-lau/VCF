@@ -7,7 +7,7 @@ import json
 import numpy as np
 import faiss
 from sentence_transformers import SentenceTransformer
-from backend.demo1.database import get_connection
+from backend.demo1.pg import get_conn
 from backend.demo1.retrieval.factory import get_vector_store
 from typing import List, Dict
 
@@ -21,12 +21,12 @@ def get_embedder():
         print("Model loaded.")
     return _EMBEDDER
 
-def get_all_entities() -> List[Dict]:
-    conn = get_connection()
-    rows = conn.execute(
-        "SELECT id, entities, text, created_at, sentiment FROM analyses"
-    ).fetchall()
-    conn.close()
+def get_all_entities(firm_id: str = "default") -> List[Dict]:
+    with get_conn(firm_id) as conn:
+        rows = conn.execute(
+            "SELECT id, entities, text, created_at, sentiment FROM analyses WHERE firm_id = %s",
+            (firm_id,)
+        ).fetchall()
     all_entities = []
     for row in rows:
         try:
@@ -45,7 +45,7 @@ def get_all_entities() -> List[Dict]:
     return all_entities
 
 def find_linked_entities(query_entity: str, top_k: int = 5,
-                          threshold: float = 0.75) -> List[Dict]:
+                          threshold: float = 0.75, firm_id: str = "default") -> List[Dict]:
     """
     Find entities semantically similar to query_entity across all documents.
     Uses persisted ChromaDB index (or Pinecone if VECTOR_BACKEND=pinecone).
@@ -85,8 +85,8 @@ def find_linked_entities(query_entity: str, top_k: int = 5,
         })
     return results
 
-def link_documents_by_entity(min_shared: int = 1) -> List[Dict]:
-    all_entities = get_all_entities()
+def link_documents_by_entity(min_shared: int = 1, firm_id: str = "default") -> List[Dict]:
+    all_entities = get_all_entities(firm_id=firm_id)
     if not all_entities:
         return []
 
