@@ -19,6 +19,15 @@ from backend.demo1.pg import get_conn
 router = APIRouter()
 
 
+def _require_auth(request: Request):
+    """Raise 401 if no valid JWT was decoded by TenantMiddleware."""
+    user_id = getattr(request.state, "user_id", None)
+    if not user_id:
+        from fastapi import HTTPException
+        raise HTTPException(status_code=401, detail="Authentication required")
+
+
+
 # ── DB Setup ───────────────────────────────────────────────────────────────────
 
 def init_audit_table():
@@ -70,7 +79,7 @@ class AuditMiddleware(BaseHTTPMiddleware):
             try:
                 import jwt as _jwt
                 import os as _os
-                _payload = _jwt.decode(auth_hdr[7:], _os.environ.get("JWT_SECRET_KEY","nlp-portfolio-secret-change-in-production"), algorithms=["HS256"])
+                _payload = _jwt.decode(auth_hdr[7:], _os.environ.get("JWT_SECRET_KEY","nlp-portfolio-secret-change-in-production"), algorithms=["HS256"], options={"verify_exp": True})
                 user_id  = int(_payload["sub"]) if _payload.get("sub") else None
             except Exception:
                 pass
@@ -116,6 +125,7 @@ def get_audit_logs(
     status:   Optional[int] = None,
     limit:    int           = 50,
 ):
+    _require_auth(request)
     limit  = min(limit, 200)
     sql    = "SELECT * FROM audit_log WHERE TRUE"
     params = []
@@ -142,6 +152,7 @@ def get_audit_logs(
 
 @router.get("/stats")
 def audit_stats(request: Request):
+    _require_auth(request)
     firm_id = getattr(request.state, "firm_id", "default")
     with get_conn(firm_id) as conn:
         total = conn.execute(

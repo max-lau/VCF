@@ -10,6 +10,7 @@ from backend.demo1.pdf_export import router as pdf_router
 from backend.demo1.pdf_module_export import router as module_pdf_router
 from backend.demo1.interrogation_export import router as interrogation_export_router
 from backend.demo1.audit_trail import AuditMiddleware, init_audit_table, router as audit_router
+from backend.demo1.pii import redact_text, redaction_summary
 from backend.demo1.risk_scorer import router as risk_router
 from backend.demo1.document_comparison import router as comparison_router
 from backend.demo1.citation_resolver import router as citations_router
@@ -411,12 +412,14 @@ Entity types: PERSON ORG GPE LOC DATE TIME MONEY PERCENT LAW PRODUCT OTHER
 Max 8 entities, max 10 keywords, max 3 tone items."""
 
     try:
+        _redacted_p, _pii_map = _pii_redact(prompt)
+        if _pii_map: print('[PII] ' + str(_pii_summary(_pii_map)))
         message = claude_with_retry(
             client.messages.create,
             model=LLM_FAST,
             max_tokens=1000,
             system=LEGAL_SYSTEM_PROMPT,
-            messages=[{"role": "user", "content": prompt}]
+            messages=[{"role": "user", "content": _redacted_p}]
         )
         raw     = message.content[0].text
         cleaned = clean_json(raw)
@@ -578,12 +581,14 @@ Return exactly this structure:
 Rules: extract ALL dates in chronological order, max 20 events."""
 
     try:
+        _redacted_p, _pii_map = _pii_redact(prompt)
+        if _pii_map: print('[PII] ' + str(_pii_summary(_pii_map)))
         message = claude_with_retry(
             client.messages.create,
             model=LLM_FAST,
             max_tokens=1500,
             system=LEGAL_SYSTEM_PROMPT,
-            messages=[{"role": "user", "content": prompt}]
+            messages=[{"role": "user", "content": _redacted_p}]
         )
         raw     = message.content[0].text
         cleaned = clean_json(raw)
@@ -694,12 +699,14 @@ Transcript:
 {body.transcript[:6000]}"""
 
     try:
+        _redacted_p, _pii_map = _pii_redact(prompt)
+        if _pii_map: print('[PII] ' + str(_pii_summary(_pii_map)))
         message = claude_with_retry(
             client.messages.create,
             model=LLM_FAST,
             max_tokens=1500,
             system=LEGAL_SYSTEM_PROMPT,
-            messages=[{"role": "user", "content": prompt}]
+            messages=[{"role": "user", "content": _redacted_p}]
         )
         raw = message.content[0].text
         cleaned = clean_json(raw)
@@ -734,12 +741,14 @@ def lease_diff(body: LeaseDiffInput, request: Request):
         "", "Lease A:", da, "", "Lease B:", db
     ])
     try:
+        _redacted_p, _pii_map = _pii_redact(prompt)
+        if _pii_map: print('[PII] ' + str(_pii_summary(_pii_map)))
         msg = claude_with_retry(
             client.messages.create,
             model=LLM_FAST,
             max_tokens=1500,
             system=LEGAL_SYSTEM_PROMPT,
-            messages=[{"role": "user", "content": prompt}]
+            messages=[{"role": "user", "content": _redacted_p}]
         )
         _lease_result = json.loads(clean_json(msg.content[0].text))
         save_work_product("/documents/lease-diff", _lease_result, getattr(request.state, "firm_id", "default"), body.case_id, input_preview=body.doc_a[:100])
@@ -797,12 +806,14 @@ def credibility_score(body: CredibilityInput, request: Request):
     prompt = chr(10).join(lines)
 
     try:
+        _redacted_p, _pii_map = _pii_redact(prompt)
+        if _pii_map: print('[PII] ' + str(_pii_summary(_pii_map)))
         msg = claude_with_retry(
             client.messages.create,
             model=LLM_FAST,
             max_tokens=2000,
             system=LEGAL_SYSTEM_PROMPT,
-            messages=[{"role": "user", "content": prompt}]
+            messages=[{"role": "user", "content": _redacted_p}]
         )
         raw = msg.content[0].text
         _cred_result = json.loads(clean_json(raw))
@@ -868,12 +879,14 @@ def deposition_summarize(body: DepositionInput, request: Request):
     prompt = chr(10).join(lines)
 
     try:
+        _redacted_p, _pii_map = _pii_redact(prompt)
+        if _pii_map: print('[PII] ' + str(_pii_summary(_pii_map)))
         msg = claude_with_retry(
             client.messages.create,
             model=LLM_FAST,
             max_tokens=3000,
             system=LEGAL_SYSTEM_PROMPT,
-            messages=[{"role": "user", "content": prompt}]
+            messages=[{"role": "user", "content": _redacted_p}]
         )
         raw = msg.content[0].text
         _depo_result = json.loads(clean_json(raw))
@@ -924,12 +937,14 @@ Document:
 {body.text[:5000] if len(body.text) <= 5000 else body.text[:5000] + chr(10) + "[TRUNCATED: input was " + str(len(body.text)) + " chars; analysis covers opening 5000 only]"}"""
 
     try:
+        _redacted_p, _pii_map = _pii_redact(prompt)
+        if _pii_map: print('[PII] ' + str(_pii_summary(_pii_map)))
         msg = claude_with_retry(
             client.messages.create,
             model=LLM_FAST,
             max_tokens=2000,
             system=LEGAL_SYSTEM_PROMPT,
-            messages=[{"role": "user", "content": prompt}]
+            messages=[{"role": "user", "content": _redacted_p}]
         )
         raw = msg.content[0].text.strip().replace("```json","").replace("```","").strip()
         _entities_result = json.loads(raw)
@@ -1276,12 +1291,14 @@ async def case_intelligence(case_id: int, request: Request):
                     "severity (critical|warning|watch|info), title (max 12 words), description (2-3 sentences)."
                 )
                 try:
+                    _redacted_ai, _pii_map2 = _pii_redact(ai_prompt)
+                    if _pii_map2: print('[PII] ' + str(_pii_summary(_pii_map2)))
                     ai_resp = claude_with_retry(
                         client.messages.create,
                         model=LLM_STRONG,
                         max_tokens=600,
                         system=LEGAL_SYSTEM_PROMPT,
-                        messages=[{"role": "user", "content": ai_prompt}]
+                        messages=[{"role": "user", "content": _redacted_ai}]
                     )
                     ai_signals = _json.loads(clean_json(ai_resp.content[0].text))
                     if isinstance(ai_signals, list):

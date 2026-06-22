@@ -33,34 +33,42 @@ def client():
 def test_user(client):
     """Register a test user, yield its data, then clean up."""
     # Clean up any leftover from a previous failed run
-    conn = sqlite3.connect(DB_PATH)
-    old = conn.execute('SELECT id FROM users WHERE username=?', (TEST_USERNAME,)).fetchone()
-    if old:
-        conn.execute('DELETE FROM role_assignments WHERE user_id=?', (old[0],))
-        conn.execute('DELETE FROM users WHERE id=?',                 (old[0],))
-        conn.commit()
-    conn.close()
+    try:
+        import backend.demo1.pg as _pg
+        _pg.init_pool()
+        from backend.demo1.pg import get_conn as _get_conn
+        with _get_conn('default') as _conn:
+            old = _conn.execute('SELECT id FROM users WHERE username=%s', (TEST_USERNAME,)).fetchone()
+            if old:
+                _conn.execute('DELETE FROM role_assignments WHERE user_id=%s', (old['id'],))
+                _conn.execute('DELETE FROM users WHERE id=%s', (old['id'],))
+    except Exception as e:
+        print(f'[conftest] pre-cleanup warning: {e}')
 
     r = client.post('/auth/register', json={
         'username': TEST_USERNAME,
         'password': TEST_PASSWORD,
         'email':    TEST_EMAIL,
         'role':     'user',
-        'firm_id':  'test',
+        'firm_id':  'default',
     })
     assert r.status_code in (200, 201), f'Register failed: {r.text}'
     data = r.json()
 
     yield data
 
-    # Teardown
+    # Teardown — use Supabase pg connection
     uid = data.get('user_id')
-    conn = sqlite3.connect(DB_PATH)
-    if uid:
-        conn.execute('DELETE FROM role_assignments WHERE user_id=?', (uid,))
-    conn.execute('DELETE FROM users WHERE username=?', (TEST_USERNAME,))
-    conn.commit()
-    conn.close()
+    try:
+        import backend.demo1.pg as _pg
+        _pg.init_pool()
+        from backend.demo1.pg import get_conn as _get_conn
+        with _get_conn('default') as _conn:
+            if uid:
+                _conn.execute('DELETE FROM role_assignments WHERE user_id=%s', (uid,))
+            _conn.execute('DELETE FROM users WHERE username=%s', (TEST_USERNAME,))
+    except Exception as e:
+        print(f'[conftest] teardown warning: {e}')
 
 @pytest.fixture(scope='session')
 def auth_token(client, test_user):
