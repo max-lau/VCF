@@ -10,6 +10,7 @@ from backend.demo1.pdf_export import router as pdf_router
 from backend.demo1.pdf_module_export import router as module_pdf_router
 from backend.demo1.interrogation_export import router as interrogation_export_router
 from backend.demo1.audit_trail import AuditMiddleware, init_audit_table, router as audit_router
+from backend.demo1.rate_limit import check_rate_limit
 from backend.demo1.pii import redact_text, redaction_summary
 from backend.demo1.risk_scorer import router as risk_router
 from backend.demo1.document_comparison import router as comparison_router
@@ -360,10 +361,11 @@ def clean_json(raw: str) -> str:
     raw = re.sub(r'\s*```$', '', raw, flags=re.MULTILINE)
     return raw.strip()
 
-def claude_with_retry(func, *args, max_retries=3, **kwargs):
+def claude_with_retry(func, *args, max_retries=3, firm_id: str = "default", **kwargs):
     """Call a Claude API function with exponential backoff on 429/500."""
     import time
     import logging
+    check_rate_limit(firm_id, "ai")
     for attempt in range(max_retries):
         try:
             return func(*args, **kwargs)
@@ -419,7 +421,8 @@ Max 8 entities, max 10 keywords, max 3 tone items."""
             model=LLM_FAST,
             max_tokens=1000,
             system=LEGAL_SYSTEM_PROMPT,
-            messages=[{"role": "user", "content": _redacted_p}]
+            messages=[{"role": "user", "content": _redacted_p}],
+            firm_id=firm_id,
         )
         raw     = message.content[0].text
         cleaned = clean_json(raw)
@@ -588,7 +591,8 @@ Rules: extract ALL dates in chronological order, max 20 events."""
             model=LLM_FAST,
             max_tokens=1500,
             system=LEGAL_SYSTEM_PROMPT,
-            messages=[{"role": "user", "content": _redacted_p}]
+            messages=[{"role": "user", "content": _redacted_p}],
+            firm_id=getattr(request.state, "firm_id", "default"),
         )
         raw     = message.content[0].text
         cleaned = clean_json(raw)
@@ -706,7 +710,8 @@ Transcript:
             model=LLM_FAST,
             max_tokens=1500,
             system=LEGAL_SYSTEM_PROMPT,
-            messages=[{"role": "user", "content": _redacted_p}]
+            messages=[{"role": "user", "content": _redacted_p}],
+            firm_id=getattr(request.state, "firm_id", "default"),
         )
         raw = message.content[0].text
         cleaned = clean_json(raw)
@@ -748,7 +753,8 @@ def lease_diff(body: LeaseDiffInput, request: Request):
             model=LLM_FAST,
             max_tokens=1500,
             system=LEGAL_SYSTEM_PROMPT,
-            messages=[{"role": "user", "content": _redacted_p}]
+            messages=[{"role": "user", "content": _redacted_p}],
+            firm_id=getattr(request.state, "firm_id", "default"),
         )
         _lease_result = json.loads(clean_json(msg.content[0].text))
         save_work_product("/documents/lease-diff", _lease_result, getattr(request.state, "firm_id", "default"), body.case_id, input_preview=body.doc_a[:100])
@@ -813,7 +819,8 @@ def credibility_score(body: CredibilityInput, request: Request):
             model=LLM_FAST,
             max_tokens=2000,
             system=LEGAL_SYSTEM_PROMPT,
-            messages=[{"role": "user", "content": _redacted_p}]
+            messages=[{"role": "user", "content": _redacted_p}],
+            firm_id=getattr(request.state, "firm_id", "default"),
         )
         raw = msg.content[0].text
         _cred_result = json.loads(clean_json(raw))
@@ -886,7 +893,8 @@ def deposition_summarize(body: DepositionInput, request: Request):
             model=LLM_FAST,
             max_tokens=3000,
             system=LEGAL_SYSTEM_PROMPT,
-            messages=[{"role": "user", "content": _redacted_p}]
+            messages=[{"role": "user", "content": _redacted_p}],
+            firm_id=getattr(request.state, "firm_id", "default"),
         )
         raw = msg.content[0].text
         _depo_result = json.loads(clean_json(raw))
@@ -944,7 +952,8 @@ Document:
             model=LLM_FAST,
             max_tokens=2000,
             system=LEGAL_SYSTEM_PROMPT,
-            messages=[{"role": "user", "content": _redacted_p}]
+            messages=[{"role": "user", "content": _redacted_p}],
+            firm_id=getattr(request.state, "firm_id", "default"),
         )
         raw = msg.content[0].text.strip().replace("```json","").replace("```","").strip()
         _entities_result = json.loads(raw)
@@ -1298,7 +1307,8 @@ async def case_intelligence(case_id: int, request: Request):
                         model=LLM_STRONG,
                         max_tokens=600,
                         system=LEGAL_SYSTEM_PROMPT,
-                        messages=[{"role": "user", "content": _redacted_ai}]
+                        messages=[{"role": "user", "content": _redacted_ai}],
+                        firm_id=firm_id,
                     )
                     ai_signals = _json.loads(clean_json(ai_resp.content[0].text))
                     if isinstance(ai_signals, list):
