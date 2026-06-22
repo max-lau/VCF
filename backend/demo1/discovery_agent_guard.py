@@ -46,7 +46,7 @@ except ImportError as e:
 # Privilege screening — import the existing function directly so we
 # don't duplicate the enclave routing logic already in discovery_intake.py
 try:
-    from discovery_intake import _screen_privilege, _get_doc_text
+    from backend.demo1.discovery_intake import _screen_privilege, _get_doc_text
     _PRIV_OK = True
 except ImportError:
     _PRIV_OK = False

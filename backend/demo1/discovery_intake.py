@@ -2,7 +2,7 @@ import os, io, zipfile, hashlib, shutil, mimetypes
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Optional
-from fastapi import APIRouter, UploadFile, File, HTTPException, Form, BackgroundTasks
+from fastapi import APIRouter, Request, UploadFile, File, HTTPException, Form, BackgroundTasks
 from fastapi.responses import JSONResponse
 import sqlite3
 import httpx
@@ -777,10 +777,10 @@ async def extract_text_to_case(file_id: int, background_tasks: BackgroundTasks):
 # PASTE THIS AT THE BOTTOM OF discovery_intake.py
 # ─────────────────────────────────────────────────────────────────────────────
 
-from discovery_agent_guard import GuardedDiscoveryRunner, AgentLimits
+from backend.demo1.discovery_agent_guard import GuardedDiscoveryRunner, AgentLimits
 
 @router.post("/run-guarded")
-async def run_guarded_discovery(body: dict):
+async def run_guarded_discovery(request: Request, body: dict):
     """
     Guarded batch discovery run.
     Accepts file_ids already uploaded via /discovery/intake.
@@ -807,9 +807,13 @@ async def run_guarded_discovery(body: dict):
         { status: "completed"|"aborted"|"blocked_doc_gate"|"no_files",
           summary: { llm_calls, estimated_cost_usd, flagged_docs, zip_path, ... } }
     """
+    # Auth required — firm_id comes from JWT, not caller-supplied body
+    user_id = getattr(request.state, "user_id", None)
+    if not user_id:
+        raise HTTPException(status_code=401, detail="Authentication required")
+    firm_id      = getattr(request.state, "firm_id", "default")
     file_ids     = body.get("file_ids", [])
     case_number  = body.get("case_number", "").strip()
-    firm_id      = body.get("firm_id", "default")
     bates_prefix = body.get("bates_prefix", "PROD")
     bates_start  = int(body.get("bates_start", 1))
     output_dir   = body.get("output_dir", "/tmp")
