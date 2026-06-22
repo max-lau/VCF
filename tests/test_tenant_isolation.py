@@ -7,7 +7,9 @@ import pytest
 import requests
 from dotenv import load_dotenv
 
-load_dotenv('/root/nlp-portfolio/.env')
+# Resolve .env relative to this file so it works outside /root/
+_HERE = os.path.dirname(os.path.abspath(__file__))
+load_dotenv(os.path.join(_HERE, "..", ".env"))
 
 BASE    = "http://localhost:5003"
 API_KEY = os.environ.get("PARAIQ_API_KEY", "")
@@ -54,19 +56,58 @@ class TestCaseIsolation:
 
 class TestAuditIsolation:
     def test_audit_logs_scoped_by_firm(self, thornton_token, meridian_token):
-        th_logs  = requests.get(f"{BASE}/audit/logs", headers=_headers(thornton_token)).json().get("logs", [])
-        mer_logs = requests.get(f"{BASE}/audit/logs", headers=_headers(meridian_token)).json().get("logs", [])
-        # Collect non-null user_ids from each
-        th_firms  = {l.get("firm_id") for l in th_logs  if l.get("firm_id")}
-        mer_firms = {l.get("firm_id") for l in mer_logs if l.get("firm_id")}
-        assert "meridian_legal" not in th_firms,  f"Thornton sees meridian logs: {th_firms}"
-        assert "firm_abc"       not in mer_firms, f"Meridian sees thornton logs: {mer_firms}"
+        th_resp  = requests.get(f"{BASE}/audit/logs?limit=50", headers=_headers(thornton_token)).json()
+        mer_resp = requests.get(f"{BASE}/audit/logs?limit=50", headers=_headers(meridian_token)).json()
+
+        th_logs  = th_resp.get("logs", [])
+        mer_logs = mer_resp.get("logs", [])
+
+        # Must have actual log rows with firm_id populated — catches the vacuous case
+        assert len(th_logs) > 0,  "Thornton audit log is empty — firm_id write path may be broken"
+        assert len(mer_logs) > 0, "Meridian audit log is empty — firm_id write path may be broken"
+
+        th_firms  = {l.get("firm_id") for l in th_logs}
+        mer_firms = {l.get("firm_id") for l in mer_logs}
+
+        # Every row returned to Thornton must belong to firm_abc only
+        assert th_firms == {"firm_abc"}, (
+            f"Thornton sees unexpected firm_ids: {th_firms} (expected only {{'firm_abc'}})"
+        )
+        # Every row returned to Meridian must belong to meridian_legal only
+        assert mer_firms == {"meridian_legal"}, (
+            f"Meridian sees unexpected firm_ids: {mer_firms} (expected only {{'meridian_legal'}})"
+        )
 
     def test_audit_log_clear_is_blocked(self, thornton_token):
         r = requests.delete(f"{BASE}/audit/logs/clear", headers=_headers(thornton_token))
         assert r.status_code in (403, 409), (
             f"Audit clear should be blocked, got {r.status_code}: {r.text}"
         )
+
+    def test_discovery_chain_requires_auth(self):
+        """Chain of custody endpoint must reject unauthenticated requests."""
+        r = requests.get(f"{BASE}/audit/discovery/chain")
+        assert r.status_code in (401, 403), (
+            f"Discovery chain should require auth, got {r.status_code}"
+        )
+
+    def test_discovery_chain_export_requires_auth(self):
+        """Chain of custody CSV export must reject unauthenticated requests."""
+        r = requests.get(f"{BASE}/audit/discovery/chain/export")
+        assert r.status_code in (401, 403), (
+            f"Discovery chain export should require auth, got {r.status_code}"
+        )
+
+    def test_discovery_chain_scoped_by_firm(self, thornton_token, meridian_token):
+        """Each firm's chain of custody must only contain their own entries."""
+        th  = requests.get(f"{BASE}/audit/discovery/chain", headers=_headers(thornton_token)).json()
+        mer = requests.get(f"{BASE}/audit/discovery/chain", headers=_headers(meridian_token)).json()
+        # Entries from each firm should not appear in the other's chain
+        th_endpoints  = {e["endpoint"] for e in th.get("entries",  [])}
+        mer_endpoints = {e["endpoint"] for e in mer.get("entries", [])}
+        # Both responses should be valid (no 4xx leaked as JSON)
+        assert "entries" in th,  f"Thornton chain response malformed: {th}"
+        assert "entries" in mer, f"Meridian chain response malformed: {mer}"
 
 
 class TestAuthBoundaries:

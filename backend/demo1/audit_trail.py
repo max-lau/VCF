@@ -27,7 +27,6 @@ def _require_auth(request: Request):
         raise HTTPException(status_code=401, detail="Authentication required")
 
 
-
 # ── DB Setup ───────────────────────────────────────────────────────────────────
 
 def init_audit_table():
@@ -36,14 +35,14 @@ def init_audit_table():
 
 
 def log_request(method, endpoint, status_code, response_time_ms,
-                client_ip, body_size, error=None, user_id=None):
+                client_ip, body_size, error=None, user_id=None, firm_id="default"):
     try:
-        with get_conn("default") as conn:
+        with get_conn(firm_id) as conn:
             conn.execute("""
                 INSERT INTO audit_log
                   (timestamp, method, endpoint, status_code,
-                   response_time_ms, client_ip, body_size_bytes, error, user_id)
-                VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s)
+                   response_time_ms, client_ip, body_size_bytes, error, user_id, firm_id)
+                VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)
             """, (
                 datetime.now(timezone.utc).isoformat(),
                 method, endpoint, status_code,
@@ -51,6 +50,7 @@ def log_request(method, endpoint, status_code, response_time_ms,
                 client_ip, body_size,
                 str(error) if error else None,
                 user_id,
+                firm_id,
             ))
     except Exception as e:
         print(f"[AuditTrail] Log error: {e}")
@@ -72,17 +72,26 @@ class AuditMiddleware(BaseHTTPMiddleware):
 
         start     = time.perf_counter()
         client_ip = request.client.host if request.client else "unknown"
-        # Extract user_id from JWT if present
-        user_id   = None
-        auth_hdr  = request.headers.get("authorization", "")
+
+        # Extract user_id + firm_id from JWT if present
+        user_id = None
+        firm_id = "default"
+        auth_hdr = request.headers.get("authorization", "")
         if auth_hdr.startswith("Bearer "):
             try:
                 import jwt as _jwt
                 import os as _os
-                _payload = _jwt.decode(auth_hdr[7:], _os.environ.get("JWT_SECRET_KEY","nlp-portfolio-secret-change-in-production"), algorithms=["HS256"], options={"verify_exp": True})
-                user_id  = int(_payload["sub"]) if _payload.get("sub") else None
+                _payload = _jwt.decode(
+                    auth_hdr[7:],
+                    _os.environ.get("JWT_SECRET_KEY", "nlp-portfolio-secret-change-in-production"),
+                    algorithms=["HS256"],
+                    options={"verify_exp": True},
+                )
+                user_id = int(_payload["sub"]) if _payload.get("sub") else None
+                firm_id = _payload.get("firm_id", "default")
             except Exception:
                 pass
+
         body      = await request.body()
         body_size = len(body)
 
@@ -110,6 +119,7 @@ class AuditMiddleware(BaseHTTPMiddleware):
             body_size        = body_size,
             error            = error,
             user_id          = user_id,
+            firm_id          = firm_id,
         )
 
         return response
@@ -126,9 +136,10 @@ def get_audit_logs(
     limit:    int           = 50,
 ):
     _require_auth(request)
-    limit  = min(limit, 200)
-    sql    = "SELECT * FROM audit_log WHERE TRUE"
-    params = []
+    limit   = min(limit, 200)
+    firm_id = getattr(request.state, "firm_id", "default")
+    sql     = "SELECT * FROM audit_log WHERE firm_id = %s"
+    params  = [firm_id]
 
     if endpoint:
         sql += " AND endpoint ILIKE %s"
@@ -143,7 +154,6 @@ def get_audit_logs(
     sql += " ORDER BY id DESC LIMIT %s"
     params.append(limit)
 
-    firm_id = getattr(request.state, "firm_id", "default")
     with get_conn(firm_id) as conn:
         rows = conn.execute(sql, params).fetchall()
 
@@ -156,7 +166,7 @@ def audit_stats(request: Request):
     firm_id = getattr(request.state, "firm_id", "default")
     with get_conn(firm_id) as conn:
         total = conn.execute(
-            "SELECT COUNT(*) AS n FROM audit_log"
+            "SELECT COUNT(*) AS n FROM audit_log WHERE firm_id = %s", (firm_id,)
         ).fetchone()["n"]
 
         by_endpoint = conn.execute("""
@@ -165,32 +175,35 @@ def audit_stats(request: Request):
                    MIN(status_code) AS min_status,
                    MAX(status_code) AS max_status
             FROM audit_log
+            WHERE firm_id = %s
             GROUP BY endpoint
             ORDER BY cnt DESC
             LIMIT 20
-        """).fetchall()
+        """, (firm_id,)).fetchall()
 
         by_status = conn.execute("""
             SELECT status_code, COUNT(*) AS cnt
             FROM audit_log
+            WHERE firm_id = %s
             GROUP BY status_code
             ORDER BY cnt DESC
-        """).fetchall()
+        """, (firm_id,)).fetchall()
 
         slowest = conn.execute("""
             SELECT endpoint, method, response_time_ms, timestamp
             FROM audit_log
+            WHERE firm_id = %s
             ORDER BY response_time_ms DESC
             LIMIT 5
-        """).fetchall()
+        """, (firm_id,)).fetchall()
 
         errors = conn.execute("""
             SELECT endpoint, method, error, timestamp
             FROM audit_log
-            WHERE error IS NOT NULL
+            WHERE firm_id = %s AND error IS NOT NULL
             ORDER BY id DESC
             LIMIT 10
-        """).fetchall()
+        """, (firm_id,)).fetchall()
 
     return {
         "success":           True,
@@ -204,15 +217,37 @@ def audit_stats(request: Request):
 
 @router.delete("/logs/clear")
 def clear_audit_logs(request: Request):
-    # Only paraiq_super may clear audit logs
+    """
+    Clears audit logs for the caller's firm only (never cross-firm).
+    Restricted to paraiq_super. The clear action itself is logged.
+    """
+    _require_auth(request)
     role = getattr(request.state, "role", "")
     if role != "paraiq_super":
         from fastapi import HTTPException
         raise HTTPException(status_code=403, detail="Only super admins may clear audit logs")
+
     firm_id = getattr(request.state, "firm_id", "default")
     with get_conn(firm_id) as conn:
-        conn.execute("DELETE FROM audit_log WHERE TRUE")
-    return {"success": True, "message": "Audit log cleared"}
+        count = conn.execute(
+            "SELECT COUNT(*) AS n FROM audit_log WHERE firm_id = %s", (firm_id,)
+        ).fetchone()["n"]
+        conn.execute("DELETE FROM audit_log WHERE firm_id = %s", (firm_id,))
+
+    # Log the clear action itself so there's always a trail
+    log_request(
+        method           = "DELETE",
+        endpoint         = "/audit/logs/clear",
+        status_code      = 200,
+        response_time_ms = 0,
+        client_ip        = request.client.host if request.client else "unknown",
+        body_size        = 0,
+        error            = None,
+        user_id          = getattr(request.state, "user_id", None),
+        firm_id          = firm_id,
+    )
+
+    return {"success": True, "message": f"Cleared {count} audit log entries for firm '{firm_id}'"}
 
 
 # ── Chain of Custody (Discovery) ──────────────────────────────────────────────
@@ -241,16 +276,19 @@ def label_action(method: str, endpoint: str) -> str:
 
 
 @router.get("/discovery/chain")
-def get_chain_of_custody(limit: int = 200):
-    with get_conn("default") as conn:
+def get_chain_of_custody(request: Request, limit: int = 200):
+    _require_auth(request)
+    firm_id = getattr(request.state, "firm_id", "default")
+    with get_conn(firm_id) as conn:
         rows = conn.execute("""
             SELECT * FROM audit_log
-            WHERE (endpoint ILIKE '/discovery/%'
-                OR endpoint ILIKE '/bates/%'
-                OR endpoint ILIKE '/production/%')
+            WHERE firm_id = %s
+              AND (endpoint ILIKE '/discovery/%%'
+                OR endpoint ILIKE '/bates/%%'
+                OR endpoint ILIKE '/production/%%')
             ORDER BY id ASC
             LIMIT %s
-        """, (limit,)).fetchall()
+        """, (firm_id, limit)).fetchall()
 
     entries = []
     for r in rows:
@@ -270,15 +308,18 @@ def get_chain_of_custody(limit: int = 200):
 
 
 @router.get("/discovery/chain/export")
-def export_chain_csv():
-    with get_conn("default") as conn:
+def export_chain_csv(request: Request):
+    _require_auth(request)
+    firm_id = getattr(request.state, "firm_id", "default")
+    with get_conn(firm_id) as conn:
         rows = conn.execute("""
             SELECT * FROM audit_log
-            WHERE (endpoint ILIKE '/discovery/%'
-                OR endpoint ILIKE '/bates/%'
-                OR endpoint ILIKE '/production/%')
+            WHERE firm_id = %s
+              AND (endpoint ILIKE '/discovery/%%'
+                OR endpoint ILIKE '/bates/%%'
+                OR endpoint ILIKE '/production/%%')
             ORDER BY id ASC
-        """).fetchall()
+        """, (firm_id,)).fetchall()
 
     buf = _io.StringIO()
     w   = _csv.writer(buf)
