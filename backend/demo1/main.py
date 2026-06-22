@@ -1061,7 +1061,7 @@ from fastapi.staticfiles import StaticFiles
 
 
 @app.get("/cases/{case_id}/wall", tags=["Cases"])
-async def case_wall(case_id: int, request: Request):
+def case_wall(case_id: int, request: Request):
     """Unified chronological matter dossier — all case activity in one feed."""
     import json as _json
     from backend.demo1.pg import get_conn
@@ -1164,7 +1164,7 @@ async def case_wall(case_id: int, request: Request):
     return {"items": items, "count": len(items), "case_id": case_id}
 
 @app.get("/cases/{case_id}/intelligence", tags=["Cases"])
-async def case_intelligence(case_id: int, request: Request):
+def case_intelligence(case_id: int, request: Request):
     """Aggregate all intelligence signals for a case."""
     import re
     from datetime import date, datetime, timedelta
