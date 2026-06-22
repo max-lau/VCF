@@ -11,6 +11,7 @@ from backend.demo1.pdf_module_export import router as module_pdf_router
 from backend.demo1.interrogation_export import router as interrogation_export_router
 from backend.demo1.audit_trail import AuditMiddleware, init_audit_table, router as audit_router
 from backend.demo1.rate_limit import check_rate_limit
+from backend.demo1.observability.tracer import trace_claude_call
 from backend.demo1.pii import redact_text, redaction_summary
 from backend.demo1.risk_scorer import router as risk_router
 from backend.demo1.document_comparison import router as comparison_router
@@ -362,13 +363,32 @@ def clean_json(raw: str) -> str:
     return raw.strip()
 
 def claude_with_retry(func, *args, max_retries=3, firm_id: str = "default", **kwargs):
-    """Call a Claude API function with exponential backoff on 429/500."""
+    """Call a Claude API function with exponential backoff on 429/500.
+    When func is client.messages.create, routes through Langfuse tracer automatically.
+    """
     import time
     import logging
     check_rate_limit(firm_id, "ai")
+    # Route through Langfuse tracer when func is client.messages.create
+    # and all required kwargs (model, messages, max_tokens) are present
+    _can_trace = (
+        func is client.messages.create
+        and "model" in kwargs
+        and "messages" in kwargs
+        and "max_tokens" in kwargs
+    )
     for attempt in range(max_retries):
         try:
-            return func(*args, **kwargs)
+            if _can_trace:
+                response, _trace_id = trace_claude_call(
+                    client=client,
+                    name=f"paraiq/{firm_id}",
+                    firm_id=firm_id,
+                    **kwargs,
+                )
+                return response
+            else:
+                return func(*args, **kwargs)
         except anthropic.RateLimitError:
             wait = 2 ** attempt
             logging.warning(f"Anthropic rate limit hit, retrying in {wait}s (attempt {attempt+1}/{max_retries})")

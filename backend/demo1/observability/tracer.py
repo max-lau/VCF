@@ -3,7 +3,7 @@ ParaIQ AI Observability — Langfuse 4.x integration.
 """
 import os
 from dotenv import load_dotenv
-load_dotenv('/root/nlp-portfolio/.env')
+load_dotenv(os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', '..', '..', '.env'))
 from langfuse import Langfuse
 from langfuse.types import TraceContext
 from typing import Optional
@@ -29,6 +29,7 @@ def trace_claude_call(
     user_id: str = "unknown",
     session_id: str = None,
     tags: list = None,
+    firm_id: str = "default",
     **kwargs
 ):
     """
@@ -44,7 +45,7 @@ def trace_claude_call(
         as_type="generation",
         input=messages,
         model=model,
-        metadata={"user_id": user_id, "session_id": session_id, "tags": tags or ["paraiq"]},
+        metadata={"user_id": user_id, "session_id": session_id, "firm_id": firm_id, "tags": tags or ["paraiq"]},
     ) as obs:
         try:
             response = client.messages.create(
