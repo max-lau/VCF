@@ -1,6 +1,6 @@
 from pathlib import Path
 import os
-﻿"""
+"""
 pdf_export.py
 =============
 FastAPI APIRouter: Export to PDF (#8)
