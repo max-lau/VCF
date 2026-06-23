@@ -69,8 +69,11 @@ jobs:
 
       - name: Start FastAPI server
         run: |
-          python -m uvicorn backend.demo1.main:app --host 0.0.0.0 --port 5003 &
+          python -m uvicorn backend.demo1.main:app --host 0.0.0.0 --port 5003             > /tmp/uvicorn.log 2>&1 &
           echo $! > /tmp/uvicorn.pid
+          sleep 2
+          echo "=== Server log (first 50 lines) ==="
+          head -50 /tmp/uvicorn.log || true
 
       - name: Wait for server to be healthy
         run: |
@@ -82,8 +85,8 @@ jobs:
             echo "Waiting... attempt $i"
             sleep 2
           done
-          echo "Server failed to start"
-          cat /tmp/uvicorn.pid | xargs kill 2>/dev/null || true
+          echo "Server failed to start — dumping logs:"
+          cat /tmp/uvicorn.log || true
           exit 1
 
       - name: Run tenant isolation tests
