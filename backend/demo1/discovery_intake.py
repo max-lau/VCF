@@ -9,7 +9,7 @@ import httpx
 
 router = APIRouter(prefix="/discovery", tags=["discovery"])
 
-UPLOAD_DIR = Path("/root/nlp-portfolio/uploads/discovery")
+UPLOAD_DIR = Path(os.environ.get("DISCOVERY_UPLOAD_DIR", str(Path(__file__).parent.parent.parent / "uploads" / "discovery")))
 UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
 
 DB_PATH = "/root/nlp-portfolio/backend/demo1/analyses.db"
