@@ -72,10 +72,6 @@ jobs:
       - name: Download spacy model
         run: python -m spacy download en_core_web_sm
 
-      - name: Debug DATABASE_URL format
-        run: |
-          python -c "import os; url=os.environ.get('DATABASE_URL',''); print('Starts with postgresql:', url.startswith('postgresql')); print('Contains DATABASE_URL=:', 'DATABASE_URL=' in url); print('Length:', len(url))"
-
       - name: Start FastAPI server
         run: |
           python -m uvicorn backend.demo1.main:app --host 0.0.0.0 --port 5003             > /tmp/uvicorn.log 2>&1 &
