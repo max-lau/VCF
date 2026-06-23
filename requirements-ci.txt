@@ -35,5 +35,22 @@ aiofiles==25.1.0
 aiosmtplib==5.1.0
 backoff==2.2.1
 
+# Google / OAuth
+google-auth==2.53.0
+google-api-python-client==2.197.0
+google-auth-oauthlib==1.4.0
+
+# Microsoft
+msal==1.37.0
+
+# Utilities
+python-magic==0.4.27
+psutil==7.2.2
+pytz==2026.2
+
+# ML extras
+scikit-learn==1.8.0
+spacy==3.8.14
+
 # Vector store
 chromadb==1.5.9
