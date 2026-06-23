@@ -22,7 +22,7 @@ from dotenv import load_dotenv
 
 load_dotenv()
 _client = anthropic.Anthropic(api_key=os.getenv("ANTHROPIC_API_KEY"))
-DB_PATH = "analyses.db"
+DB_PATH = os.environ.get("PARAIQ_DB", str(__import__("pathlib").Path(__file__).parent / "analyses.db"))
 
 
 def _get_db():
@@ -387,7 +387,7 @@ def _scan_text_for_dates(text: str) -> list:
 def get_deadline_radar() -> dict:
     """Scan all open cases for upcoming dates extracted from documents."""
     try:
-        conn = sqlite3.connect("/root/nlp-portfolio/analyses.db")
+        conn = sqlite3.connect(os.environ.get("PARAIQ_DB", str(__import__("pathlib").Path(__file__).parent / "analyses.db")))
         conn.row_factory = sqlite3.Row
         cur = conn.cursor()
 

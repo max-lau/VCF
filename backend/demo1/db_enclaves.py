@@ -12,7 +12,7 @@ import os
 from datetime import datetime, timezone
 from typing import Optional
 
-CLOUD_DB = os.getenv("ANALYSES_DB_PATH", "/root/nlp-portfolio/analyses.db")
+CLOUD_DB = os.environ.get("PARAIQ_DB", str(__import__("pathlib").Path(__file__).parent / "analyses.db"))
 
 def _now():
     return datetime.now(timezone.utc).isoformat()

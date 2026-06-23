@@ -20,7 +20,7 @@ from backend.demo1.routers.morning_brief_router import run_all_firms_brief
 
 log = logging.getLogger("risk_watcher")
 
-DB_PATH       = "backend/demo1/analyses.db"
+DB_PATH       = os.environ.get("PARAIQ_DB", str(__import__("pathlib").Path(__file__).parent / "analyses.db"))
 CF_TOKEN      = os.getenv("CF_API_TOKEN", "")
 CF_ZONE       = os.getenv("CF_ZONE_ID", "")
 SLACK_URL     = os.getenv("SLACK_WEBHOOK_URL", "")

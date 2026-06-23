@@ -27,7 +27,7 @@ import anthropic
 pytesseract.pytesseract.tesseract_cmd = 'tesseract'
 
 router  = APIRouter()
-DB_PATH = "backend/demo1/analyses.db"
+DB_PATH = os.environ.get("PARAIQ_DB", str(__import__("pathlib").Path(__file__).parent / "analyses.db"))
 
 
 def get_conn():

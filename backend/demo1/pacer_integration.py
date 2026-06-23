@@ -53,7 +53,7 @@ PACER_BASE     = "https://pacer.uscourts.gov"
 PACER_AUTH_URL = f"{PACER_BASE}/services/cso-auth"
 PACER_API_BASE = "https://pcl.uscourts.gov/pcl-public-api/rest"
 CL_BASE        = "https://www.courtlistener.com/api/rest/v3"
-DB_PATH        = "analyses.db"
+DB_PATH        = os.environ.get("PARAIQ_DB", str(__import__("pathlib").Path(__file__).parent / "analyses.db"))
 TOKEN_TTL_SECS = 3600
 
 # ── CourtListener token (free at courtlistener.com/profile/api/) ───────────────

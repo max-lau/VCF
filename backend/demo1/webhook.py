@@ -21,7 +21,7 @@ from pydantic import BaseModel, HttpUrl
 from typing import Optional
 
 router  = APIRouter()
-DB_PATH = "backend/demo1/analyses.db"
+DB_PATH = os.environ.get("PARAIQ_DB", str(__import__("pathlib").Path(__file__).parent / "analyses.db"))
 
 # ── Valid event types ──────────────────────────────────────────────────────────
 VALID_EVENTS = {

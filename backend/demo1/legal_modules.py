@@ -7,7 +7,7 @@ from typing import Optional
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
 
-DB = os.getenv("ANALYSES_DB_PATH", "/root/nlp-portfolio/backend/demo1/analyses.db")
+DB = os.environ.get("PARAIQ_DB", str(__import__("pathlib").Path(__file__).parent / "analyses.db"))
 
 def get_conn():
     conn = sqlite3.connect(DB)
