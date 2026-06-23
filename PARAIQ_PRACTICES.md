@@ -213,20 +213,27 @@ This feeds into the Vue dashboard's run history view and gives attorneys visibil
 ## 12. Deployment Checklist
 
 ```bash
-# 1. Guard file must be at project root (not demo1/) — Python path issue
-cp backend/demo1/discovery_agent_guard.py /root/nlp-portfolio/discovery_agent_guard.py
+# 1. Guard file lives at backend/demo1/discovery_agent_guard.py only
+# (previously required dual-location sync — fixed June 2026)
 
 # 2. Always run with venv Python
-/root/nlp-portfolio/.venv/bin/python3 discovery_agent_guard.py
+/root/nlp-portfolio/.venv/bin/python3 -m pytest tests/ -v
 
-# 3. After any patch, copy to both locations
-cp discovery_agent_guard.py backend/demo1/discovery_agent_guard.py
+# 3. After any patch, compile check before restart
+.venv/bin/python3 -m py_compile backend/demo1/discovery_agent_guard.py
 
 # 4. Restart API after changes
-pm2 restart paraiq-api
+pm2 restart paraiq-api && pm2 logs paraiq-api --lines 20 --nostream
 
-# 5. Verify privilege_log schema has all columns
-sqlite3 backend/demo1/analyses.db "PRAGMA table_info(privilege_log);"
+# 5. Verify privilege_log schema (Supabase)
+.venv/bin/python3 -c "
+from dotenv import load_dotenv; load_dotenv('.env')
+import psycopg2, os
+conn = psycopg2.connect(os.environ['DATABASE_URL'])
+cur = conn.cursor()
+cur.execute("SELECT column_name FROM information_schema.columns WHERE table_name='privilege_log'")
+print([r[0] for r in cur.fetchall()])
+"
 ```
 
 ---
@@ -246,7 +253,7 @@ sqlite3 backend/demo1/analyses.db "PRAGMA table_info(privilege_log);"
 This project follows the global **CLAUDE.md** engineering standards — see `CLAUDE.md` for the full specification.
 
 **ParaIQ-specific reminders:**
-- Guard file lives at `/root/nlp-portfolio/` AND `/root/nlp-portfolio/backend/demo1/` — always sync both after any patch
+- Guard file lives at `backend/demo1/discovery_agent_guard.py` — single location, proper package import
 - Always use `/root/nlp-portfolio/.venv/bin/python3` — never bare `python3`
 - Pre-flight grep before any new import: `grep "^def " backend/demo1/*.py`
 - Tests: `/root/nlp-portfolio/.venv/bin/python3 -m pytest tests/test_discovery_agent_guard.py -v`

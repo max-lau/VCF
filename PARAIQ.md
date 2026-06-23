@@ -147,7 +147,72 @@ EMAIL_QUIET_HOUR_START=21, EMAIL_QUIET_HOUR_END=7
 ---
 
 ## Upcoming
-- User-defined voice shortcuts (Option B)
-- Multi-tenant RLS hardening (prerequisite for real firm onboarding)
+- User-defined voice shortcuts (Option B — per-user phrase→command mapping in Supabase)
 - Outlook Graph webhooks (replace polling with push)
 - Email intake case link UI (click case badge to open matter)
+- Gmail poller token expiry fix (pre-existing noise in PM2 logs)
+- Broader test coverage (currently ~3%, target 20%+)
+- Course 2 MLOps: MLflow → PyTorch → LoRA/PEFT
+
+---
+
+## CI/CD (GitHub Actions)
+
+### Workflow
+- File: `.github/workflows/ci.yml`
+- Triggers: every push to `main`, every pull request to `main`
+- Runtime: ~3-4 minutes on `ubuntu-latest`
+- Steps: Checkout → Python 3.12 → Install deps → spacy model download → Compile check → Start server → Health check → pytest → Stop server
+
+### Secrets (GitHub Repository Secrets)
+Required secrets at `https://github.com/max-lau/nlp-portfolio/settings/secrets/actions`:
+- `DATABASE_URL` — Supabase session pooler URL (value only, no `DATABASE_URL=` prefix)
+- `JWT_SECRET_KEY` — must match VPS `.env`
+- `PARAIQ_API_KEY` — must match VPS `.env`
+- `ANTHROPIC_API_KEY` — Claude API key
+- `LANGFUSE_PUBLIC_KEY`, `LANGFUSE_SECRET_KEY`, `LANGFUSE_BASE_URL` — Langfuse US region
+
+### Dependencies
+- `requirements-ci.txt` — lean 35-package subset of full venv (excludes torch, transformers, MLflow)
+- Full venv: `requirements.txt` (273 packages, used on VPS only)
+- spacy model: `en_core_web_sm` downloaded as a workflow step (not a pip package)
+
+### To trigger a run manually
+```bash
+git commit --allow-empty -m "ci: trigger run"
+git push origin main
+```
+
+### Reading the Actions tab
+- Green ✅ = all 11 tenant isolation tests passed
+- Red ❌ = click the failed step to see the traceback
+- "Wait for server to be healthy" failing = server crashed at startup, check the dumped log
+
+---
+
+## Security Hardening (v4 Audit — June 2026)
+
+### What was fixed (score moved 3/10 → 7/10+)
+- **§2.1** Audit write path now firm-scoped — `log_request()` inserts `firm_id` from JWT
+- **§2.2** `/audit/discovery/chain` + `/export` require auth + firm scoping
+- **§2.3** `rate_limit.py` wired into all 8 `claude_with_retry` call sites
+- **§2.4** Langfuse `trace_claude_call()` wired into `claude_with_retry` — all Claude calls now traced
+- **§2.5** `/discovery/run-guarded` endpoint is real code with auth + firm scoping
+- **§2.6** `redaction.py` migrated from SQLite to Supabase Postgres
+- **§2.7** `/audit/logs/clear` now per-firm only; logs the clear action itself
+- **§2.8** `case_wall` + `case_intelligence` converted from `async def` to `def` (psycopg2 is sync)
+- **§2.9** All hardcoded `/root/nlp-portfolio/` paths replaced with env-configurable relative paths
+- **§2.10** `get_connection()` shim deprecated; `contradiction.py` + `entity_linker.py` use `get_conn(firm_id)`
+
+### Key patterns enforced
+- Every Claude call: `check_rate_limit(firm_id, "ai")` → `trace_claude_call()` → response
+- Every audit row: `firm_id` written at insert time, read with `WHERE firm_id = %s`
+- All upload/storage dirs: configurable via env vars (`DISCOVERY_UPLOAD_DIR`, `BATES_DIR`, `REDACTION_STORAGE_DIR`, etc.)
+- DB paths: all modules use `PARAIQ_DB` env var with `Path(__file__).parent` relative fallback
+
+### Tenant isolation test suite
+```bash
+cd /root/nlp-portfolio
+.venv/bin/python3 -m pytest tests/test_tenant_isolation.py -v
+# 11 passed, 1 skipped (Meridian has no cases yet)
+```
