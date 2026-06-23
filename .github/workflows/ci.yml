@@ -1,0 +1,98 @@
+name: ParaIQ CI
+
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+    branches: [ main ]
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    env:
+      DATABASE_URL:        ${{ secrets.DATABASE_URL }}
+      JWT_SECRET_KEY:      ${{ secrets.JWT_SECRET_KEY }}
+      PARAIQ_API_KEY:      ${{ secrets.PARAIQ_API_KEY }}
+      ANTHROPIC_API_KEY:   ${{ secrets.ANTHROPIC_API_KEY }}
+      LANGFUSE_PUBLIC_KEY: ${{ secrets.LANGFUSE_PUBLIC_KEY }}
+      LANGFUSE_SECRET_KEY: ${{ secrets.LANGFUSE_SECRET_KEY }}
+      LANGFUSE_BASE_URL:   ${{ secrets.LANGFUSE_BASE_URL }}
+      # Stub values — not exercised by tenant isolation tests
+      OPENAI_API_KEY:          stub
+      GMAIL_CLIENT_ID:         stub
+      GMAIL_CLIENT_SECRET:     stub
+      GMAIL_REDIRECT_URI:      stub
+      OUTLOOK_CLIENT_ID:       stub
+      OUTLOOK_CLIENT_SECRET:   stub
+      OUTLOOK_REDIRECT_URI:    stub
+      OUTLOOK_TENANT_ID:       stub
+      HERMES_SERVICE_JWT:      stub
+      COURTLISTENER_API_KEY:   stub
+      SLACK_WEBHOOK_URL:       stub
+      SMTP_HOST:               stub
+      SMTP_PORT:               "25"
+      SMTP_USER:               stub
+      SMTP_PASS:               stub
+      ALERT_EMAIL_TO:          stub
+      CF_API_TOKEN:            stub
+      CF_ZONE_ID:              stub
+      PARAIQ_ADMIN_KEY:        stub
+      TESTING:                 "1"
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python 3.12
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: "pip"
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements-ci.txt
+
+      - name: Compile check — verify no syntax errors
+        run: |
+          python -m py_compile backend/demo1/main.py
+          python -m py_compile backend/demo1/audit_trail.py
+          python -m py_compile backend/demo1/redaction.py
+          python -m py_compile backend/demo1/rate_limit.py
+          python -m py_compile backend/demo1/observability/tracer.py
+          python -m py_compile backend/demo1/discovery_intake.py
+          python -m py_compile backend/demo1/discovery_agent_guard.py
+          echo "All files compile OK"
+
+      - name: Start FastAPI server
+        run: |
+          python -m uvicorn backend.demo1.main:app --host 0.0.0.0 --port 5003 &
+          echo $! > /tmp/uvicorn.pid
+
+      - name: Wait for server to be healthy
+        run: |
+          for i in $(seq 1 30); do
+            if curl -sf http://localhost:5003/health > /dev/null 2>&1; then
+              echo "Server is up after ${i}s"
+              exit 0
+            fi
+            echo "Waiting... attempt $i"
+            sleep 2
+          done
+          echo "Server failed to start"
+          cat /tmp/uvicorn.pid | xargs kill 2>/dev/null || true
+          exit 1
+
+      - name: Run tenant isolation tests
+        run: |
+          python -m pytest tests/test_tenant_isolation.py -v --tb=short
+
+      - name: Stop server
+        if: always()
+        run: |
+          if [ -f /tmp/uvicorn.pid ]; then
+            cat /tmp/uvicorn.pid | xargs kill 2>/dev/null || true
+          fi
