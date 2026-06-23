@@ -40,6 +40,8 @@ jobs:
       CF_ZONE_ID:              stub
       PARAIQ_ADMIN_KEY:        stub
       TESTING:                 "1"
+      PARAIQ_DB:               "/tmp/paraiq_ci.db"
+      DISCOVERY_UPLOAD_DIR:    "/tmp/paraiq_uploads"
 
     steps:
       - name: Checkout

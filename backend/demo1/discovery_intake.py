@@ -12,7 +12,7 @@ router = APIRouter(prefix="/discovery", tags=["discovery"])
 UPLOAD_DIR = Path(os.environ.get("DISCOVERY_UPLOAD_DIR", str(Path(__file__).parent.parent.parent / "uploads" / "discovery")))
 UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
 
-DB_PATH = "/root/nlp-portfolio/backend/demo1/analyses.db"
+DB_PATH = os.environ.get("PARAIQ_DB", str(Path(__file__).parent / "analyses.db"))
 
 def get_conn():
     conn = sqlite3.connect(DB_PATH)
@@ -43,20 +43,23 @@ def init_discovery_table():
     conn.commit()
 
     # Migrate existing tables — add columns if missing
-    existing = {row[1] for row in conn.execute("PRAGMA table_info(discovery_files)").fetchall()}
-    migrations = [
-        ("privilege_flag",       "INTEGER"),
-        ("privilege_type",       "TEXT"),
-        ("privilege_confidence", "REAL"),
-        ("requires_review",      "INTEGER"),
-    ]
-    for col, typedef in migrations:
-        if col not in existing:
-            try:
-                conn.execute(f"ALTER TABLE discovery_files ADD COLUMN {col} {typedef}")
-            except Exception:
-                pass
-    conn.commit()
+    try:
+        existing = {row[1] for row in conn.execute("PRAGMA table_info(discovery_files)").fetchall()}
+        migrations = [
+            ("privilege_flag",       "INTEGER"),
+            ("privilege_type",       "TEXT"),
+            ("privilege_confidence", "REAL"),
+            ("requires_review",      "INTEGER"),
+        ]
+        for col, typedef in migrations:
+            if col not in existing:
+                try:
+                    conn.execute(f"ALTER TABLE discovery_files ADD COLUMN {col} {typedef}")
+                except Exception:
+                    pass
+        conn.commit()
+    except Exception:
+        pass
     conn.close()
 
 init_discovery_table()
