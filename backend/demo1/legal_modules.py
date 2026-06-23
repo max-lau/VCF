@@ -1,3 +1,4 @@
+import os
 """
 legal_modules.py — Depositions, Motions, Contracts routers
 """
