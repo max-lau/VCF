@@ -1,3 +1,5 @@
+from pathlib import Path
+import os
 import sqlite3, csv, io, os, json
 from datetime import datetime, timezone
 from typing import Optional, List
@@ -8,7 +10,7 @@ import anthropic
 
 router = APIRouter(prefix="/privilege", tags=["Privilege Log"])
 
-DB_PATH = "/root/nlp-portfolio/backend/demo1/analyses.db"
+DB_PATH = os.environ.get("PARAIQ_DB", str(Path(__file__).parent / "analyses.db"))
 def get_client():
     import anthropic
     return anthropic.Anthropic(api_key=os.getenv("ANTHROPIC_API_KEY"))

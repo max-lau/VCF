@@ -1,3 +1,5 @@
+from pathlib import Path
+import os
 import io, sqlite3, json, os
 from datetime import datetime
 from fastapi import APIRouter
@@ -9,7 +11,7 @@ from reportlab.lib import colors
 from reportlab.lib.units import inch
 
 router = APIRouter()
-DB = "/root/nlp-portfolio/analyses.db"
+DB = os.environ.get("PARAIQ_DB", str(Path(__file__).parent / "analyses.db"))
 
 def get_conn():
     conn = sqlite3.connect(DB)

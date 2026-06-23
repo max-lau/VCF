@@ -1,3 +1,4 @@
+import os
 import io, csv, sqlite3, zipfile
 from pathlib import Path
 from datetime import datetime, timezone
@@ -8,8 +9,8 @@ from pydantic import BaseModel
 
 router = APIRouter(prefix="/production", tags=["Production Bundler"])
 
-DB_PATH   = "/root/nlp-portfolio/backend/demo1/analyses.db"
-BATES_DIR = Path("/root/nlp-portfolio/uploads/bates")
+DB_PATH   = os.environ.get("PARAIQ_DB", str(Path(__file__).parent / "analyses.db"))
+BATES_DIR = Path(os.environ.get("BATES_DIR", str(Path(__file__).parent.parent.parent / "uploads" / "bates")))
 
 def get_conn():
     conn = sqlite3.connect(DB_PATH)

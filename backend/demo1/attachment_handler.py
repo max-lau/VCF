@@ -16,8 +16,8 @@ import magic
 
 logger = logging.getLogger(__name__)
 
-QUARANTINE = Path("/root/nlp-portfolio/uploads/email_attachments/quarantine")
-CLEARED    = Path("/root/nlp-portfolio/uploads/email_attachments/cleared")
+QUARANTINE = Path(os.environ.get("QUARANTINE_DIR", str(Path(__file__).parent.parent.parent / "uploads" / "email_attachments" / "quarantine")))
+CLEARED    = Path(os.environ.get("CLEARED_DIR", str(Path(__file__).parent.parent.parent / "uploads" / "email_attachments" / "cleared")))
 
 # Allowed MIME types
 ALLOWED_MIMES = {

@@ -1,3 +1,5 @@
+from pathlib import Path
+import os
 ﻿"""
 pdf_export.py
 =============
@@ -30,7 +32,7 @@ from reportlab.platypus import (
 from reportlab.lib.enums import TA_LEFT, TA_CENTER, TA_RIGHT
 
 router  = APIRouter()
-DB_PATH = "/root/nlp-portfolio/analyses.db"
+DB_PATH = os.environ.get("PARAIQ_DB", str(Path(__file__).parent / "analyses.db"))
 
 
 # ── DB helper ──────────────────────────────────────────────────────────────────

@@ -7,8 +7,8 @@ from fastapi.responses import JSONResponse
 
 router = APIRouter(prefix="/media", tags=["Media Transcription"])
 
-DB_PATH    = "/root/nlp-portfolio/backend/demo1/analyses.db"
-MEDIA_DIR  = Path("/root/nlp-portfolio/uploads/media")
+DB_PATH    = os.environ.get("PARAIQ_DB", str(Path(__file__).parent / "analyses.db"))
+MEDIA_DIR  = Path(os.environ.get("MEDIA_DIR", str(Path(__file__).parent.parent.parent / "uploads" / "media")))
 MEDIA_DIR.mkdir(parents=True, exist_ok=True)
 
 def get_client():
@@ -235,7 +235,7 @@ from pydantic import BaseModel as _BM
 async def transcribe_from_discovery(file_id: int, case_number: Optional[str] = None):
     """Transcribe a discovery file already on disk by its queue ID."""
     import sqlite3 as _sq
-    DISC_DIR = Path("/root/nlp-portfolio/uploads/discovery")
+    DISC_DIR = Path(os.environ.get("DISCOVERY_UPLOAD_DIR", str(Path(__file__).parent.parent.parent / "uploads" / "discovery")))
 
     # Look up file record
     try:

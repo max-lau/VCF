@@ -1,3 +1,4 @@
+import os
 import io, email, mailbox, sqlite3, json, re, zipfile, html
 from email import policy as email_policy
 from pathlib import Path
@@ -7,8 +8,8 @@ from fastapi import APIRouter, UploadFile, File, Form, HTTPException
 
 router = APIRouter(prefix="/messages", tags=["Message Parsers"])
 
-DB_PATH = "/root/nlp-portfolio/backend/demo1/analyses.db"
-MSG_DIR = Path("/root/nlp-portfolio/uploads/messages")
+DB_PATH = os.environ.get("PARAIQ_DB", str(Path(__file__).parent / "analyses.db"))
+MSG_DIR = Path(os.environ.get("MSG_DIR", str(Path(__file__).parent.parent.parent / "uploads" / "messages")))
 MSG_DIR.mkdir(parents=True, exist_ok=True)
 
 def get_conn():

@@ -1,3 +1,4 @@
+import os
 import io, sqlite3
 from datetime import datetime, timezone
 from pathlib import Path
@@ -7,9 +8,9 @@ from pydantic import BaseModel
 
 router = APIRouter(prefix="/bates", tags=["Bates Numbering"])
 
-DB_PATH    = "/root/nlp-portfolio/backend/demo1/analyses.db"
-UPLOAD_DIR = Path("/root/nlp-portfolio/uploads/discovery")
-BATES_DIR  = Path("/root/nlp-portfolio/uploads/bates")
+DB_PATH    = os.environ.get("PARAIQ_DB", str(Path(__file__).parent / "analyses.db"))
+UPLOAD_DIR = Path(os.environ.get("DISCOVERY_UPLOAD_DIR", str(Path(__file__).parent.parent.parent / "uploads" / "discovery")))
+BATES_DIR  = Path(os.environ.get("BATES_DIR", str(Path(__file__).parent.parent.parent / "uploads" / "bates")))
 BATES_DIR.mkdir(parents=True, exist_ok=True)
 
 def get_conn():
