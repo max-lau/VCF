@@ -1,4 +1,4 @@
-﻿"""
+"""
 ocr_intake.py
 =============
 FastAPI APIRouter: OCR Intake Module
@@ -16,58 +16,36 @@ import os
 import io
 import re
 import base64
-import sqlite3
+import json
 from datetime import datetime, timezone
-from fastapi import APIRouter, UploadFile, File, HTTPException, Form
+from fastapi import APIRouter, UploadFile, File, HTTPException, Form, Request
 from typing import Optional
 from PIL import Image
 import pytesseract
-import anthropic
+
+from backend.demo1.pg import get_conn
 
 pytesseract.pytesseract.tesseract_cmd = 'tesseract'
 
-router  = APIRouter()
-DB_PATH = os.environ.get("PARAIQ_DB", str(__import__("pathlib").Path(__file__).parent / "analyses.db"))
-
-
-def get_conn():
-    conn = sqlite3.connect(DB_PATH)
-    conn.row_factory = sqlite3.Row
-    return conn
+router = APIRouter()
 
 
 def init_intake_table():
-    conn = get_conn()
-    conn.execute("""
-        CREATE TABLE IF NOT EXISTS intake_scans (
-            id            INTEGER PRIMARY KEY AUTOINCREMENT,
-            filename      TEXT,
-            raw_text      TEXT,
-            word_count    INTEGER,
-            confidence    REAL,
-            ocr_engine    TEXT,
-            sentiment     TEXT,
-            risk_score    REAL,
-            risk_level    TEXT,
-            entities_json TEXT,
-            form_fields   TEXT,
-            created_at    TEXT
-        )
-    """)
-    conn.commit()
-    conn.close()
+    """No-op — table exists in Supabase Postgres."""
     print("[Intake] OCR table initialized ✓")
 
 
 # ── Claude Vision OCR ──────────────────────────────────────────────────────────
 
-def ocr_with_claude(image_bytes: bytes, mime_type: str = "image/jpeg") -> dict:
+def ocr_with_claude(image_bytes: bytes, mime_type: str = "image/jpeg",
+                    firm_id: str = "default") -> dict:
     """Use Claude Vision to transcribe handwritten/scanned documents."""
-    client = anthropic.Anthropic(api_key=os.getenv("ANTHROPIC_API_KEY"))
+    from backend.demo1.main import claude_with_retry, client, LLM_STRONG
     b64_image = base64.standard_b64encode(image_bytes).decode("utf-8")
 
-    response = client.messages.create(
-        model="claude-opus-4-5",
+    response = claude_with_retry(
+        client.messages.create,
+        model=LLM_STRONG,
         max_tokens=1000,
         messages=[{
             "role": "user",
@@ -89,7 +67,8 @@ Rules:
 - Return ONLY the transcribed text, no commentary."""
                 }
             ]
-        }]
+        }],
+        firm_id=firm_id,
     )
 
     text = response.content[0].text.strip()
@@ -113,7 +92,7 @@ def ocr_with_tesseract(image_bytes: bytes, lang: str = "eng") -> dict:
         data = pytesseract.image_to_data(image, lang=lang, output_type=pytesseract.Output.DICT)
         confidences = [int(c) for c in data["conf"] if int(c) > 30]
         raw_text = pytesseract.image_to_string(image, lang=lang).strip()
-        avg_conf  = round(sum(confidences) / len(confidences), 1) if confidences else 0
+        avg_conf  = round(sum(confidences) / len(confidences), 1) if confidences else 0.0
 
         return {
             "text":       raw_text,
@@ -122,17 +101,18 @@ def ocr_with_tesseract(image_bytes: bytes, lang: str = "eng") -> dict:
             "engine":     "tesseract",
         }
     except Exception as e:
-        raise HTTPException(400, f"OCR failed: {str(e)}")
+        raise HTTPException(400, "OCR failed")
 
 
 # ── Smart dispatcher ───────────────────────────────────────────────────────────
 
 def extract_text(image_bytes: bytes, lang: str = "eng",
-                 engine: str = "auto", mime_type: str = "image/jpeg") -> dict:
+                 engine: str = "auto", mime_type: str = "image/jpeg",
+                 firm_id: str = "default") -> dict:
     if engine == "tesseract":
         return ocr_with_tesseract(image_bytes, lang)
     try:
-        return ocr_with_claude(image_bytes, mime_type)
+        return ocr_with_claude(image_bytes, mime_type, firm_id=firm_id)
     except Exception as e:
         print(f"[Intake] Claude Vision failed, falling back to Tesseract: {e}")
         return ocr_with_tesseract(image_bytes, lang)
@@ -159,20 +139,17 @@ def extract_form_fields(text: str) -> dict:
     }
     text_lower = text.lower()
 
-    # Client name
     for p in [r'client\s*:\s*([A-Z][a-z]+ [A-Z][a-z]+)',
                r'name\s*:\s*([A-Z][a-z]+ [A-Z][a-z]+)']:
         m = re.search(p, text, re.IGNORECASE)
         if m: fields["client_name"] = m.group(1).strip(); break
 
-    # Date
     for p in [r'date\s*:\s*([A-Za-z]+ \d{1,2},?\s*\d{4})',
                r'\b(January|February|March|April|May|June|July|August|September|October|November|December)\s+\d{1,2}(?:st|nd|rd|th)?,?\s+\d{4}\b',
                r'\b(\d{1,2}[/\-]\d{1,2}[/\-]\d{2,4})\b']:
         m = re.search(p, text, re.IGNORECASE)
         if m: fields["date"] = (m.group(1) if m.lastindex else m.group(0)).strip(); break
 
-    # Matter type — explicit label first
     matter_m = re.search(r'matter\s*:\s*(.+?)(?:\n|$)', text, re.IGNORECASE)
     if matter_m:
         fields["matter_type"] = matter_m.group(1).strip()
@@ -189,19 +166,15 @@ def extract_form_fields(text: str) -> dict:
             if any(kw in text_lower for kw in keywords):
                 fields["matter_type"] = matter; break
 
-    # Phone
     m = re.search(r'\b(\(?\d{3}\)?[\s\-\.]\d{3}[\s\-\.]\d{4})\b', text)
     if m: fields["phone"] = m.group(1)
 
-    # Email
     m = re.search(r'\b[A-Za-z0-9._%+\-]+@[A-Za-z0-9.\-]+\.[A-Z|a-z]{2,}\b', text)
     if m: fields["email"] = m.group(0)
 
-    # Urgency
     fields["urgent"] = any(kw in text_lower for kw in
         ["urgent", "asap", "immediately", "emergency", "deadline"])
 
-    # Key facts
     legal_kws = ["terminated", "fired", "severance", "service", "charged",
                  "arrested", "contract", "damages", "employer", "years"]
     for sent in re.split(r'[.!?\n]+', text):
@@ -226,46 +199,57 @@ def pdf_to_image_bytes(pdf_bytes: bytes) -> bytes:
 
 @router.post("/scan")
 async def scan_document(
+    request: Request,
     file: UploadFile = File(...),
     lang: str = Form(default="eng"),
     engine: str = Form(default="auto")
 ):
     """Upload image/PDF → extract text via OCR."""
+    firm_id = getattr(request.state, "firm_id", "default")
     contents = await file.read()
     mime_type = file.content_type
     if file.content_type == "application/pdf":
         contents = pdf_to_image_bytes(contents); mime_type = "image/png"
 
-    result = extract_text(contents, lang=lang, engine=engine, mime_type=mime_type)
+    result = extract_text(contents, lang=lang, engine=engine,
+                          mime_type=mime_type, firm_id=firm_id)
     result["text"] = clean_ocr_text(result["text"])
 
-    conn = get_conn()
-    conn.execute("INSERT INTO intake_scans (filename,raw_text,word_count,confidence,ocr_engine,created_at) VALUES (?,?,?,?,?,?)",
-        (file.filename, result["text"], result["word_count"], result["confidence"], result["engine"], datetime.now(timezone.utc).isoformat()))
-    conn.commit(); conn.close()
+    with get_conn(firm_id) as conn:
+        conn.execute(
+            """INSERT INTO intake_scans
+               (firm_id, filename, raw_text, word_count, confidence, ocr_engine, created_at)
+               VALUES (%s,%s,%s,%s,%s,%s,%s)""",
+            (firm_id, file.filename, result["text"], result["word_count"],
+             result["confidence"], result["engine"],
+             datetime.now(timezone.utc).isoformat())
+        )
 
     return {"success": True, "filename": file.filename, **result}
 
 
 @router.post("/analyze")
 async def analyze_document(
+    request: Request,
     file: UploadFile = File(...),
     lang: str = Form(default="eng"),
     context: str = Form(default="general"),
     engine: str = Form(default="auto")
 ):
     """Upload image/PDF → OCR → full NLP pipeline."""
-    import json
+    firm_id = getattr(request.state, "firm_id", "default")
     contents = await file.read()
     mime_type = file.content_type
     if file.content_type == "application/pdf":
         contents = pdf_to_image_bytes(contents); mime_type = "image/png"
 
-    ocr_result = extract_text(contents, lang=lang, engine=engine, mime_type=mime_type)
+    ocr_result = extract_text(contents, lang=lang, engine=engine,
+                               mime_type=mime_type, firm_id=firm_id)
     text = clean_ocr_text(ocr_result["text"])
 
     if not text or len(text.split()) < 3:
-        return {"success": False, "error": "Could not extract readable text.", "ocr_confidence": ocr_result["confidence"]}
+        return {"success": False, "error": "Could not extract readable text.",
+                "ocr_confidence": ocr_result["confidence"]}
 
     from backend.demo1.risk_scorer import score_text
     risk = score_text(text, context=context)
@@ -279,54 +263,69 @@ async def analyze_document(
 
     form_fields = extract_form_fields(text)
 
-    conn = get_conn()
-    conn.execute("""INSERT INTO intake_scans
-        (filename,raw_text,word_count,confidence,ocr_engine,risk_score,risk_level,entities_json,form_fields,created_at)
-        VALUES (?,?,?,?,?,?,?,?,?,?)""",
-        (file.filename, text, ocr_result["word_count"], ocr_result["confidence"], ocr_result["engine"],
-         risk["score"], risk["level"], json.dumps(entities), json.dumps(form_fields),
-         datetime.now(timezone.utc).isoformat()))
-    conn.commit(); conn.close()
+    with get_conn(firm_id) as conn:
+        conn.execute(
+            """INSERT INTO intake_scans
+               (firm_id, filename, raw_text, word_count, confidence, ocr_engine,
+                risk_score, risk_level, entities_json, form_fields, created_at)
+               VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)""",
+            (firm_id, file.filename, text, ocr_result["word_count"],
+             ocr_result["confidence"], ocr_result["engine"],
+             risk["score"], risk["level"],
+             json.dumps(entities), json.dumps(form_fields),
+             datetime.now(timezone.utc).isoformat())
+        )
 
     return {
-        "success": True, "filename": file.filename,
-        "ocr":     {"text": text, "word_count": ocr_result["word_count"],
-                    "confidence": ocr_result["confidence"], "engine": ocr_result["engine"]},
-        "risk":    {"score": risk["score"], "level": risk["level"],
-                    "top_signals": risk["top_signals"][:3], "category_breakdown": risk["category_breakdown"]},
-        "entities": entities[:20], "custom_entities": custom_ents[:15],
-        "form_fields": form_fields,
+        "success":  True,
+        "filename": file.filename,
+        "ocr":      {"text": text, "word_count": ocr_result["word_count"],
+                     "confidence": ocr_result["confidence"], "engine": ocr_result["engine"]},
+        "risk":     {"score": risk["score"], "level": risk["level"],
+                     "top_signals": risk["top_signals"][:3],
+                     "category_breakdown": risk["category_breakdown"]},
+        "entities":        entities[:20],
+        "custom_entities": custom_ents[:15],
+        "form_fields":     form_fields,
     }
 
 
 @router.post("/form")
 async def extract_intake_form(
+    request: Request,
     file: UploadFile = File(...),
     lang: str = Form(default="eng"),
     engine: str = Form(default="auto")
 ):
     """Upload handwritten intake form → extract structured fields."""
+    firm_id = getattr(request.state, "firm_id", "default")
     contents = await file.read()
     mime_type = file.content_type
     if file.content_type == "application/pdf":
         contents = pdf_to_image_bytes(contents); mime_type = "image/png"
 
-    ocr_result = extract_text(contents, lang=lang, engine=engine, mime_type=mime_type)
+    ocr_result = extract_text(contents, lang=lang, engine=engine,
+                               mime_type=mime_type, firm_id=firm_id)
     text = clean_ocr_text(ocr_result["text"])
 
     return {
-        "success": True, "filename": file.filename,
-        "raw_text": text, "confidence": ocr_result["confidence"],
-        "engine": ocr_result["engine"], "form_fields": extract_form_fields(text),
+        "success":     True,
+        "filename":    file.filename,
+        "raw_text":    text,
+        "confidence":  ocr_result["confidence"],
+        "engine":      ocr_result["engine"],
+        "form_fields": extract_form_fields(text),
     }
 
 
 @router.get("/history")
-def intake_history(limit: int = 20):
-    import json
-    conn = get_conn()
-    rows = conn.execute("SELECT * FROM intake_scans ORDER BY id DESC LIMIT ?", (limit,)).fetchall()
-    conn.close()
+def intake_history(request: Request, limit: int = 20):
+    firm_id = getattr(request.state, "firm_id", "default")
+    with get_conn(firm_id) as conn:
+        rows = conn.execute(
+            "SELECT * FROM intake_scans WHERE firm_id=%s ORDER BY id DESC LIMIT %s",
+            (firm_id, limit)
+        ).fetchall()
     results = []
     for r in rows:
         d = dict(r)
@@ -342,12 +341,12 @@ def intake_history(limit: int = 20):
 def supported_languages():
     return {
         "languages": [
-            {"code": "eng", "name": "English"},
+            {"code": "eng",     "name": "English"},
             {"code": "chi_sim", "name": "Chinese Simplified"},
             {"code": "chi_tra", "name": "Chinese Traditional"},
-            {"code": "spa", "name": "Spanish"},
-            {"code": "fra", "name": "French"},
-            {"code": "deu", "name": "German"},
+            {"code": "spa",     "name": "Spanish"},
+            {"code": "fra",     "name": "French"},
+            {"code": "deu",     "name": "German"},
         ],
         "engines": [
             {"id": "auto",      "name": "Auto (Claude Vision → Tesseract fallback)"},
@@ -357,23 +356,20 @@ def supported_languages():
     }
 
 
-
-
 # ── Audio Transcription (OpenAI Whisper) ──────────────────────────────────────
 
 @router.post("/audio")
 async def transcribe_audio(
+    request: Request,
     file: UploadFile = File(...),
     lang: str = "auto",
     module: str = "intake",
     redact: bool = False,
     redact_style: str = "label"
 ):
-    """
-    Transcribe audio/video file using OpenAI Whisper.
-    Returns transcript, detected language, duration, word count, recording_id.
-    """
+    """Transcribe audio/video file using OpenAI Whisper."""
     import openai, uuid, tempfile, time
+    firm_id = getattr(request.state, "firm_id", "default")
 
     openai_key = os.getenv("OPENAI_API_KEY", "")
     if not openai_key:
@@ -381,7 +377,6 @@ async def transcribe_audio(
 
     client_oai = openai.OpenAI(api_key=openai_key)
 
-    # Save upload to temp file (Whisper needs a real file path)
     suffix = os.path.splitext(file.filename or "audio.webm")[1] or ".webm"
     with tempfile.NamedTemporaryFile(delete=False, suffix=suffix) as tmp:
         tmp.write(await file.read())
@@ -390,7 +385,6 @@ async def transcribe_audio(
     try:
         t_start = time.time()
 
-        # Call Whisper
         whisper_kwargs = {"model": "whisper-1", "response_format": "verbose_json"}
         if lang and lang != "auto":
             whisper_kwargs["language"] = lang
@@ -401,7 +395,7 @@ async def transcribe_audio(
                 **whisper_kwargs
             )
 
-        duration  = round(getattr(result, "duration", time.time() - t_start), 2)
+        duration   = round(getattr(result, "duration", time.time() - t_start), 2)
         transcript = result.text or ""
         detected   = getattr(result, "language", lang if lang != "auto" else "unknown")
         word_count = len(transcript.split())
@@ -415,18 +409,18 @@ async def transcribe_audio(
             "recording_id":      rec_id,
         }
 
-        # Optional inline redaction via Claude
         if redact and transcript:
             try:
-                claude = anthropic.Anthropic(api_key=os.getenv("ANTHROPIC_API_KEY"))
+                from backend.demo1.main import claude_with_retry, client, LLM_FAST, clean_json
                 styles = {
                     "label":  "Replace PII with [CATEGORY] labels like [NAME], [DOB], [PHONE].",
                     "redact": "Replace PII with █████ blocks.",
-                    "tag":    "Wrap PII in <redacted category=\'TYPE\'>original</redacted> tags.",
+                    "tag":    "Wrap PII in <redacted category='TYPE'>original</redacted> tags.",
                 }
                 style_prompt = styles.get(redact_style, styles["label"])
-                msg = claude.messages.create(
-                    model="claude-haiku-4-5-20251001",
+                msg = claude_with_retry(
+                    client.messages.create,
+                    model=LLM_FAST,
                     max_tokens=2048,
                     messages=[{
                         "role": "user",
@@ -440,26 +434,26 @@ async def transcribe_audio(
                             "{redacted_transcript, findings: [{text, category, score}], "
                             "total_redactions, confidence_score}"
                         )
-                    }]
+                    }],
+                    firm_id=firm_id,
                 )
-                import json as _json
                 raw = msg.content[0].text.strip()
-                raw = re.sub(r"^```json|^```|```$", "", raw, flags=re.MULTILINE).strip()
-                rd = _json.loads(raw)
+                raw = clean_json(raw)
+                rd  = json.loads(raw)
                 rd["original_transcript"] = transcript
                 rd["applied"] = True
                 response["redaction"] = rd
-            except Exception as e:
-                response["redaction"] = {"applied": False, "error": str(e)}
+            except Exception:
+                response["redaction"] = {"applied": False, "error": "Redaction failed"}
 
         return response
 
     except openai.AuthenticationError:
         raise HTTPException(status_code=500, detail="Invalid or missing OpenAI API key")
     except openai.BadRequestError as e:
-        raise HTTPException(status_code=400, detail=f"Whisper error: {str(e)}")
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Transcription failed: {str(e)}")
+        raise HTTPException(status_code=400, detail="Audio file could not be processed")
+    except Exception:
+        raise HTTPException(status_code=500, detail="Transcription failed")
     finally:
         try:
             os.unlink(tmp_path)
