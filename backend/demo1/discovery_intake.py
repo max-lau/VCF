@@ -1,68 +1,34 @@
-import os, io, zipfile, hashlib, shutil, mimetypes
+"""
+discovery_intake.py — ParaIQ Discovery Intake & Processing
+All DB access now goes through pg.get_conn(firm_id) for RLS-based tenant isolation.
+"""
+import os, io, zipfile, hashlib, mimetypes
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Optional
 from fastapi import APIRouter, Request, UploadFile, File, HTTPException, Form, BackgroundTasks
 from fastapi.responses import JSONResponse
-import sqlite3
 import httpx
+
+from backend.demo1.pg import get_conn
 
 router = APIRouter(prefix="/discovery", tags=["discovery"])
 
 UPLOAD_DIR = Path(os.environ.get("DISCOVERY_UPLOAD_DIR", str(Path(__file__).parent.parent.parent / "uploads" / "discovery")))
 UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
 
-DB_PATH = os.environ.get("PARAIQ_DB", str(Path(__file__).parent / "analyses.db"))
-
-def get_conn():
-    conn = sqlite3.connect(DB_PATH)
-    conn.row_factory = sqlite3.Row
-    return conn
 
 def init_discovery_table():
-    conn = get_conn()
-    conn.execute("""
-        CREATE TABLE IF NOT EXISTS discovery_files (
-            id                  INTEGER PRIMARY KEY AUTOINCREMENT,
-            filename            TEXT NOT NULL,
-            original_name       TEXT NOT NULL,
-            file_hash           TEXT,
-            file_size           INTEGER,
-            mime_type           TEXT,
-            route               TEXT NOT NULL,
-            case_number         TEXT,
-            doc_date            TEXT,
-            status              TEXT DEFAULT 'queued',
-            created_at          TEXT DEFAULT (datetime('now')),
-            privilege_flag      INTEGER,
-            privilege_type      TEXT,
-            privilege_confidence REAL,
-            requires_review     INTEGER
-        )
-    """)
-    conn.commit()
+    """No-op — table exists in Supabase Postgres."""
+    print("[Discovery] DB table initialized ✓")
 
-    # Migrate existing tables — add columns if missing
-    try:
-        existing = {row[1] for row in conn.execute("PRAGMA table_info(discovery_files)").fetchall()}
-        migrations = [
-            ("privilege_flag",       "INTEGER"),
-            ("privilege_type",       "TEXT"),
-            ("privilege_confidence", "REAL"),
-            ("requires_review",      "INTEGER"),
-        ]
-        for col, typedef in migrations:
-            if col not in existing:
-                try:
-                    conn.execute(f"ALTER TABLE discovery_files ADD COLUMN {col} {typedef}")
-                except Exception:
-                    pass
-        conn.commit()
-    except Exception:
-        pass
-    conn.close()
 
-init_discovery_table()
+def _require_auth(request: Request):
+    """Raise 401 if no valid JWT was decoded by TenantMiddleware."""
+    user_id = getattr(request.state, "user_id", None)
+    if not user_id:
+        raise HTTPException(status_code=401, detail="Authentication required")
+
 
 IMAGE_TYPES = {"image/jpeg","image/png","image/tiff","image/bmp","image/webp","image/gif"}
 ZIP_TYPES   = {"application/zip","application/x-zip-compressed","application/x-zip"}
@@ -93,7 +59,6 @@ def file_hash(data: bytes) -> str:
 
 # ── Privilege screening ────────────────────────────────────────────────────────
 
-# Keyword fallback when no enclave is registered
 _PRIVILEGE_KEYWORDS = [
     "attorney-client", "privileged and confidential", "work product",
     "attorney eyes only", "legal advice", "without prejudice",
@@ -107,11 +72,7 @@ async def _screen_privilege(
     filename: str,
     firm_id: str = "default",
 ):
-    """
-    Background task — screen a file for privilege and write verdict to discovery_files.
-    Uses client enclave if registered, falls back to keyword scan otherwise.
-    Soft scan: never blocks; only sets flags.
-    """
+    """Background task — screen a file for privilege and write verdict to discovery_files."""
     privileged      = False
     priv_type       = "none"
     confidence      = 0.0
@@ -122,7 +83,6 @@ async def _screen_privilege(
         enclave = get_client_enclave(firm_id)
 
         if enclave:
-            # Forward to client enclave (Legal-BERT INT8)
             async with httpx.AsyncClient(timeout=30) as hx:
                 resp = await hx.post(
                     f"{enclave['enclave_url'].rstrip('/')}/screen",
@@ -140,7 +100,6 @@ async def _screen_privilege(
                 priv_type       = r.get("privilege_type", "none")
                 confidence      = float(r.get("confidence", 0.0))
                 requires_review = bool(r.get("requires_review", False))
-                # Log verdict to cloud DB (no document content stored)
                 save_privilege_verdict(
                     client_id=firm_id,
                     doc_id=str(file_id),
@@ -150,7 +109,6 @@ async def _screen_privilege(
                     requires_review=requires_review,
                 )
         else:
-            # Keyword fallback — no enclave registered
             t_lower = text.lower()
             hits    = sum(1 for kw in _PRIVILEGE_KEYWORDS if kw in t_lower)
             if hits >= 2:
@@ -169,32 +127,28 @@ async def _screen_privilege(
 
     # Write verdict back to discovery_files (soft — never raises)
     try:
-        conn = get_conn()
-        conn.execute(
-            """UPDATE discovery_files
-               SET privilege_flag=?, privilege_type=?, privilege_confidence=?, requires_review=?
-               WHERE id=?""",
-            (int(privileged), priv_type, confidence, int(requires_review), file_id),
-        )
-        conn.commit()
-        conn.close()
+        with get_conn(firm_id) as conn:
+            conn.execute(
+                """UPDATE discovery_files
+                   SET privilege_flag=%s, privilege_type=%s, privilege_confidence=%s, requires_review=%s
+                   WHERE id=%s""",
+                (int(privileged), priv_type, confidence, int(requires_review), file_id),
+            )
     except Exception as exc:
         import logging
         logging.getLogger("paraiq.privilege").error(f"DB verdict write failed: {exc}")
 
 
-def _get_doc_text(original_name: str, fallback: str = "") -> str:
+def _get_doc_text(original_name: str, firm_id: str = "default", fallback: str = "") -> str:
     """Pull extracted text from case_documents. Returns fallback if not found."""
     try:
-        import sqlite3 as _sq
-        cc = _sq.connect("/root/nlp-portfolio/analyses.db")
-        row = cc.execute(
-            "SELECT doc_text FROM case_documents WHERE document_name=? LIMIT 1",
-            (original_name,)
-        ).fetchone()
-        cc.close()
-        if row and row[0]:
-            return row[0][:5000]
+        with get_conn(firm_id) as conn:
+            row = conn.execute(
+                "SELECT doc_text FROM case_documents WHERE document_name=%s LIMIT 1",
+                (original_name,)
+            ).fetchone()
+            if row and row["doc_text"]:
+                return row["doc_text"][:5000]
     except Exception:
         pass
     return fallback
@@ -203,14 +157,16 @@ def _get_doc_text(original_name: str, fallback: str = "") -> str:
 # ── Upload / intake ───────────────────────────────────────────────────────────
 
 @router.post("/intake")
-@router.post("/upload")  # alias — DiscoveryUpload.vue calls this
+@router.post("/upload")
 async def intake_files(
+    request: Request,
     background_tasks: BackgroundTasks,
     files: list[UploadFile] = File(...),
     case_number: Optional[str] = Form(None),
     firm_id:     Optional[str] = Form(None),
 ):
-    effective_firm = firm_id or "default"
+    _require_auth(request)
+    effective_firm = firm_id or getattr(request.state, "firm_id", "default")
     results = []
 
     for upload in files:
@@ -220,13 +176,11 @@ async def intake_files(
         fhash = file_hash(data)
         size  = len(data)
 
-        # Save file to disk
         ts        = datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S")
         safe_name = f"{ts}_{fhash}_{upload.filename}"
         dest      = UPLOAD_DIR / safe_name
         dest.write_bytes(data)
 
-        # ZIP: list contents
         zip_contents = []
         if route == "zip":
             try:
@@ -239,42 +193,35 @@ async def intake_files(
             except Exception:
                 route = "unknown"
 
-        conn   = get_conn()
-        cur    = conn.execute(
-            """INSERT INTO discovery_files
-               (filename, original_name, file_hash, file_size, mime_type, route, case_number, status)
-               VALUES (?,?,?,?,?,?,?,?)""",
-            (safe_name, upload.filename, fhash, size, mime, route, case_number, "queued"),
-        )
-        file_id = cur.lastrowid
-        conn.commit()
-        conn.close()
+        with get_conn(effective_firm) as conn:
+            cur = conn.execute(
+                """INSERT INTO discovery_files
+                   (filename, original_name, file_hash, file_size, mime_type, route, case_number, status)
+                   VALUES (%s,%s,%s,%s,%s,%s,%s,%s)
+                   RETURNING id""",
+                (safe_name, upload.filename, fhash, size, mime, route, case_number, "queued"),
+            )
+            file_id = cur.fetchone()["id"]
 
         # Auto-link to case_documents if case_number provided
         if case_number:
-            import sqlite3 as _sq2
-            cases_con = _sq2.connect("/root/nlp-portfolio/analyses.db")
-            cases_con.row_factory = _sq2.Row
-            case_row = cases_con.execute(
-                "SELECT id FROM cases WHERE case_number=? AND deleted=0 LIMIT 1",
-                (case_number,)
-            ).fetchone()
-            if case_row:
-                stub = f"Intake route: {route} | Hash: {fhash}"
-                already = cases_con.execute(
-                    "SELECT id FROM case_documents WHERE case_id=? AND document_name=?",
-                    (case_row["id"], upload.filename)
+            with get_conn(effective_firm) as conn:
+                case_row = conn.execute(
+                    "SELECT id FROM cases WHERE case_number=%s AND deleted=false LIMIT 1",
+                    (case_number,)
                 ).fetchone()
-                if not already:
-                    cases_con.execute(
-                        "INSERT INTO case_documents (case_id, document_name, source, doc_text) VALUES (?,?,?,?)",
-                        (case_row["id"], upload.filename, "discovery", stub)
-                    )
-                    cases_con.commit()
-            cases_con.close()
+                if case_row:
+                    stub = f"Intake route: {route} | Hash: {fhash}"
+                    already = conn.execute(
+                        "SELECT id FROM case_documents WHERE case_id=%s AND document_name=%s",
+                        (case_row["id"], upload.filename)
+                    ).fetchone()
+                    if not already:
+                        conn.execute(
+                            "INSERT INTO case_documents (case_id, document_name, source, doc_text) VALUES (%s,%s,%s,%s)",
+                            (case_row["id"], upload.filename, "discovery", stub)
+                        )
 
-        # Soft privilege screen in background using filename as initial text
-        # (proper text screening fires again in extract_text_to_case)
         background_tasks.add_task(
             _screen_privilege, file_id, upload.filename, upload.filename, effective_firm
         )
@@ -297,46 +244,49 @@ async def intake_files(
 # ── Queue / catalog / stats ───────────────────────────────────────────────────
 
 @router.get("/queue")
-def get_queue(case_number: Optional[str] = None, limit: int = 50):
-    conn = get_conn()
-    if case_number:
-        rows = conn.execute(
-            "SELECT * FROM discovery_files WHERE case_number=? ORDER BY created_at DESC LIMIT ?",
-            (case_number, limit)
-        ).fetchall()
-    else:
-        rows = conn.execute(
-            "SELECT * FROM discovery_files ORDER BY created_at DESC LIMIT ?",
-            (limit,)
-        ).fetchall()
-    conn.close()
+def get_queue(request: Request, case_number: Optional[str] = None, limit: int = 50):
+    _require_auth(request)
+    firm_id = getattr(request.state, "firm_id", "default")
+    limit = min(limit, 200)
+    with get_conn(firm_id) as conn:
+        if case_number:
+            rows = conn.execute(
+                "SELECT * FROM discovery_files WHERE case_number=%s ORDER BY created_at DESC LIMIT %s",
+                (case_number, limit)
+            ).fetchall()
+        else:
+            rows = conn.execute(
+                "SELECT * FROM discovery_files ORDER BY created_at DESC LIMIT %s",
+                (limit,)
+            ).fetchall()
     return {"files": [dict(r) for r in rows]}
 
 
 @router.delete("/queue/{file_id}")
-def remove_from_queue(file_id: int):
-    conn = get_conn()
-    row = conn.execute("SELECT filename FROM discovery_files WHERE id=?", (file_id,)).fetchone()
-    if not row:
-        raise HTTPException(404, "File not found")
-    try:
-        (UPLOAD_DIR / row["filename"]).unlink(missing_ok=True)
-    except Exception:
-        pass
-    conn.execute("DELETE FROM discovery_files WHERE id=?", (file_id,))
-    conn.commit()
-    conn.close()
+def remove_from_queue(file_id: int, request: Request):
+    _require_auth(request)
+    firm_id = getattr(request.state, "firm_id", "default")
+    with get_conn(firm_id) as conn:
+        row = conn.execute("SELECT filename FROM discovery_files WHERE id=%s", (file_id,)).fetchone()
+        if not row:
+            raise HTTPException(404, "File not found")
+        try:
+            (UPLOAD_DIR / row["filename"]).unlink(missing_ok=True)
+        except Exception:
+            pass
+        conn.execute("DELETE FROM discovery_files WHERE id=%s", (file_id,))
     return {"success": True}
 
 
 @router.get("/stats")
-def discovery_stats():
-    conn = get_conn()
-    rows  = conn.execute(
-        "SELECT route, COUNT(*) as cnt FROM discovery_files GROUP BY route"
-    ).fetchall()
-    total = conn.execute("SELECT COUNT(*) FROM discovery_files").fetchone()[0]
-    conn.close()
+def discovery_stats(request: Request):
+    _require_auth(request)
+    firm_id = getattr(request.state, "firm_id", "default")
+    with get_conn(firm_id) as conn:
+        rows  = conn.execute(
+            "SELECT route, COUNT(*) as cnt FROM discovery_files GROUP BY route"
+        ).fetchall()
+        total = conn.execute("SELECT COUNT(*) FROM discovery_files").fetchone()[0]
     return {"total": total, "by_route": {r["route"]: r["cnt"] for r in rows}}
 
 
@@ -345,34 +295,34 @@ def discovery_stats():
 @router.post("/screen/{file_id}")
 async def screen_file_privilege(
     file_id: int,
+    request: Request,
     background_tasks: BackgroundTasks,
-    firm_id: str = "default",
 ):
-    """Manually trigger privilege screening for a single discovery file."""
-    conn = get_conn()
-    row  = conn.execute("SELECT * FROM discovery_files WHERE id=?", (file_id,)).fetchone()
-    conn.close()
+    _require_auth(request)
+    firm_id = getattr(request.state, "firm_id", "default")
+    with get_conn(firm_id) as conn:
+        row = conn.execute("SELECT * FROM discovery_files WHERE id=%s", (file_id,)).fetchone()
     if not row:
         raise HTTPException(404, "File not found")
-    row  = dict(row)
-    text = _get_doc_text(row["original_name"], fallback=row["original_name"])
+    row = dict(row)
+    text = _get_doc_text(row["original_name"], firm_id=firm_id, fallback=row["original_name"])
     background_tasks.add_task(_screen_privilege, file_id, text, row["original_name"], firm_id)
     return {"success": True, "file_id": file_id, "status": "screening_queued"}
 
 
 @router.post("/screen-all")
 async def screen_all_unscreened(
+    request: Request,
     background_tasks: BackgroundTasks,
-    firm_id: str = "default",
 ):
-    """Retroactively screen all unscreened discovery files."""
-    conn = get_conn()
-    rows = conn.execute(
-        "SELECT id, original_name FROM discovery_files WHERE privilege_flag IS NULL"
-    ).fetchall()
-    conn.close()
+    _require_auth(request)
+    firm_id = getattr(request.state, "firm_id", "default")
+    with get_conn(firm_id) as conn:
+        rows = conn.execute(
+            "SELECT id, original_name FROM discovery_files WHERE privilege_flag IS NULL"
+        ).fetchall()
     for row in rows:
-        text = _get_doc_text(row["original_name"], fallback=row["original_name"])
+        text = _get_doc_text(row["original_name"], firm_id=firm_id, fallback=row["original_name"])
         background_tasks.add_task(_screen_privilege, row["id"], text, row["original_name"], firm_id)
     return {"success": True, "queued": len(rows), "firm_id": firm_id}
 
@@ -380,12 +330,13 @@ async def screen_all_unscreened(
 # ── OCR / ZIP / audio processing ─────────────────────────────────────────────
 
 @router.post("/process/ocr/{file_id}")
-async def process_ocr(file_id: int):
-    conn = get_conn()
-    row  = conn.execute(
-        "SELECT * FROM discovery_files WHERE id=? AND route='ocr'", (file_id,)
-    ).fetchone()
-    conn.close()
+async def process_ocr(file_id: int, request: Request):
+    _require_auth(request)
+    firm_id = getattr(request.state, "firm_id", "default")
+    with get_conn(firm_id) as conn:
+        row = conn.execute(
+            "SELECT * FROM discovery_files WHERE id=%s AND route='ocr'", (file_id,)
+        ).fetchone()
     if not row:
         raise HTTPException(404, "File not found or not an OCR file")
 
@@ -404,10 +355,8 @@ async def process_ocr(file_id: int):
 
     result = resp.json()
 
-    conn = get_conn()
-    conn.execute("UPDATE discovery_files SET status='processed' WHERE id=?", (file_id,))
-    conn.commit()
-    conn.close()
+    with get_conn(firm_id) as conn:
+        conn.execute("UPDATE discovery_files SET status='processed' WHERE id=%s", (file_id,))
 
     return {
         "success":       True,
@@ -421,12 +370,13 @@ async def process_ocr(file_id: int):
 
 
 @router.post("/process/zip/{file_id}")
-async def process_zip(file_id: int):
-    conn = get_conn()
-    row  = conn.execute(
-        "SELECT * FROM discovery_files WHERE id=? AND route='zip'", (file_id,)
-    ).fetchone()
-    conn.close()
+async def process_zip(file_id: int, request: Request):
+    _require_auth(request)
+    firm_id = getattr(request.state, "firm_id", "default")
+    with get_conn(firm_id) as conn:
+        row = conn.execute(
+            "SELECT * FROM discovery_files WHERE id=%s AND route='zip'", (file_id,)
+        ).fetchone()
     if not row:
         raise HTTPException(404, "File not found or not a ZIP file")
 
@@ -462,21 +412,20 @@ async def process_zip(file_id: int):
                     try:    doc_date = datetime(*entry.date_time).strftime("%Y-%m-%d")
                     except: doc_date = None
 
-                    conn = get_conn()
-                    cur  = conn.execute(
-                        """INSERT INTO discovery_files
-                           (filename, original_name, file_hash, file_size, mime_type,
-                            route, case_number, doc_date, status)
-                           VALUES (?,?,?,?,?,?,?,?,?)""",
-                        (safe_name, flat_name, fhash, len(data), mime,
-                         route, row["case_number"], doc_date, "queued")
-                    )
-                    new_id = cur.lastrowid
-                    conn.execute(
-                        "UPDATE discovery_files SET status='extracted' WHERE id=?", (file_id,)
-                    )
-                    conn.commit()
-                    conn.close()
+                    with get_conn(firm_id) as conn:
+                        cur = conn.execute(
+                            """INSERT INTO discovery_files
+                               (filename, original_name, file_hash, file_size, mime_type,
+                                route, case_number, doc_date, status)
+                               VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s)
+                               RETURNING id""",
+                            (safe_name, flat_name, fhash, len(data), mime,
+                             route, row["case_number"], doc_date, "queued")
+                        )
+                        new_id = cur.fetchone()["id"]
+                        conn.execute(
+                            "UPDATE discovery_files SET status='extracted' WHERE id=%s", (file_id,)
+                        )
 
                     extracted.append({
                         "id":       new_id,
@@ -505,8 +454,9 @@ async def process_zip(file_id: int):
 
 
 @router.post("/assign")
-async def assign_to_case(body: dict):
-    """Assign one or more discovery files to a case matter."""
+async def assign_to_case(body: dict, request: Request):
+    _require_auth(request)
+    firm_id = getattr(request.state, "firm_id", "default")
     file_ids    = body.get("file_ids", [])
     case_number = body.get("case_number", "").strip()
     case_name   = body.get("case_name", case_number)
@@ -514,47 +464,43 @@ async def assign_to_case(body: dict):
     if not file_ids or not case_number:
         raise HTTPException(400, "file_ids and case_number are required")
 
-    import sqlite3 as _sq
     API_KEY = os.environ.get("PARAIQ_API_KEY", "")
 
-    cc       = _sq.connect("/root/nlp-portfolio/analyses.db")
-    cc.row_factory = _sq.Row
-    existing = cc.execute("SELECT id FROM cases WHERE case_number=?", (case_number,)).fetchone()
-    case_id  = existing["id"] if existing else None
-    cc.close()
+    with get_conn(firm_id) as conn:
+        existing = conn.execute("SELECT id FROM cases WHERE case_number=%s", (case_number,)).fetchone()
+        case_id  = existing["id"] if existing else None
 
     if not case_id:
         async with httpx.AsyncClient(timeout=15) as client:
             r2 = await client.post(
                 "http://localhost:5003/cases/",
-                headers={"X-API-Key": API_KEY, "Content-Type": "application/json"},
+                headers={"X-API-Key": API_KEY, "Content-Type": "application/json",
+                         "Authorization": request.headers.get("Authorization", "")},
                 json={"case_number": case_number, "client_name": case_name, "status": "open"}
             )
-            case_id = r2.json().get("id")
+        case_id = r2.json().get("id")
 
     if not case_id:
         raise HTTPException(500, "Could not create or find case")
 
     assigned = []
-    conn     = get_conn()
-    for fid in file_ids:
-        row = conn.execute("SELECT * FROM discovery_files WHERE id=?", (fid,)).fetchone()
-        if not row:
-            continue
-        conn.execute("UPDATE discovery_files SET case_number=? WHERE id=?", (case_number, fid))
-        async with httpx.AsyncClient(timeout=15) as client:
-            await client.post(
-                f"http://localhost:5003/cases/{case_id}/documents",
-                headers={"X-API-Key": API_KEY, "Content-Type": "application/json"},
-                json={
-                    "document_name": row["original_name"],
-                    "doc_text":      f"Intake route: {row['route']} | Hash: {row['file_hash']}",
-                }
-            )
-        assigned.append({"id": fid, "name": row["original_name"]})
-
-    conn.commit()
-    conn.close()
+    with get_conn(firm_id) as conn:
+        for fid in file_ids:
+            row = conn.execute("SELECT * FROM discovery_files WHERE id=%s", (fid,)).fetchone()
+            if not row:
+                continue
+            conn.execute("UPDATE discovery_files SET case_number=%s WHERE id=%s", (case_number, fid))
+            async with httpx.AsyncClient(timeout=15) as client:
+                await client.post(
+                    f"http://localhost:5003/cases/{case_id}/documents",
+                    headers={"X-API-Key": API_KEY, "Content-Type": "application/json",
+                             "Authorization": request.headers.get("Authorization", "")},
+                    json={
+                        "document_name": row["original_name"],
+                        "doc_text":      f"Intake route: {row['route']} | Hash: {row['file_hash']}",
+                    }
+                )
+            assigned.append({"id": fid, "name": row["original_name"]})
 
     return {
         "success":     True,
@@ -566,20 +512,20 @@ async def assign_to_case(body: dict):
 
 
 @router.get("/catalog")
-def get_catalog():
-    """Files grouped by case number."""
-    conn = get_conn()
-    rows = conn.execute(
-        """SELECT case_number, route,
-                  COUNT(*) as cnt,
-                  SUM(file_size) as total_size,
-                  MIN(created_at) as first_added,
-                  MAX(created_at) as last_added
-           FROM discovery_files
-           GROUP BY case_number, route
-           ORDER BY case_number, route"""
-    ).fetchall()
-    conn.close()
+def get_catalog(request: Request):
+    _require_auth(request)
+    firm_id = getattr(request.state, "firm_id", "default")
+    with get_conn(firm_id) as conn:
+        rows = conn.execute(
+            """SELECT case_number, route,
+                      COUNT(*) as cnt,
+                      COALESCE(SUM(file_size), 0) as total_size,
+                      MIN(created_at) as first_added,
+                      MAX(created_at) as last_added
+               FROM discovery_files
+               GROUP BY case_number, route
+               ORDER BY case_number, route"""
+        ).fetchall()
 
     catalog = {}
     for r in rows:
@@ -616,17 +562,18 @@ def extract_date_from_text(text: str):
 
 
 @router.post("/extract-dates")
-async def extract_dates(body: dict = None):
+async def extract_dates(request: Request, body: dict = None):
+    _require_auth(request)
+    firm_id = getattr(request.state, "firm_id", "default")
     file_ids = (body or {}).get("file_ids", None)
-    conn     = get_conn()
-    if file_ids:
-        placeholders = ",".join("?" * len(file_ids))
-        rows = conn.execute(
-            f"SELECT * FROM discovery_files WHERE id IN ({placeholders})", file_ids
-        ).fetchall()
-    else:
-        rows = conn.execute("SELECT * FROM discovery_files WHERE doc_date IS NULL").fetchall()
-    conn.close()
+    with get_conn(firm_id) as conn:
+        if file_ids:
+            rows = conn.execute(
+                "SELECT * FROM discovery_files WHERE id = ANY(%s)",
+                (file_ids,)
+            ).fetchall()
+        else:
+            rows = conn.execute("SELECT * FROM discovery_files WHERE doc_date IS NULL").fetchall()
 
     updated = []
     skipped = []
@@ -643,10 +590,8 @@ async def extract_dates(body: dict = None):
                 pass
 
         if doc_date:
-            conn = get_conn()
-            conn.execute("UPDATE discovery_files SET doc_date=? WHERE id=?", (doc_date, row["id"]))
-            conn.commit()
-            conn.close()
+            with get_conn(firm_id) as conn:
+                conn.execute("UPDATE discovery_files SET doc_date=%s WHERE id=%s", (doc_date, row["id"]))
             updated.append({"id": row["id"], "name": row["original_name"], "doc_date": doc_date})
         else:
             skipped.append({"id": row["id"], "name": row["original_name"]})
@@ -656,47 +601,49 @@ async def extract_dates(body: dict = None):
 
 
 @router.get("/sorted")
-def get_sorted_queue(case_number: str = None):
-    conn = get_conn()
-    if case_number:
-        rows = conn.execute(
-            "SELECT * FROM discovery_files WHERE case_number=? ORDER BY COALESCE(doc_date,'9999') ASC, created_at ASC",
-            (case_number,)
-        ).fetchall()
-    else:
-        rows = conn.execute(
-            "SELECT * FROM discovery_files ORDER BY COALESCE(doc_date,'9999') ASC, created_at ASC"
-        ).fetchall()
-    conn.close()
+def get_sorted_queue(request: Request, case_number: str = None):
+    _require_auth(request)
+    firm_id = getattr(request.state, "firm_id", "default")
+    with get_conn(firm_id) as conn:
+        if case_number:
+            rows = conn.execute(
+                "SELECT * FROM discovery_files WHERE case_number=%s ORDER BY COALESCE(doc_date,'9999') ASC, created_at ASC",
+                (case_number,)
+            ).fetchall()
+        else:
+            rows = conn.execute(
+                "SELECT * FROM discovery_files ORDER BY COALESCE(doc_date,'9999') ASC, created_at ASC"
+            ).fetchall()
     return {"files": [dict(r) for r in rows], "total": len(rows)}
 
 
 @router.get("/duplicates")
-def find_duplicates():
-    conn  = get_conn()
-    dupes = conn.execute("""
-        SELECT file_hash, COUNT(*) as cnt
-        FROM discovery_files
-        WHERE file_hash IS NOT NULL
-        GROUP BY file_hash
-        HAVING cnt > 1
-    """).fetchall()
+def find_duplicates(request: Request):
+    _require_auth(request)
+    firm_id = getattr(request.state, "firm_id", "default")
+    with get_conn(firm_id) as conn:
+        dupes = conn.execute("""
+            SELECT file_hash, COUNT(*) as cnt
+            FROM discovery_files
+            WHERE file_hash IS NOT NULL
+            GROUP BY file_hash
+            HAVING COUNT(*) > 1
+        """).fetchall()
 
-    groups = []
-    for d in dupes:
-        rows = conn.execute(
-            "SELECT * FROM discovery_files WHERE file_hash=? ORDER BY created_at ASC",
-            (d["file_hash"],)
-        ).fetchall()
-        files = [dict(r) for r in rows]
-        groups.append({
-            "hash":       d["file_hash"],
-            "count":      d["cnt"],
-            "keep":       files[0]["id"],
-            "duplicates": files,
-        })
+        groups = []
+        for d in dupes:
+            rows = conn.execute(
+                "SELECT * FROM discovery_files WHERE file_hash=%s ORDER BY created_at ASC",
+                (d["file_hash"],)
+            ).fetchall()
+            files = [dict(r) for r in rows]
+            groups.append({
+                "hash":       d["file_hash"],
+                "count":      d["cnt"],
+                "keep":       files[0]["id"],
+                "duplicates": files,
+            })
 
-    conn.close()
     return {
         "total_groups":     len(groups),
         "total_duplicates": sum(g["count"] - 1 for g in groups),
@@ -705,11 +652,11 @@ def find_duplicates():
 
 
 @router.post("/extract-text/{file_id}")
-async def extract_text_to_case(file_id: int, background_tasks: BackgroundTasks):
-    """Extract text from any discovery file, update case_documents, then re-screen for privilege."""
-    conn = get_conn()
-    row  = conn.execute("SELECT * FROM discovery_files WHERE id=?", (file_id,)).fetchone()
-    conn.close()
+async def extract_text_to_case(file_id: int, request: Request, background_tasks: BackgroundTasks):
+    _require_auth(request)
+    firm_id = getattr(request.state, "firm_id", "default")
+    with get_conn(firm_id) as conn:
+        row = conn.execute("SELECT * FROM discovery_files WHERE id=%s", (file_id,)).fetchone()
     if not row:
         raise HTTPException(404, "File not found")
 
@@ -722,7 +669,8 @@ async def extract_text_to_case(file_id: int, background_tasks: BackgroundTasks):
         async with httpx.AsyncClient(timeout=60) as client:
             resp = await client.post(
                 "http://localhost:5003/discovery/process/ocr/" + str(file_id),
-                headers={"X-API-Key": os.environ.get("PARAIQ_API_KEY", "")}
+                headers={"X-API-Key": os.environ.get("PARAIQ_API_KEY", ""),
+                         "Authorization": request.headers.get("Authorization", "")}
             )
         extracted_text = resp.json().get("text", "")
 
@@ -738,7 +686,8 @@ async def extract_text_to_case(file_id: int, background_tasks: BackgroundTasks):
         async with httpx.AsyncClient(timeout=120) as client:
             resp = await client.post(
                 "http://localhost:5003/media/transcribe/discovery/" + str(file_id),
-                headers={"X-API-Key": os.environ.get("PARAIQ_API_KEY", "")}
+                headers={"X-API-Key": os.environ.get("PARAIQ_API_KEY", ""),
+                         "Authorization": request.headers.get("Authorization", "")}
             )
         extracted_text = resp.json().get("transcript", "")
 
@@ -748,23 +697,16 @@ async def extract_text_to_case(file_id: int, background_tasks: BackgroundTasks):
     if not extracted_text.strip():
         return {"success": False, "file_id": file_id, "message": "No text extracted"}
 
-    import sqlite3 as _sq
-    cases_con = _sq.connect("/root/nlp-portfolio/analyses.db")
-    updated   = cases_con.execute(
-        "UPDATE case_documents SET doc_text=? WHERE document_name=?",
-        (extracted_text, row["original_name"])
-    ).rowcount
-    cases_con.commit()
-    cases_con.close()
-
-    conn = get_conn()
-    conn.execute("UPDATE discovery_files SET status='text_extracted' WHERE id=?", (file_id,))
-    conn.commit()
-    conn.close()
+    with get_conn(firm_id) as conn:
+        updated = conn.execute(
+            "UPDATE case_documents SET doc_text=%s WHERE document_name=%s",
+            (extracted_text, row["original_name"])
+        ).rowcount
+        conn.execute("UPDATE discovery_files SET status='text_extracted' WHERE id=%s", (file_id,))
 
     # Re-screen with real text now that extraction is complete
     background_tasks.add_task(
-        _screen_privilege, file_id, extracted_text[:5000], row["original_name"], "default"
+        _screen_privilege, file_id, extracted_text[:5000], row["original_name"], firm_id
     )
 
     return {
@@ -776,8 +718,7 @@ async def extract_text_to_case(file_id: int, background_tasks: BackgroundTasks):
         "preview":                extracted_text[:200],
         "case_documents_updated": updated,
     }
-# ─────────────────────────────────────────────────────────────────────────────
-# PASTE THIS AT THE BOTTOM OF discovery_intake.py
+
 # ─────────────────────────────────────────────────────────────────────────────
 
 from backend.demo1.discovery_agent_guard import GuardedDiscoveryRunner, AgentLimits
@@ -788,32 +729,8 @@ async def run_guarded_discovery(request: Request, body: dict):
     Guarded batch discovery run.
     Accepts file_ids already uploaded via /discovery/intake.
     Runs all 7 pipeline stages with hard compute guards.
-
-    Body:
-        file_ids     list[int]  — required; IDs from discovery_files
-        case_number  str        — required; ties to cases table
-        firm_id      str        — optional; for enclave routing (default: "default")
-        bates_prefix str        — optional; e.g. "PROD", "DEF", "CONF" (default: "PROD")
-        bates_start  int        — optional; starting Bates number (default: 1)
-        output_dir   str        — optional; where to write the ZIP (default: /tmp)
-
-        # Override any limit (all optional):
-        max_llm_calls        int
-        max_total_tokens     int
-        max_docs             int
-        max_ocr_pages        int
-        max_cost_usd         float
-        timeout_per_stage    int
-        timeout_total        int
-
-    Returns:
-        { status: "completed"|"aborted"|"blocked_doc_gate"|"no_files",
-          summary: { llm_calls, estimated_cost_usd, flagged_docs, zip_path, ... } }
     """
-    # Auth required — firm_id comes from JWT, not caller-supplied body
-    user_id = getattr(request.state, "user_id", None)
-    if not user_id:
-        raise HTTPException(status_code=401, detail="Authentication required")
+    _require_auth(request)
     firm_id      = getattr(request.state, "firm_id", "default")
     file_ids     = body.get("file_ids", [])
     case_number  = body.get("case_number", "").strip()
@@ -826,7 +743,6 @@ async def run_guarded_discovery(request: Request, body: dict):
     if not case_number:
         raise HTTPException(400, "case_number is required")
 
-    # Build limits — caller can override any individual limit
     limits = AgentLimits(
         max_llm_calls_per_run     = int(body.get("max_llm_calls",     8)),
         max_total_tokens_per_run  = int(body.get("max_total_tokens",  12000)),

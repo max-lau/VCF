@@ -83,7 +83,7 @@ class AuditMiddleware(BaseHTTPMiddleware):
                 import os as _os
                 _payload = _jwt.decode(
                     auth_hdr[7:],
-                    _os.environ.get("JWT_SECRET_KEY", "nlp-portfolio-secret-change-in-production"),
+                    _os.environ.get("JWT_SECRET_KEY", ""),
                     algorithms=["HS256"],
                     options={"verify_exp": True},
                 )

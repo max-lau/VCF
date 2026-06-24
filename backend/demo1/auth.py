@@ -57,7 +57,7 @@ def _clear_failures(ip: str):
 
 
 # ── Config ─────────────────────────────────────────────────────────────────────
-SECRET_KEY   = os.getenv("JWT_SECRET_KEY", "nlp-portfolio-secret-change-in-production")
+SECRET_KEY   = os.getenv("JWT_SECRET_KEY", "")
 ALGORITHM    = "HS256"
 EXPIRE_HOURS = int(os.getenv("JWT_EXPIRE_HOURS", "24"))
 

@@ -9,9 +9,18 @@ from langfuse.types import TraceContext
 from typing import Optional
 
 _langfuse: Optional[Langfuse] = None
+_langfuse_enabled: Optional[bool] = None
 
-def get_langfuse() -> Langfuse:
-    global _langfuse
+def _langfuse_is_configured() -> bool:
+    """Check if Langfuse env vars are present."""
+    return bool(os.getenv("LANGFUSE_PUBLIC_KEY") and os.getenv("LANGFUSE_SECRET_KEY"))
+
+def get_langfuse() -> Optional[Langfuse]:
+    global _langfuse, _langfuse_enabled
+    if _langfuse_enabled is None:
+        _langfuse_enabled = _langfuse_is_configured()
+    if not _langfuse_enabled:
+        return None
     if _langfuse is None:
         _langfuse = Langfuse(
             public_key=os.getenv("LANGFUSE_PUBLIC_KEY"),
@@ -34,9 +43,19 @@ def trace_claude_call(
 ):
     """
     Drop-in wrapper for client.messages.create() with Langfuse 4.x tracing.
+    Falls back to a plain call if Langfuse is not configured.
     Returns (response, trace_id).
     """
     lf = get_langfuse()
+    if lf is None:
+        # Langfuse not configured — make a plain call
+        response = client.messages.create(
+            model=model,
+            messages=messages,
+            max_tokens=max_tokens,
+            **kwargs
+        )
+        return response, None
     trace_id = lf.create_trace_id()
     ctx = TraceContext(trace_id=trace_id)
     with lf.start_as_current_observation(

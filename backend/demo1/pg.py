@@ -157,7 +157,7 @@ def make_tenant_middleware():
     import jwt as pyjwt
     from starlette.middleware.base import BaseHTTPMiddleware
 
-    SECRET = os.environ.get("JWT_SECRET_KEY", "nlp-portfolio-secret-change-in-production")
+    SECRET = os.environ.get("JWT_SECRET_KEY", "")
 
     class TenantMiddleware(BaseHTTPMiddleware):
         async def dispatch(self, request: Request, call_next):

@@ -12,7 +12,7 @@ from backend.demo1.interrogation_export import router as interrogation_export_ro
 from backend.demo1.audit_trail import AuditMiddleware, init_audit_table, router as audit_router
 from backend.demo1.rate_limit import check_rate_limit
 from backend.demo1.observability.tracer import trace_claude_call
-from backend.demo1.pii import redact_text, redaction_summary
+from backend.demo1.pii import redact_text as _pii_redact, redaction_summary as _pii_summary
 from backend.demo1.risk_scorer import router as risk_router
 from backend.demo1.document_comparison import router as comparison_router
 from backend.demo1.citation_resolver import router as citations_router
@@ -496,15 +496,16 @@ def analyze(body: TextInput, request: Request):
     return run_analysis(body.text, firm_id=getattr(request.state, 'firm_id', 'default'))
 
 @app.post("/analyze/batch")
-async def analyze_batch(body: BatchInput):
+async def analyze_batch(body: BatchInput, request: Request):
     if not body.documents:
         raise HTTPException(status_code=400, detail="No documents provided")
     if len(body.documents) > 20:
         raise HTTPException(status_code=400, detail="Max 20 documents per batch")
     labels = body.labels + [""] * (len(body.documents) - len(body.labels))
+    firm_id = getattr(request.state, 'firm_id', 'default')
     loop   = asyncio.get_event_loop()
     tasks  = [
-        loop.run_in_executor(executor, run_analysis, doc, label)
+        loop.run_in_executor(executor, run_analysis, doc, label, firm_id)
         for doc, label in zip(body.documents, labels)
     ]
     results    = await asyncio.gather(*tasks)
@@ -529,15 +530,16 @@ async def analyze_batch(body: BatchInput):
     }
 
 @app.post("/analyze/batch/csv")
-async def analyze_batch_csv(body: BatchInput):
+async def analyze_batch_csv(body: BatchInput, request: Request):
     if not body.documents:
         raise HTTPException(status_code=400, detail="No documents provided")
     if len(body.documents) > 20:
         raise HTTPException(status_code=400, detail="Max 20 documents per batch")
     labels = body.labels + [""] * (len(body.documents) - len(body.labels))
+    firm_id = getattr(request.state, 'firm_id', 'default')
     loop   = asyncio.get_event_loop()
     tasks  = [
-        loop.run_in_executor(executor, run_analysis, doc, label)
+        loop.run_in_executor(executor, run_analysis, doc, label, firm_id)
         for doc, label in zip(body.documents, labels)
     ]
     results = await asyncio.gather(*tasks)
@@ -641,15 +643,14 @@ def history(
 # disambiguate + coreference → routers/nlp_router.py
 
 @app.post("/entities/score")
-def entities_score(body: TextInput):
+def entities_score(body: TextInput, request: Request):
     """Extract and score entities with confidence and salience metrics."""
     if not body.text or len(body.text.strip()) < 20:
         raise HTTPException(status_code=400, detail="Text too short")
     
-    doc = nlp_spacy(body.text[:5000]) if hasattr(body, 'nlp_spacy') else None
-    
+    firm_id = getattr(request.state, 'firm_id', 'default')
     # Use Claude for initial extraction then score
-    result = run_analysis(body.text)
+    result = run_analysis(body.text, firm_id=firm_id)
     entities = result.get("entities", [])
     scored   = score_entities(body.text, entities)
     summary  = get_entity_summary(scored)
@@ -663,7 +664,7 @@ def entities_score(body: TextInput):
 # summary/score → routers/summary_router.py
 
 @app.post("/summary/score/auto")
-def summary_score_auto(body: TextInput):
+def summary_score_auto(body: TextInput, request: Request):
     """
     Analyze text, generate summary, then immediately score it.
     One endpoint that does the full pipeline.
@@ -671,8 +672,9 @@ def summary_score_auto(body: TextInput):
     if not body.text or len(body.text.strip()) < 20:
         raise HTTPException(status_code=400, detail="Text too short")
 
+    firm_id = getattr(request.state, 'firm_id', 'default')
     # Run full analysis to get the summary
-    result  = run_analysis(body.text)
+    result  = run_analysis(body.text, firm_id=firm_id)
     summary = result.get("summary", "")
 
     if not summary:
@@ -1340,7 +1342,7 @@ def case_intelligence(case_id: int, request: Request):
     except Exception as e:
         import logging
         logging.error(f"case_intelligence error for case {case_id}: {e}")
-        return {"signals": signals, "error": str(e)}
+        return {"signals": signals, "error": "Failed to load case intelligence signals."}
 
     return {"signals": signals}
 
