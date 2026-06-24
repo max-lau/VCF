@@ -8,7 +8,8 @@ Agentic 24/7 system monitor for ParaIQ Super Admin.
 - Fires Slack DM + email if risk >= warning
 - Logs every assessment to risk_assessments table
 """
-import os, json, sqlite3, asyncio, logging
+import os, json, asyncio, logging
+from backend.demo1.pg import get_conn as _pg_get_conn
 from datetime import datetime, timezone, timedelta
 
 import httpx
@@ -20,7 +21,6 @@ from backend.demo1.routers.morning_brief_router import run_all_firms_brief
 
 log = logging.getLogger("risk_watcher")
 
-DB_PATH       = os.environ.get("PARAIQ_DB", str(__import__("pathlib").Path(__file__).parent / "analyses.db"))
 CF_TOKEN      = os.getenv("CF_API_TOKEN", "")
 CF_ZONE       = os.getenv("CF_ZONE_ID", "")
 SLACK_URL     = os.getenv("SLACK_WEBHOOK_URL", "")
@@ -35,40 +35,22 @@ _anthropic = Anthropic(api_key=ANTHROPIC_KEY)
 
 # ── DB setup ───────────────────────────────────────────────────────────────────
 def init_risk_table():
-    conn = sqlite3.connect(DB_PATH)
-    conn.execute("""
-        CREATE TABLE IF NOT EXISTS risk_assessments (
-            id           INTEGER PRIMARY KEY AUTOINCREMENT,
-            assessed_at  TEXT    NOT NULL,
-            risk_level   TEXT    NOT NULL,
-            summary      TEXT    NOT NULL,
-            signals      TEXT    NOT NULL,
-            prediction   TEXT,
-            actions      TEXT,
-            alerted      INTEGER DEFAULT 0
-        )
-    """)
-    conn.commit()
-    conn.close()
+    """No-op -- table exists in Supabase Postgres."""
     log.info("[RiskWatcher] Table initialized")
 
 def save_assessment(risk_level, summary, signals, prediction, actions, alerted):
-    conn = sqlite3.connect(DB_PATH)
-    conn.execute("""
-        INSERT INTO risk_assessments
-          (assessed_at, risk_level, summary, signals, prediction, actions, alerted)
-        VALUES (?, ?, ?, ?, ?, ?, ?)
-    """, (
-        datetime.now(timezone.utc).isoformat(),
-        risk_level,
-        summary,
-        json.dumps(signals),
-        prediction,
-        json.dumps(actions) if actions else None,
-        1 if alerted else 0,
-    ))
-    conn.commit()
-    conn.close()
+    with _pg_get_conn("default") as conn:
+        conn.execute("""
+            INSERT INTO risk_assessments
+              (assessed_at, risk_level, summary, signals, prediction, actions, alerted)
+            VALUES (%s,%s,%s,%s,%s,%s,%s)
+        """, (
+            datetime.now(timezone.utc).isoformat(),
+            risk_level, summary,
+            json.dumps(signals), prediction,
+            json.dumps(actions) if actions else None,
+            alerted,
+        ))
 
 # ── Signal collection ─────────────────────────────────────────────────────────
 def collect_system_signals():

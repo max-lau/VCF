@@ -10,7 +10,7 @@ Three proactive AI features:
 import json
 import os
 import re
-import sqlite3
+from backend.demo1.pg import get_conn as _pg_get_conn
 from datetime import datetime, date
 from typing import Optional
 
@@ -21,14 +21,11 @@ from backend.demo1.ab_testing.logger import log_experiment_result
 from dotenv import load_dotenv
 
 load_dotenv()
-_client = anthropic.Anthropic(api_key=os.getenv("ANTHROPIC_API_KEY"))
-DB_PATH = os.environ.get("PARAIQ_DB", str(__import__("pathlib").Path(__file__).parent / "analyses.db"))
+# Claude client imported lazily via claude_with_retry
 
 
-def _get_db():
-    conn = sqlite3.connect(DB_PATH)
-    conn.row_factory = sqlite3.Row
-    return conn
+def _get_db(firm_id="default"):
+    return _pg_get_conn(firm_id)
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -36,36 +33,8 @@ def _get_db():
 # ─────────────────────────────────────────────────────────────────────────────
 
 def init_intelligence_db():
-    conn = _get_db()
-    c = conn.cursor()
-    c.execute("""
-        CREATE TABLE IF NOT EXISTS case_contradictions (
-            id           INTEGER PRIMARY KEY AUTOINCREMENT,
-            case_id      INTEGER NOT NULL,
-            doc_a_id     INTEGER NOT NULL,
-            doc_b_id     INTEGER NOT NULL,
-            doc_a_name   TEXT,
-            doc_b_name   TEXT,
-            severity     TEXT DEFAULT 'medium',
-            c_type       TEXT,
-            entity       TEXT,
-            claim_a      TEXT,
-            claim_b      TEXT,
-            explanation  TEXT,
-            reviewed     INTEGER DEFAULT 0,
-            detected_at  TEXT DEFAULT (datetime('now'))
-        )
-    """)
-    c.execute("""
-        CREATE TABLE IF NOT EXISTS case_briefs (
-            id           INTEGER PRIMARY KEY AUTOINCREMENT,
-            case_id      INTEGER NOT NULL,
-            brief_json   TEXT NOT NULL,
-            generated_at TEXT DEFAULT (datetime('now'))
-        )
-    """)
-    conn.commit()
-    conn.close()
+    """No-op -- tables exist in Supabase Postgres."""
+    pass
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -81,7 +50,7 @@ def run_case_contradiction_scan(case_id: int, new_doc_id: int):
     try:
         conn = _get_db()
         new_doc = conn.execute(
-            "SELECT id, document_name, doc_text FROM case_documents WHERE id=?",
+            "SELECT id, document_name, doc_text FROM case_documents WHERE id=%s",
             (new_doc_id,)
         ).fetchone()
         if not new_doc or not new_doc["doc_text"]:
@@ -90,7 +59,7 @@ def run_case_contradiction_scan(case_id: int, new_doc_id: int):
 
         existing = conn.execute(
             """SELECT id, document_name, doc_text FROM case_documents
-               WHERE case_id=? AND id!=? AND doc_text IS NOT NULL AND doc_text!=''""",
+               WHERE case_id=%s AND id!=%s AND doc_text IS NOT NULL AND doc_text!=''""",
             (case_id, new_doc_id)
         ).fetchall()
         conn.close()
@@ -192,7 +161,7 @@ def _save_contradictions(case_id, doc_a, doc_b, items):
 def get_case_contradictions(case_id: int) -> list:
     conn = _get_db()
     rows = conn.execute(
-        """SELECT * FROM case_contradictions WHERE case_id=?
+        """SELECT * FROM case_contradictions WHERE case_id=%s
            ORDER BY severity DESC, detected_at DESC""",
         (case_id,)
     ).fetchall()
@@ -203,7 +172,7 @@ def get_case_contradictions(case_id: int) -> list:
 def get_unreviewed_count(case_id: int) -> int:
     conn = _get_db()
     n = conn.execute(
-        "SELECT COUNT(*) FROM case_contradictions WHERE case_id=? AND reviewed=0",
+        "SELECT COUNT(*) FROM case_contradictions WHERE case_id=? AND reviewed=FALSE",
         (case_id,)
     ).fetchone()[0]
     conn.close()
@@ -212,7 +181,7 @@ def get_unreviewed_count(case_id: int) -> int:
 
 def mark_reviewed(contradiction_id: int):
     conn = _get_db()
-    conn.execute("UPDATE case_contradictions SET reviewed=1 WHERE id=?",
+    conn.execute("UPDATE case_contradictions SET reviewed=1 WHERE id=%s",
                  (contradiction_id,))
     conn.commit()
     conn.close()
@@ -229,7 +198,7 @@ def generate_case_brief(case_id: int) -> dict:
     Saves the brief to case_briefs table and returns the dict.
     """
     conn = _get_db()
-    case = conn.execute("SELECT * FROM cases WHERE id=?", (case_id,)).fetchone()
+    case = conn.execute("SELECT * FROM cases WHERE id=%s", (case_id,)).fetchone()
     if not case:
         conn.close()
         raise ValueError(f"Case {case_id} not found")
@@ -237,12 +206,12 @@ def generate_case_brief(case_id: int) -> dict:
     docs = conn.execute(
         """SELECT document_name, doc_text, summary, risk_score,
                   events_json, entities_json
-           FROM case_documents WHERE case_id=? ORDER BY upload_date ASC""",
+           FROM case_documents WHERE case_id=%s ORDER BY upload_date ASC""",
         (case_id,)
     ).fetchall()
 
     notes = conn.execute(
-        "SELECT note, author FROM case_notes WHERE case_id=? ORDER BY created_at ASC",
+        "SELECT note, author FROM case_notes WHERE case_id=%s ORDER BY created_at ASC",
         (case_id,)
     ).fetchall()
     conn.close()
@@ -315,7 +284,7 @@ def generate_case_brief(case_id: int) -> dict:
     brief = json.loads(raw)
 
     conn = _get_db()
-    conn.execute("INSERT INTO case_briefs (case_id, brief_json) VALUES (?,?)",
+    conn.execute("INSERT INTO case_briefs (case_id, brief_json) VALUES (%s,%s)",
                  (case_id, json.dumps(brief)))
     conn.commit()
     conn.close()
@@ -387,16 +356,11 @@ def _scan_text_for_dates(text: str) -> list:
 def get_deadline_radar() -> dict:
     """Scan all open cases for upcoming dates extracted from documents."""
     try:
-        conn = sqlite3.connect(os.environ.get("PARAIQ_DB", str(__import__("pathlib").Path(__file__).parent / "analyses.db")))
-        conn.row_factory = sqlite3.Row
-        cur = conn.cursor()
-
-        # Get all open cases
-        cur.execute("""
-            SELECT id, case_number, client_name, description
-            FROM cases WHERE status='open' AND deleted=0
-        """)
-        cases = cur.fetchall()
+        with _pg_get_conn("default") as conn:
+            cases = conn.execute("""
+                SELECT id, case_number, client_name, description
+                FROM cases WHERE status='open' AND deleted=FALSE
+            """).fetchall()
 
         deadlines = []
         today = date.today()
@@ -404,14 +368,18 @@ def get_deadline_radar() -> dict:
         for case in cases:
             case_id, case_number, client_name, matter = case[0], case[1], case[2], case[3]
 
-            # Pull dates extracted from documents (stored in case_documents doc_text JSON or entities)
-            cur.execute("""
-                SELECT doc_text FROM case_documents
-                WHERE case_id=? AND doc_text IS NOT NULL AND doc_text!=''
-            """, (case_id,))
-            docs = cur.fetchall()
+            # Pull dates extracted from documents
+            with _pg_get_conn("default") as conn2:
+                docs = conn2.execute("""
+                    SELECT doc_text FROM case_documents
+                    WHERE case_id=%s AND doc_text IS NOT NULL AND doc_text!=''
+                """, (case_id,)).fetchall()
+                filing_row = conn2.execute(
+                    "SELECT filing_date FROM cases WHERE id=%s", (case_id,)
+                ).fetchone()
 
-            for (doc_text,) in docs:
+            for doc in docs:
+                doc_text = doc["doc_text"] if hasattr(doc, "keys") else doc[0]
                 # Try to find ISO dates in doc text
                 import re
                 found = re.findall(r'\b(\d{4}-\d{2}-\d{2})\b', doc_text)
@@ -431,8 +399,7 @@ def get_deadline_radar() -> dict:
                         pass
 
             # Also check filing_date + 30 days as a basic deadline
-            cur.execute("SELECT filing_date FROM cases WHERE id=?", (case_id,))
-            row = cur.fetchone()
+            row = filing_row
             if row and row[0]:
                 try:
                     fd = datetime.strptime(row[0][:10], "%Y-%m-%d").date()
