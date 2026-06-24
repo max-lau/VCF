@@ -10,11 +10,11 @@ VPS: root@5.161.83.6 — project root: /root/nlp-portfolio
 ## Infrastructure
 
 ### pm2 Processes
-- ID 9: paraiq-api (FastAPI backend, port 5003)
-- ID 6: paraiq-frontend (Vue 3, dist-vue)
-- ID 5: paraiq-tunnel (Cloudflare)
+- ID 4: paraiq-api (FastAPI backend, port 5003)
+- ID 2: paraiq-frontend (Vue 3, dist-vue)
+- ID 1: paraiq-tunnel (Cloudflare)
+- ID 5: prometheus (port 9090, scrapes /metrics every 15s)
 - ID 11: paraiq-voice-bot (Telegram)
-- ID 3: whale-scanner
 - Start all: /root/start-paraiq.sh
 
 ### Tech Stack
@@ -23,6 +23,7 @@ VPS: root@5.161.83.6 — project root: /root/nlp-portfolio
 - Database: Supabase Postgres (primary), SQLite (backup)
 - Frontend: Vue 3, Vite, IBM Plex Mono
 - Infra: Hetzner VPS, Cloudflare Tunnel, pm2, nginx
+- Observability: Prometheus + Grafana 11.1.0 (https://grafana.para-iq.com)
 
 ### Database
 - Connection: backend/demo1/pg.py — synchronous psycopg2 pool
@@ -32,8 +33,10 @@ VPS: root@5.161.83.6 — project root: /root/nlp-portfolio
 
 ### Auth
 - JWT (PyJWT), bcrypt passwords
+- Every token includes jti (uuid4) for blocklist support
 - Super user: maxwell / paraiq2026, role paraiq_super, firm_id default
 - Login: POST /auth/login — response field is token (not access_token)
+- Logout: POST /auth/logout — blocks jti in token_blocklist table
 - Frontend stores token in localStorage as paraiq_token
 
 ---
@@ -41,7 +44,32 @@ VPS: root@5.161.83.6 — project root: /root/nlp-portfolio
 ## Modules
 Analyzer, Batch, Timeline, Dashboard, Insights, Scorer, Risk, Citations,
 Compare, Model, Audit, OCR Intake, Redaction, Interrogation, Credibility,
-Multilingual, Review, Discovery, Privilege Log, Correspondence, Email Intake
+Multilingual, Review, Discovery, Privilege Log, Correspondence, Email Intake,
+Billing, Voice Shortcuts, Morning Brief
+
+---
+
+## Observability Stack (June 2026)
+
+### Prometheus
+- Binary: /opt/prometheus/prometheus
+- Config: /opt/prometheus/prometheus.yml
+- Scrapes: http://localhost:5003/metrics every 15s (job: paraiq-api)
+- Data: /opt/prometheus/data
+- PM2 process: prometheus (id:5), listens on 127.0.0.1:9090
+
+### Grafana
+- Version: 11.1.0, installed via .deb
+- Config: /etc/grafana/grafana.ini
+- Public URL: https://grafana.para-iq.com (Cloudflare tunnel route)
+- Data source: Prometheus at http://localhost:9090
+- Dashboard: FastAPI Observability (ID 18739)
+- Alert: ParaIQ 5xx Spike — fires to Slack ParaIQ Monitor when 5xx > 0.01 req/s over 5m
+
+### FastAPI Instrumentation
+- Package: prometheus-fastapi-instrumentator==8.0.2
+- Wired in main.py: Instrumentator().instrument(app).expose(app, endpoint="/metrics")
+- Metrics endpoint: http://localhost:5003/metrics (not exposed publicly)
 
 ---
 
@@ -53,6 +81,9 @@ Multilingual, Review, Discovery, Privilege Log, Correspondence, Email Intake
 - Compound commands: get_workload_today, get_case_intelligence
 - Telegram locked to ID 541424804, password paraiq2026
 - Auth uses username field (not email) at /auth/login
+- User-defined shortcuts: voice_shortcuts_router.py, stored in voice_shortcuts table
+  - CRUD: GET/POST/PUT/DELETE /voice/shortcuts
+  - Injected into Claude prompt at runtime per user/firm
 
 ---
 
@@ -60,7 +91,7 @@ Multilingual, Review, Discovery, Privilege Log, Correspondence, Email Intake
 
 ### Files
 - backend/demo1/email_filter.py — 5-stage filter engine
-- backend/demo1/email_poller.py — Gmail adaptive poller
+- backend/demo1/email_poller.py — Gmail adaptive poller (token refresh persisted to DB)
 - backend/demo1/outlook_poller.py — Outlook/Graph API poller
 - backend/demo1/email_router.py — 10 FastAPI endpoints
 - frontend/paraiq-vue/src/views/email/EmailInboxView.vue — Inbox UI
@@ -75,13 +106,13 @@ Multilingual, Review, Discovery, Privilege Log, Correspondence, Email Intake
 - OAuth2 via google-auth-oauthlib, scope: gmail.readonly
 - Credentials: GMAIL_CLIENT_ID, GMAIL_CLIENT_SECRET
 - Redirect: https://app.para-iq.com/auth/gmail/callback
+- Token refresh: _send_gmail_reply() refreshes and persists new token to DB
 
 ### Outlook
 - OAuth2 via MSAL, scopes: Mail.Read, User.Read, email
 - Do NOT pass offline_access/openid/profile — MSAL adds them automatically
 - Credentials: OUTLOOK_CLIENT_ID, OUTLOOK_TENANT_ID, OUTLOOK_CLIENT_SECRET
 - Redirect: https://app.para-iq.com/auth/outlook/callback
-- Azure app supports personal + org Microsoft accounts
 
 ### 5-Stage Filter Pipeline
 - Stage 1 Domain Trust: +40 trusted domains, -50 bulk headers, -100 SYSTEM_DOMAINS
@@ -91,36 +122,67 @@ Multilingual, Review, Discovery, Privilege Log, Correspondence, Email Intake
 - Stage 5 Priority Tag: urgent/high/normal
 - Formula: final = max(0, min(100, s1 + s2 + s3 + 50))
 
-### Deduplication
-- DB-based: fetch all processed IDs before each poll cycle
-- Inbox never modified (read-only scope)
-- UNIQUE constraint on (provider_message_id, attorney_id)
-
-### Quiet Hours
-- Default: 9pm-7am America/New_York
-- Active: 300s poll, Quiet: 1800s poll
-- Configurable per firm in firm_email_settings
-
-### API Endpoints
-- GET /email/accounts — list connected accounts
-- POST /email/accounts/gmail/connect — start Gmail OAuth
-- GET /auth/gmail/callback — Gmail OAuth callback
-- POST /email/accounts/outlook/connect — start Outlook OAuth
-- GET /auth/outlook/callback — Outlook OAuth callback
-- DELETE /email/accounts/{id} — disconnect account
-- GET /email/intake — paginated intake feed
-- GET /email/intake/{id} — detail (JOINs log for scores)
-- GET /email/log — full processing log
-- POST /email/log/{id}/reprocess — flag for reprocess
-
 ### Key Learnings
 - DB dedup safer than modifying inbox (attorney inbox integrity)
 - RLS blocks background workers — query with attorney_id directly
 - MSAL reserved scopes: do not pass manually
 - gmail.readonly is superset of gmail.metadata
 - HTML entity decode: html.unescape() after stripping tags
-- email_intakes lacks score columns — JOIN with log for detail view
-- selectItem on intake tab: use item.id not item.intake_id
+
+---
+
+## Billing Module
+
+### Files
+- backend/demo1/routers/billing_router.py (703 lines)
+- frontend/paraiq-vue/src/views/admin/BillingView.vue
+
+### Endpoints
+- POST /billing/invoices — create invoice, pulls certified time entries
+- GET /billing/invoices — list invoices with filter
+- GET /billing/invoices/{id} — invoice detail
+- POST /billing/invoices/{id}/items — add line item
+- PATCH /billing/invoices/{id}/status — advance status (with void guard)
+- POST /billing/invoices/{id}/payments — record payment, auto-advances to paid/partially_paid
+- GET /billing/invoices/{id}/pdf — ReportLab PDF download
+- GET /billing/dashboard — summary stats + billing rates
+- POST /billing/rates — set attorney billing rate
+- GET /billing/matter/{matter_id}/ledger — matter ledger
+
+### Status Flow
+draft -> pending_certification -> certified -> sent -> viewed -> partially_paid -> paid
+Voiding: blocked if status is paid or partially_paid (frontend + backend guard)
+
+### Key Fixes (June 2026)
+- matter_id type mismatch fixed (v-model.number removed from select)
+- Empty matters warning shown in New Invoice modal
+- Void warning mentions time entry release; paid invoices cannot be voided
+
+---
+
+## Morning Brief (COMPLETE)
+
+### Files
+- backend/demo1/routers/morning_brief_router.py
+- Scheduler: backend/demo1/risk_watcher.py (APScheduler, cron hour=8 minute=0)
+
+### Behavior
+- Runs at 8am daily via APScheduler inside FastAPI process
+- get_active_firms() queries live users table — auto-includes new firms on onboarding
+- GET /brief/today — returns today brief, generates on demand if not yet created
+- GET /brief/today/voice — voice-optimized brief format
+- Stored in morning_briefs table (firm_id, brief_date, brief_json, summary_text)
+
+---
+
+## JWT Token Blocklist (June 2026)
+
+### Implementation
+- Every JWT now includes jti (uuid4) in payload
+- decode_token() checks token_blocklist table on every request
+- POST /auth/logout — inserts jti + expires_at into blocklist
+- token_blocklist table: jti (PK), firm_id, user_id, blocked_at, expires_at
+- Index on expires_at for cleanup queries
 
 ---
 
@@ -131,7 +193,8 @@ feedback, summary, credibility, interrogate, coreference, disambiguate,
 contradictions, citations, documents, media, messages, model, multilingual,
 entities, bates, bundle, pacer, timeline, export, exports, reports,
 calendar, contacts, research, legal-bert, client-portal, ai-config,
-enclave, notify, webhook, health, stats
+enclave, notify, webhook, health, stats, kanban, draft, notifications,
+brief, approvals, voice, docketing, time, billing, dashboard
 
 ---
 
@@ -142,77 +205,58 @@ GMAIL_REDIRECT_URI=https://app.para-iq.com/auth/gmail/callback,
 OUTLOOK_CLIENT_ID, OUTLOOK_TENANT_ID, OUTLOOK_CLIENT_SECRET,
 OUTLOOK_REDIRECT_URI=https://app.para-iq.com/auth/outlook/callback,
 EMAIL_POLL_INTERVAL_ACTIVE=300, EMAIL_POLL_INTERVAL_QUIET=1800,
-EMAIL_QUIET_HOUR_START=21, EMAIL_QUIET_HOUR_END=7
-
----
-
-## Upcoming
-- User-defined voice shortcuts (Option B — per-user phrase→command mapping in Supabase)
-- Outlook Graph webhooks (replace polling with push)
-- Email intake case link UI (click case badge to open matter)
-- Gmail poller token expiry fix (pre-existing noise in PM2 logs)
-- Broader test coverage (currently ~3%, target 20%+)
-- Course 2 MLOps: MLflow → PyTorch → LoRA/PEFT
+EMAIL_QUIET_HOUR_START=21, EMAIL_QUIET_HOUR_END=7,
+LANGFUSE_BASE_URL=https://us.cloud.langfuse.com,
+LANGFUSE_PUBLIC_KEY, LANGFUSE_SECRET_KEY
 
 ---
 
 ## CI/CD (GitHub Actions)
 
 ### Workflow
-- File: `.github/workflows/ci.yml`
-- Triggers: every push to `main`, every pull request to `main`
-- Runtime: ~3-4 minutes on `ubuntu-latest`
-- Steps: Checkout → Python 3.12 → Install deps → spacy model download → Compile check → Start server → Health check → pytest → Stop server
+- File: .github/workflows/ci.yml
+- Triggers: every push to main, every pull request to main
+- Runtime: ~3-4 minutes on ubuntu-latest
+- Steps: Checkout -> Python 3.12 -> Install deps -> spacy model download -> Compile check -> Start server -> Health check -> pytest -> Stop server
 
-### Secrets (GitHub Repository Secrets)
-Required secrets at `https://github.com/max-lau/nlp-portfolio/settings/secrets/actions`:
-- `DATABASE_URL` — Supabase session pooler URL (value only, no `DATABASE_URL=` prefix)
-- `JWT_SECRET_KEY` — must match VPS `.env`
-- `PARAIQ_API_KEY` — must match VPS `.env`
-- `ANTHROPIC_API_KEY` — Claude API key
-- `LANGFUSE_PUBLIC_KEY`, `LANGFUSE_SECRET_KEY`, `LANGFUSE_BASE_URL` — Langfuse US region
+### Secrets
+- DATABASE_URL, JWT_SECRET_KEY, PARAIQ_API_KEY, ANTHROPIC_API_KEY
+- LANGFUSE_PUBLIC_KEY, LANGFUSE_SECRET_KEY, LANGFUSE_BASE_URL
 
 ### Dependencies
-- `requirements-ci.txt` — lean 35-package subset of full venv (excludes torch, transformers, MLflow)
-- Full venv: `requirements.txt` (273 packages, used on VPS only)
-- spacy model: `en_core_web_sm` downloaded as a workflow step (not a pip package)
-
-### To trigger a run manually
-```bash
-git commit --allow-empty -m "ci: trigger run"
-git push origin main
-```
-
-### Reading the Actions tab
-- Green ✅ = all 11 tenant isolation tests passed
-- Red ❌ = click the failed step to see the traceback
-- "Wait for server to be healthy" failing = server crashed at startup, check the dumped log
+- requirements-ci.txt — lean subset (excludes torch, transformers, MLflow)
+- Full venv: requirements.txt (273 packages, VPS only)
+- spacy model: en_core_web_sm downloaded as workflow step
 
 ---
 
 ## Security Hardening (v4 Audit — June 2026)
 
-### What was fixed (score moved 3/10 → 7/10+)
-- **§2.1** Audit write path now firm-scoped — `log_request()` inserts `firm_id` from JWT
-- **§2.2** `/audit/discovery/chain` + `/export` require auth + firm scoping
-- **§2.3** `rate_limit.py` wired into all 8 `claude_with_retry` call sites
-- **§2.4** Langfuse `trace_claude_call()` wired into `claude_with_retry` — all Claude calls now traced
-- **§2.5** `/discovery/run-guarded` endpoint is real code with auth + firm scoping
-- **§2.6** `redaction.py` migrated from SQLite to Supabase Postgres
-- **§2.7** `/audit/logs/clear` now per-firm only; logs the clear action itself
-- **§2.8** `case_wall` + `case_intelligence` converted from `async def` to `def` (psycopg2 is sync)
-- **§2.9** All hardcoded `/root/nlp-portfolio/` paths replaced with env-configurable relative paths
-- **§2.10** `get_connection()` shim deprecated; `contradiction.py` + `entity_linker.py` use `get_conn(firm_id)`
-
-### Key patterns enforced
-- Every Claude call: `check_rate_limit(firm_id, "ai")` → `trace_claude_call()` → response
-- Every audit row: `firm_id` written at insert time, read with `WHERE firm_id = %s`
-- All upload/storage dirs: configurable via env vars (`DISCOVERY_UPLOAD_DIR`, `BATES_DIR`, `REDACTION_STORAGE_DIR`, etc.)
-- DB paths: all modules use `PARAIQ_DB` env var with `Path(__file__).parent` relative fallback
+### What was fixed (score 5/10 -> 8/10)
+- §2.1 Audit write path now firm-scoped
+- §2.2 /audit/discovery/chain + /export require auth + firm scoping
+- §2.3 rate_limit.py wired into all 8 claude_with_retry call sites
+- §2.4 Langfuse trace_claude_call() wired into claude_with_retry
+- §2.5 /discovery/run-guarded endpoint with auth + firm scoping
+- §2.6 redaction.py migrated from SQLite to Supabase
+- §2.7 /audit/logs/clear now per-firm only
+- §2.8 case_wall + case_intelligence converted to sync def
+- §2.9 All hardcoded /root/nlp-portfolio/ paths replaced
+- §2.10 get_connection() deprecated; all callers use get_conn(firm_id)
+- JWT blocklist — logout invalidation via token_blocklist table
+- Gmail OAuth — refresh token persisted back to DB after refresh
 
 ### Tenant isolation test suite
 ```bash
 cd /root/nlp-portfolio
 .venv/bin/python3 -m pytest tests/test_tenant_isolation.py -v
-# 11 passed, 1 skipped (Meridian has no cases yet)
 ```
+
+---
+
+## Pending
+- Anthropic BAA — submit at anthropic.com/contact before onboarding real firm data
+- Outlook Graph webhooks (replace polling with push)
+- JWT blocklist cleanup cron (delete expired rows from token_blocklist)
+- Broader test coverage (currently ~3%, target 20%+)
+- Course 2 MLOps: MLflow -> PyTorch -> LoRA/PEFT (deps installed, CPU-only on VPS)
