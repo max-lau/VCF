@@ -1,45 +1,21 @@
 from pathlib import Path
 import os
-import sqlite3, csv, io, os, json
+import csv, io, json
 from datetime import datetime, timezone
 from typing import Optional, List
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, Request
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
-import anthropic
+
+from backend.demo1.pg import get_conn
 
 router = APIRouter(prefix="/privilege", tags=["Privilege Log"])
 
-DB_PATH = os.environ.get("PARAIQ_DB", str(Path(__file__).parent / "analyses.db"))
-def get_client():
-    import anthropic
-    return anthropic.Anthropic(api_key=os.getenv("ANTHROPIC_API_KEY"))
-
-def get_conn():
-    conn = sqlite3.connect(DB_PATH)
-    conn.row_factory = sqlite3.Row
-    return conn
 
 def init_privilege_table():
-    conn = get_conn()
-    conn.execute("""
-        CREATE TABLE IF NOT EXISTS privilege_log (
-            id             INTEGER PRIMARY KEY AUTOINCREMENT,
-            case_number    TEXT NOT NULL,
-            doc_id         INTEGER,
-            filename       TEXT NOT NULL,
-            doc_date       TEXT,
-            author         TEXT,
-            recipients     TEXT,
-            privilege_type TEXT NOT NULL,
-            basis          TEXT NOT NULL,
-            withheld_at    TEXT DEFAULT (datetime('now'))
-        )
-    """)
-    conn.commit()
-    conn.close()
+    """No-op — table exists in Supabase Postgres."""
+    print("[Privilege] DB table initialized ✓")
 
-init_privilege_table()
 
 # ── Models ────────────────────────────────────────────────────────────────────
 
@@ -59,7 +35,9 @@ class ManualEntryIn(BaseModel):
 
 # ── Claude helper ─────────────────────────────────────────────────────────────
 
-def generate_privilege_entry(filename: str, doc_date: str, case_number: str) -> dict:
+def generate_privilege_entry(filename: str, doc_date: str, case_number: str,
+                              firm_id: str = "default") -> dict:
+    from backend.demo1.main import claude_with_retry, client, LLM_FAST, clean_json
     prompt = f"""You are a litigation paralegal generating a privilege log entry.
 Given only the document filename and date, infer the most likely privilege basis.
 
@@ -76,13 +54,15 @@ Return ONLY valid JSON, no markdown:
 }}"""
 
     try:
-        msg = get_client().messages.create(
-            model="claude-haiku-4-5-20251001",
+        msg = claude_with_retry(
+            client.messages.create,
+            model=LLM_FAST,
             max_tokens=300,
-            messages=[{"role": "user", "content": prompt}]
+            messages=[{"role": "user", "content": prompt}],
+            firm_id=firm_id,
         )
         raw = msg.content[0].text.strip()
-        raw = raw.replace("```json","").replace("```","").strip()
+        raw = clean_json(raw)
         return json.loads(raw)
     except Exception:
         return {
@@ -95,14 +75,15 @@ Return ONLY valid JSON, no markdown:
 # ── Routes ────────────────────────────────────────────────────────────────────
 
 @router.post("/log/generate")
-def generate_log(body: GenerateLogIn):
+def generate_log(body: GenerateLogIn, request: Request):
     """Use Claude to auto-populate privilege log entries for selected files."""
-    conn = get_conn()
-    ph   = ",".join("?" * len(body.file_ids))
-    rows = conn.execute(
-        f"SELECT * FROM discovery_files WHERE id IN ({ph})", body.file_ids
-    ).fetchall()
-    conn.close()
+    firm_id = getattr(request.state, "firm_id", "default")
+    ph = ",".join(["%s"] * len(body.file_ids))
+    with get_conn(firm_id) as conn:
+        rows = conn.execute(
+            f"SELECT * FROM discovery_files WHERE id IN ({ph}) AND firm_id=%s",
+            body.file_ids + [firm_id]
+        ).fetchall()
 
     if not rows:
         raise HTTPException(404, "No files found for given IDs")
@@ -110,25 +91,25 @@ def generate_log(body: GenerateLogIn):
     generated = []
     for row in rows:
         entry = generate_privilege_entry(
-            row["original_name"], row["doc_date"], body.case_number
+            row["original_name"], row["doc_date"], body.case_number, firm_id
         )
-        conn = get_conn()
-        cur  = conn.execute("""
-            INSERT INTO privilege_log
-              (case_number, doc_id, filename, doc_date, author, recipients,
-               privilege_type, basis)
-            VALUES (?,?,?,?,?,?,?,?)
-        """, (
-            body.case_number, row["id"], row["original_name"],
-            row["doc_date"],  entry["author"], entry["recipients"],
-            entry["privilege_type"], entry["basis"]
-        ))
-        log_id = cur.lastrowid
-        conn.execute(
-            "UPDATE discovery_files SET status='withheld' WHERE id=?", (row["id"],)
-        )
-        conn.commit()
-        conn.close()
+        with get_conn(firm_id) as conn:
+            cur = conn.execute("""
+                INSERT INTO privilege_log
+                  (case_number, doc_id, filename, doc_date, author, recipients,
+                   privilege_type, basis, firm_id)
+                VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s)
+                RETURNING id
+            """, (
+                body.case_number, row["id"], row["original_name"],
+                row["doc_date"], entry["author"], entry["recipients"],
+                entry["privilege_type"], entry["basis"], firm_id
+            ))
+            log_id = cur.fetchone()["id"]
+            conn.execute(
+                "UPDATE discovery_files SET status='withheld' WHERE id=%s AND firm_id=%s",
+                (row["id"], firm_id)
+            )
 
         generated.append({
             "id":             log_id,
@@ -142,60 +123,63 @@ def generate_log(body: GenerateLogIn):
         })
 
     return {
-        "success":   True,
+        "success":     True,
         "case_number": body.case_number,
-        "generated": len(generated),
-        "entries":   generated,
+        "generated":   len(generated),
+        "entries":     generated,
     }
 
+
 @router.post("/log/entry")
-def add_manual_entry(body: ManualEntryIn):
+def add_manual_entry(body: ManualEntryIn, request: Request):
     """Manually add a privilege log entry."""
-    conn = get_conn()
-    cur  = conn.execute("""
-        INSERT INTO privilege_log
-          (case_number, doc_id, filename, doc_date, author, recipients,
-           privilege_type, basis)
-        VALUES (?,?,?,?,?,?,?,?)
-    """, (body.case_number, body.doc_id, body.filename, body.doc_date,
-          body.author, body.recipients, body.privilege_type, body.basis))
-    log_id = cur.lastrowid
-    conn.commit()
-    conn.close()
+    firm_id = getattr(request.state, "firm_id", "default")
+    with get_conn(firm_id) as conn:
+        cur = conn.execute("""
+            INSERT INTO privilege_log
+              (case_number, doc_id, filename, doc_date, author, recipients,
+               privilege_type, basis, firm_id)
+            VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s)
+            RETURNING id
+        """, (body.case_number, body.doc_id, body.filename, body.doc_date,
+              body.author, body.recipients, body.privilege_type, body.basis, firm_id))
+        log_id = cur.fetchone()["id"]
     return {"success": True, "id": log_id}
 
+
 @router.get("/log/{case_number}")
-def get_log(case_number: str):
+def get_log(case_number: str, request: Request):
     """Get the full privilege log for a case."""
-    conn = get_conn()
-    rows = conn.execute(
-        "SELECT * FROM privilege_log WHERE case_number=? ORDER BY id ASC",
-        (case_number,)
-    ).fetchall()
-    conn.close()
+    firm_id = getattr(request.state, "firm_id", "default")
+    with get_conn(firm_id) as conn:
+        rows = conn.execute(
+            "SELECT * FROM privilege_log WHERE case_number=%s AND firm_id=%s ORDER BY id ASC",
+            (case_number, firm_id)
+        ).fetchall()
     return {
         "case_number": case_number,
         "total":       len(rows),
         "entries":     [dict(r) for r in rows],
     }
 
+
 @router.get("/log/{case_number}/export")
-def export_log(case_number: str):
+def export_log(case_number: str, request: Request):
     """Export privilege log as CSV."""
-    conn = get_conn()
-    rows = conn.execute(
-        "SELECT * FROM privilege_log WHERE case_number=? ORDER BY id ASC",
-        (case_number,)
-    ).fetchall()
-    conn.close()
+    firm_id = getattr(request.state, "firm_id", "default")
+    with get_conn(firm_id) as conn:
+        rows = conn.execute(
+            "SELECT * FROM privilege_log WHERE case_number=%s AND firm_id=%s ORDER BY id ASC",
+            (case_number, firm_id)
+        ).fetchall()
 
     if not rows:
         raise HTTPException(404, f"No privilege log entries for case '{case_number}'")
 
     buf = io.StringIO()
     w   = csv.writer(buf)
-    w.writerow(["#","Document","Date","Author","Recipients",
-                "Privilege Type","Basis for Withholding","Logged At"])
+    w.writerow(["#", "Document", "Date", "Author", "Recipients",
+                "Privilege Type", "Basis for Withholding", "Logged At"])
     for i, r in enumerate(rows, 1):
         w.writerow([i, r["filename"], r["doc_date"] or "",
                     r["author"] or "", r["recipients"] or "",
@@ -209,24 +193,35 @@ def export_log(case_number: str):
         headers={"Content-Disposition": f"attachment; filename={fname}"}
     )
 
+
 @router.delete("/log/entry/{entry_id}")
-def delete_entry(entry_id: int):
-    conn = get_conn()
-    conn.execute("DELETE FROM privilege_log WHERE id=?", (entry_id,))
-    conn.commit()
-    conn.close()
+def delete_entry(entry_id: int, request: Request):
+    firm_id = getattr(request.state, "firm_id", "default")
+    with get_conn(firm_id) as conn:
+        row = conn.execute(
+            "SELECT id FROM privilege_log WHERE id=%s AND firm_id=%s",
+            (entry_id, firm_id)
+        ).fetchone()
+        if not row:
+            raise HTTPException(404, "Entry not found")
+        conn.execute(
+            "DELETE FROM privilege_log WHERE id=%s AND firm_id=%s",
+            (entry_id, firm_id)
+        )
     return {"success": True}
 
 
-# ── Feature 25: Privilege Flagging AI ────────────────────────────────────────
+# ── Privilege Flagging AI ─────────────────────────────────────────────────────
 
 class FlagTextIn(BaseModel):
     text:        str
     case_number: Optional[str] = None
 
 @router.post("/flag")
-def flag_privilege(body: FlagTextIn):
+def flag_privilege(body: FlagTextIn, request: Request):
     """Analyze document text clause-by-clause for privilege markers."""
+    from backend.demo1.main import claude_with_retry, client, LLM_FAST, clean_json
+    firm_id = getattr(request.state, "firm_id", "default")
     if not body.text or len(body.text.strip()) < 20:
         raise HTTPException(400, "Text too short")
 
@@ -254,50 +249,54 @@ Document text:
 {body.text[:6000]}"""
 
     try:
-        msg = get_client().messages.create(
-            model="claude-haiku-4-5-20251001",
+        msg = claude_with_retry(
+            client.messages.create,
+            model=LLM_FAST,
             max_tokens=2000,
-            messages=[{"role": "user", "content": prompt}]
+            messages=[{"role": "user", "content": prompt}],
+            firm_id=firm_id,
         )
-        raw = msg.content[0].text.strip().replace("```json","").replace("```","").strip()
+        raw = msg.content[0].text.strip()
+        raw = clean_json(raw)
         result = json.loads(raw)
         result["case_number"] = body.case_number
         return {"success": True, **result}
     except json.JSONDecodeError as e:
         raise HTTPException(500, f"JSON parse error: {e}")
     except Exception as e:
-        raise HTTPException(500, str(e))
+        raise HTTPException(500, "Privilege analysis failed")
+
 
 @router.get("/log")
 def list_all_privilege_entries(
+    request:        Request,
     limit:          int  = 100,
     offset:         int  = 0,
     case_number:    str  = None,
     privilege_type: str  = None,
-    only_flagged:   bool = False,
 ):
-    """General listing of all privilege log entries across all cases."""
-    conn  = get_conn()
-    where = []
-    args  = []
+    """List privilege log entries scoped to current firm."""
+    firm_id = getattr(request.state, "firm_id", "default")
+    where = ["firm_id = %s"]
+    args  = [firm_id]
     if case_number:
-        where.append("case_number = ?")
+        where.append("case_number = %s")
         args.append(case_number)
     if privilege_type:
-        where.append("privilege_type = ?")
+        where.append("privilege_type = %s")
         args.append(privilege_type)
-    where_sql = ("WHERE " + " AND ".join(where)) if where else ""
-    total = conn.execute(
-        f"SELECT COUNT(*) FROM privilege_log {where_sql}", args
-    ).fetchone()[0]
-    rows = conn.execute(
-        f"""SELECT id, case_number, doc_id, filename, doc_date,
-                   author, recipients, privilege_type, basis, withheld_at
-            FROM privilege_log {where_sql}
-            ORDER BY withheld_at DESC LIMIT ? OFFSET ?""",
-        args + [limit, offset]
-    ).fetchall()
-    conn.close()
+    where_sql = "WHERE " + " AND ".join(where)
+    with get_conn(firm_id) as conn:
+        total = conn.execute(
+            f"SELECT COUNT(*) as c FROM privilege_log {where_sql}", args
+        ).fetchone()["c"]
+        rows = conn.execute(
+            f"""SELECT id, case_number, doc_id, filename, doc_date,
+                       author, recipients, privilege_type, basis, withheld_at
+                FROM privilege_log {where_sql}
+                ORDER BY withheld_at DESC LIMIT %s OFFSET %s""",
+            args + [limit, offset]
+        ).fetchall()
     return {
         "success": True,
         "total":   total,
@@ -308,20 +307,24 @@ def list_all_privilege_entries(
 
 
 @router.get("/stats")
-def privilege_stats():
+def privilege_stats(request: Request):
     """Summary stats for the privilege log dashboard."""
-    conn = get_conn()
-    total = conn.execute("SELECT COUNT(*) FROM privilege_log").fetchone()[0]
-    by_type = conn.execute(
-        "SELECT privilege_type, COUNT(*) as count FROM privilege_log GROUP BY privilege_type"
-    ).fetchall()
-    by_case = conn.execute(
-        "SELECT case_number, COUNT(*) as count FROM privilege_log GROUP BY case_number ORDER BY count DESC LIMIT 10"
-    ).fetchall()
-    conn.close()
+    firm_id = getattr(request.state, "firm_id", "default")
+    with get_conn(firm_id) as conn:
+        total = conn.execute(
+            "SELECT COUNT(*) as c FROM privilege_log WHERE firm_id=%s", (firm_id,)
+        ).fetchone()["c"]
+        by_type = conn.execute(
+            "SELECT privilege_type, COUNT(*) as count FROM privilege_log WHERE firm_id=%s GROUP BY privilege_type",
+            (firm_id,)
+        ).fetchall()
+        by_case = conn.execute(
+            "SELECT case_number, COUNT(*) as count FROM privilege_log WHERE firm_id=%s GROUP BY case_number ORDER BY count DESC LIMIT 10",
+            (firm_id,)
+        ).fetchall()
     return {
-        "success":  True,
-        "total":    total,
-        "by_type":  [dict(r) for r in by_type],
-        "by_case":  [dict(r) for r in by_case],
+        "success": True,
+        "total":   total,
+        "by_type": [dict(r) for r in by_type],
+        "by_case": [dict(r) for r in by_case],
     }
