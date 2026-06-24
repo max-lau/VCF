@@ -466,6 +466,9 @@ def update_status(
         ).fetchone()
         if not inv:
             raise HTTPException(404)
+        inv = dict(inv)
+        if body.status == "void" and inv["status"] in ("paid", "partially_paid"):
+            raise HTTPException(400, "Cannot void a paid or partially paid invoice")
 
         updates = {"status": body.status, "updated_at": "NOW()"}
         now = datetime.now(timezone.utc)

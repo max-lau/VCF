@@ -138,12 +138,15 @@
         </div>
         <div class="bl-modal__body">
           <label class="bl-label">Matter / Case</label>
-          <select v-model.number="newInv.matter_id" class="piq-input">
-            <option value="">Select a matter…</option>
+          <select v-model="newInv.matter_id" class="piq-input">
+            <option :value="null">Select a matter…</option>
             <option v-for="m in matters" :key="m.id" :value="m.id">
               {{ m.case_number }} — {{ m.client_name }}
             </option>
           </select>
+          <p v-if="matters.length === 0" style="color:#f59e0b;font-size:0.85rem;margin:4px 0 8px">
+            ⚠️ No active matters found. Create a case first.
+          </p>
           <label class="bl-label">Billing Period Start</label>
           <input v-model="newInv.billing_period_start" type="date" class="piq-input" />
           <label class="bl-label">Billing Period End</label>
@@ -325,7 +328,16 @@ async function createInvoice() {
 
 async function advanceStatus(id, status) {
   const labels = { pending_certification: "submit for certification", certified: "certify", sent: "mark as sent", void: "void" }
-  if (!confirm(`Are you sure you want to ${labels[status] || status} this invoice?`)) return
+  if (status === "void") {
+    const inv = invoices.value.find(i => i.id === id)
+    if (inv && ["paid", "partially_paid"].includes(inv.status)) {
+      alert("⚠️ Cannot void a paid or partially paid invoice. Record a refund or dispute instead.")
+      return
+    }
+    if (!confirm("⚠️ Voiding this invoice will release all associated time entries back to unbilled. This cannot be undone. Continue?")) return
+  } else {
+    if (!confirm(`Are you sure you want to ${labels[status] || status} this invoice?`)) return
+  }
   await fetch(`/billing/invoices/${id}/status`, {
     method: "PATCH",
     headers: { ...authHdr(), "Content-Type": "application/json" },
