@@ -20,7 +20,7 @@ sentence-transformers==5.4.1
 
 # Observability
 langfuse==4.9.1
-prometheus-fastapi-instrumentator==7.1.0
+prometheus-fastapi-instrumentator==8.0.2
 
 # Document processing
 pdfplumber==0.11.9

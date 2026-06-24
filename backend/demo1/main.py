@@ -150,7 +150,7 @@ app = FastAPI(title="NLP Text Analyzer API")
 
 # ── Prometheus metrics ────────────────────────────────────────────────────────
 from prometheus_fastapi_instrumentator import Instrumentator
-Instrumentator.instrument(app).expose(app, endpoint="/metrics", include_in_schema=False)
+Instrumentator().instrument(app).expose(app, endpoint="/metrics", include_in_schema=False)
 
 @app.on_event("startup")
 async def startup_event():
