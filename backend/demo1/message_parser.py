@@ -1,40 +1,24 @@
 import os
-import io, email, mailbox, sqlite3, json, re, zipfile, html
+import io, email, mailbox, json, re, zipfile, html
 from email import policy as email_policy
 from pathlib import Path
 from datetime import datetime, timezone
 from typing import Optional, List
-from fastapi import APIRouter, UploadFile, File, Form, HTTPException
+from fastapi import APIRouter, UploadFile, File, Form, HTTPException, Request
+
+from backend.demo1.pg import get_conn
 
 router = APIRouter(prefix="/messages", tags=["Message Parsers"])
 
-DB_PATH = os.environ.get("PARAIQ_DB", str(Path(__file__).parent / "analyses.db"))
-MSG_DIR = Path(os.environ.get("MSG_DIR", str(Path(__file__).parent.parent.parent / "uploads" / "messages")))
+MSG_DIR = Path(os.environ.get("MSG_DIR",
+    str(Path(__file__).parent.parent.parent / "uploads" / "messages")))
 MSG_DIR.mkdir(parents=True, exist_ok=True)
 
-def get_conn():
-    conn = sqlite3.connect(DB_PATH)
-    conn.row_factory = sqlite3.Row
-    return conn
 
 def init_messages_table():
-    conn = get_conn()
-    conn.execute("""
-        CREATE TABLE IF NOT EXISTS parsed_messages (
-            id           INTEGER PRIMARY KEY AUTOINCREMENT,
-            source_file  TEXT NOT NULL,
-            format       TEXT NOT NULL,
-            case_number  TEXT,
-            thread_count INTEGER DEFAULT 0,
-            msg_count    INTEGER DEFAULT 0,
-            parsed_json  TEXT,
-            created_at   TEXT DEFAULT (datetime('now'))
-        )
-    """)
-    conn.commit()
-    conn.close()
+    """No-op — table exists in Supabase Postgres."""
+    print("[Messages] Parsed messages table initialized ✓")
 
-init_messages_table()
 
 # ── Feature 18: EML / mbox parser ────────────────────────────────────────────
 
@@ -52,7 +36,7 @@ def parse_eml_message(msg) -> dict:
     if msg.is_multipart():
         for part in msg.walk():
             ct = part.get_content_type()
-            cd = str(part.get("Content-Disposition",""))
+            cd = str(part.get("Content-Disposition", ""))
             if "attachment" in cd:
                 attachments.append(part.get_filename() or "attachment")
             elif ct == "text/plain" and not body:
@@ -65,76 +49,81 @@ def parse_eml_message(msg) -> dict:
             body = payload.decode(msg.get_content_charset() or "utf-8", errors="replace")
 
     return {
-        "from":        decode_header(msg.get("From","")),
-        "to":          decode_header(msg.get("To","")),
-        "cc":          decode_header(msg.get("Cc","")),
-        "subject":     decode_header(msg.get("Subject","")),
-        "date":        msg.get("Date",""),
-        "message_id":  msg.get("Message-ID",""),
+        "from":        decode_header(msg.get("From", "")),
+        "to":          decode_header(msg.get("To", "")),
+        "cc":          decode_header(msg.get("Cc", "")),
+        "subject":     decode_header(msg.get("Subject", "")),
+        "date":        msg.get("Date", ""),
+        "message_id":  msg.get("Message-ID", ""),
         "body":        body[:3000],
         "attachments": attachments,
     }
 
+
 @router.post("/parse/email")
 async def parse_email(
+    request: Request,
     file: UploadFile = File(...),
     case_number: Optional[str] = Form(None)
 ):
-    ext = Path(file.filename).suffix.lower()
+    firm_id = getattr(request.state, "firm_id", "default")
+    ext  = Path(file.filename).suffix.lower()
     data = await file.read()
     messages = []
 
-    if ext in {".eml"}:
+    if ext == ".eml":
         msg = email.message_from_bytes(data, policy=email_policy.default)
         messages.append(parse_eml_message(msg))
-
-    elif ext in {".mbox"}:
-        ts = datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S")
+    elif ext == ".mbox":
+        ts  = datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S")
         tmp = MSG_DIR / f"{ts}_{file.filename}"
         tmp.write_bytes(data)
         mbox = mailbox.mbox(str(tmp))
         for m in mbox:
             messages.append(parse_eml_message(m))
         tmp.unlink(missing_ok=True)
-
     else:
         raise HTTPException(400, "Supported formats: .eml, .mbox")
 
-    # Reconstruct threads by subject
     threads = {}
     for m in messages:
         subj = re.sub(r'^(Re:|Fwd?:)\s*', '', m["subject"], flags=re.I).strip()
         threads.setdefault(subj, []).append(m)
 
     result = {
-        "format":       "email",
+        "format":        "email",
         "message_count": len(messages),
         "thread_count":  len(threads),
         "threads": [
             {"subject": s, "messages": msgs}
-            for s, msgs in sorted(threads.items(), key=lambda x: x[1][0].get("date",""))
+            for s, msgs in sorted(threads.items(), key=lambda x: x[1][0].get("date", ""))
         ]
     }
 
-    conn = get_conn()
-    cur = conn.execute("""
-        INSERT INTO parsed_messages (source_file, format, case_number, thread_count, msg_count, parsed_json)
-        VALUES (?,?,?,?,?,?)
-    """, (file.filename, "email", case_number,
-          len(threads), len(messages), json.dumps(result)))
-    result["id"] = cur.lastrowid
-    conn.commit()
-    conn.close()
+    with get_conn(firm_id) as conn:
+        cur = conn.execute("""
+            INSERT INTO parsed_messages
+              (firm_id, source_file, format, case_number, thread_count, msg_count, parsed_json, created_at)
+            VALUES (%s,%s,%s,%s,%s,%s,%s,%s)
+            RETURNING id
+        """, (firm_id, file.filename, "email", case_number,
+              len(threads), len(messages), json.dumps(result),
+              datetime.now(timezone.utc).isoformat()))
+        result["id"] = cur.fetchone()["id"]
+
     return {"success": True, **result}
+
 
 # ── Feature 19: SMS XML parser ────────────────────────────────────────────────
 
 @router.post("/parse/sms")
 async def parse_sms(
+    request: Request,
     file: UploadFile = File(...),
     case_number: Optional[str] = Form(None)
 ):
     import xml.etree.ElementTree as ET
+    firm_id = getattr(request.state, "firm_id", "default")
     data = await file.read()
     try:
         root = ET.fromstring(data)
@@ -142,61 +131,59 @@ async def parse_sms(
         raise HTTPException(400, f"Invalid XML: {e}")
 
     messages = []
-    # iOS (SMS Backup & Restore) and Android SMS Backup XML both use <sms> tags
     for sms in root.findall(".//sms"):
         a = sms.attrib
         messages.append({
-            "address":  a.get("address",""),
-            "date":     a.get("readable_date", a.get("date","")),
-            "type":     "sent" if a.get("type","1")=="2" else "received",
-            "body":     a.get("body",""),
-            "contact":  a.get("contact_name", a.get("name","")),
+            "address": a.get("address", ""),
+            "date":    a.get("readable_date", a.get("date", "")),
+            "type":    "sent" if a.get("type", "1") == "2" else "received",
+            "body":    a.get("body", ""),
+            "contact": a.get("contact_name", a.get("name", "")),
         })
-
-    # MMS
     for mms in root.findall(".//mms"):
         a = mms.attrib
-        parts = [p.attrib.get("text","") for p in mms.findall(".//part") if p.attrib.get("ct","")=="text/plain"]
+        parts = [p.attrib.get("text", "") for p in mms.findall(".//part")
+                 if p.attrib.get("ct", "") == "text/plain"]
         messages.append({
-            "address":  a.get("address",""),
-            "date":     a.get("readable_date", a.get("date","")),
-            "type":     "sent" if a.get("msg_box","1")=="2" else "received",
-            "body":     " ".join(parts) or "[MMS/Media]",
-            "contact":  a.get("contact_name",""),
+            "address": a.get("address", ""),
+            "date":    a.get("readable_date", a.get("date", "")),
+            "type":    "sent" if a.get("msg_box", "1") == "2" else "received",
+            "body":    " ".join(parts) or "[MMS/Media]",
+            "contact": a.get("contact_name", ""),
         })
 
-    # Group into conversations by address
     convos = {}
     for m in messages:
         convos.setdefault(m["address"], []).append(m)
 
     result = {
-        "format":     "sms",
-        "msg_count":  len(messages),
+        "format":       "sms",
+        "msg_count":    len(messages),
         "thread_count": len(convos),
         "conversations": [
-            {"address": addr, "contact": msgs[0].get("contact",""),
+            {"address": addr, "contact": msgs[0].get("contact", ""),
              "msg_count": len(msgs), "messages": msgs}
             for addr, msgs in convos.items()
         ]
     }
 
-    conn = get_conn()
-    cur = conn.execute("""
-        INSERT INTO parsed_messages (source_file, format, case_number, thread_count, msg_count, parsed_json)
-        VALUES (?,?,?,?,?,?)
-    """, (file.filename, "sms", case_number,
-          len(convos), len(messages), json.dumps(result)))
-    result["id"] = cur.lastrowid
-    conn.commit()
-    conn.close()
+    with get_conn(firm_id) as conn:
+        cur = conn.execute("""
+            INSERT INTO parsed_messages
+              (firm_id, source_file, format, case_number, thread_count, msg_count, parsed_json, created_at)
+            VALUES (%s,%s,%s,%s,%s,%s,%s,%s)
+            RETURNING id
+        """, (firm_id, file.filename, "sms", case_number,
+              len(convos), len(messages), json.dumps(result),
+              datetime.now(timezone.utc).isoformat()))
+        result["id"] = cur.fetchone()["id"]
+
     return {"success": True, **result}
+
 
 # ── Feature 20: WhatsApp & WeChat parser ─────────────────────────────────────
 
 def parse_whatsapp_txt(text: str) -> List[dict]:
-    # Matches: [DD/MM/YYYY, HH:MM:SS] Name: message
-    # or:      MM/DD/YY, HH:MM - Name: message
     pattern = re.compile(
         r'[\[\(]?(\d{1,2}[\/\-]\d{1,2}[\/\-]\d{2,4}),?\s*(\d{1,2}:\d{2}(?::\d{2})?(?:\s*[AP]M)?)\s*[\]\)]?\s*[-–]\s*([^:]+):\s*(.*)'
     )
@@ -208,11 +195,13 @@ def parse_whatsapp_txt(text: str) -> List[dict]:
             if current:
                 messages.append(current)
             current = {
-                "date":    m.group(1),
-                "time":    m.group(2),
-                "sender":  m.group(3).strip(),
-                "message": m.group(4).strip(),
-                "is_media": m.group(4).strip() in {"<Media omitted>","image omitted","video omitted","audio omitted","sticker omitted"},
+                "date":     m.group(1),
+                "time":     m.group(2),
+                "sender":   m.group(3).strip(),
+                "message":  m.group(4).strip(),
+                "is_media": m.group(4).strip() in {
+                    "<Media omitted>", "image omitted", "video omitted",
+                    "audio omitted", "sticker omitted"},
             }
         elif current:
             current["message"] += "\n" + line.strip()
@@ -220,13 +209,16 @@ def parse_whatsapp_txt(text: str) -> List[dict]:
         messages.append(current)
     return messages
 
+
 @router.post("/parse/chat")
 async def parse_chat(
+    request: Request,
     file: UploadFile = File(...),
     platform: str = Form("whatsapp"),
     case_number: Optional[str] = Form(None)
 ):
-    ext = Path(file.filename).suffix.lower()
+    firm_id = getattr(request.state, "firm_id", "default")
+    ext  = Path(file.filename).suffix.lower()
     data = await file.read()
 
     if platform == "whatsapp":
@@ -251,24 +243,23 @@ async def parse_chat(
             not all(ord(c) < 128 for c in m["message"])
             for m in messages if m["message"]
         )
-
         result = {
             "platform":         "whatsapp",
             "msg_count":        len(messages),
             "participants":     list(senders.keys()),
             "msg_per_sender":   senders,
             "translation_flag": has_non_ascii,
-            "messages":         messages[:500],  # cap for response size
+            "messages":         messages[:500],
         }
 
     elif platform == "wechat":
-        # WeChat HTML export
-        if ext not in {".html",".htm"}:
+        if ext not in {".html", ".htm"}:
             raise HTTPException(400, "WeChat exports are .html files")
         raw = data.decode("utf-8", errors="replace")
-        # Parse WeChat's standard export div structure
         msg_pattern = re.compile(
-            r'<div class="message[^"]*"[^>]*>.*?<span class="time"[^>]*>([^<]+)</span>.*?<span class="sender"[^>]*>([^<]+)</span>.*?<span class="content"[^>]*>(.*?)</span>',
+            r'<div class="message[^"]*"[^>]*>.*?<span class="time"[^>]*>([^<]+)</span>'
+            r'.*?<span class="sender"[^>]*>([^<]+)</span>'
+            r'.*?<span class="content"[^>]*>(.*?)</span>',
             re.DOTALL
         )
         messages = []
@@ -276,9 +267,8 @@ async def parse_chat(
             messages.append({
                 "time":    m.group(1).strip(),
                 "sender":  m.group(2).strip(),
-                "message": html.unescape(re.sub(r'<[^>]+>','', m.group(3))).strip(),
+                "message": html.unescape(re.sub(r'<[^>]+>', '', m.group(3))).strip(),
             })
-
         has_non_ascii = any(
             not all(ord(c) < 128 for c in m["message"])
             for m in messages if m["message"]
@@ -292,28 +282,40 @@ async def parse_chat(
     else:
         raise HTTPException(400, "platform must be 'whatsapp' or 'wechat'")
 
-    conn = get_conn()
-    cur = conn.execute("""
-        INSERT INTO parsed_messages (source_file, format, case_number, thread_count, msg_count, parsed_json)
-        VALUES (?,?,?,?,?,?)
-    """, (file.filename, platform, case_number, 1, result["msg_count"], json.dumps(result)))
-    result["id"] = cur.lastrowid
-    conn.commit()
-    conn.close()
+    with get_conn(firm_id) as conn:
+        cur = conn.execute("""
+            INSERT INTO parsed_messages
+              (firm_id, source_file, format, case_number, thread_count, msg_count, parsed_json, created_at)
+            VALUES (%s,%s,%s,%s,%s,%s,%s,%s)
+            RETURNING id
+        """, (firm_id, file.filename, platform, case_number,
+              1, result["msg_count"], json.dumps(result),
+              datetime.now(timezone.utc).isoformat()))
+        result["id"] = cur.fetchone()["id"]
+
     return {"success": True, **result}
 
+
 @router.get("/parsed")
-def list_parsed(case_number: Optional[str] = None, limit: int = 50):
-    conn = get_conn()
-    if case_number:
-        rows = conn.execute(
-            "SELECT id,source_file,format,case_number,thread_count,msg_count,created_at FROM parsed_messages WHERE case_number=? ORDER BY id DESC LIMIT ?",
-            (case_number, limit)
-        ).fetchall()
-    else:
-        rows = conn.execute(
-            "SELECT id,source_file,format,case_number,thread_count,msg_count,created_at FROM parsed_messages ORDER BY id DESC LIMIT ?",
-            (limit,)
-        ).fetchall()
-    conn.close()
+def list_parsed(
+    request: Request,
+    case_number: Optional[str] = None,
+    limit: int = 50
+):
+    firm_id = getattr(request.state, "firm_id", "default")
+    with get_conn(firm_id) as conn:
+        if case_number:
+            rows = conn.execute(
+                """SELECT id,source_file,format,case_number,thread_count,msg_count,created_at
+                   FROM parsed_messages WHERE firm_id=%s AND case_number=%s
+                   ORDER BY id DESC LIMIT %s""",
+                (firm_id, case_number, limit)
+            ).fetchall()
+        else:
+            rows = conn.execute(
+                """SELECT id,source_file,format,case_number,thread_count,msg_count,created_at
+                   FROM parsed_messages WHERE firm_id=%s
+                   ORDER BY id DESC LIMIT %s""",
+                (firm_id, limit)
+            ).fetchall()
     return {"records": [dict(r) for r in rows], "total": len(rows)}
