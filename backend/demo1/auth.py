@@ -18,6 +18,7 @@ Token expiry: 24 hours (configurable via .env JWT_EXPIRE_HOURS).
 
 import bcrypt
 import os
+import uuid
 from datetime import datetime, timezone, timedelta
 from fastapi import APIRouter, HTTPException, Depends, Request
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
@@ -174,6 +175,7 @@ def create_token(user_id: int, username: str, role: str, firm_id: str = "default
         "firm_id":  firm_id,
         "exp":      expire,
         "iat":      datetime.now(timezone.utc),
+        "jti":      str(uuid.uuid4()),
     }
     return jwt.encode(payload, SECRET_KEY, algorithm=ALGORITHM)
 
@@ -194,7 +196,18 @@ def get_current_firm_id(credentials: HTTPAuthorizationCredentials = Depends(bear
 
 def decode_token(token: str) -> dict:
     try:
-        return jwt.decode(token, SECRET_KEY, algorithms=[ALGORITHM])
+        payload = jwt.decode(token, SECRET_KEY, algorithms=[ALGORITHM])
+        jti = payload.get("jti")
+        if jti:
+            with get_conn("default") as conn:
+                row = conn.execute(
+                    "SELECT 1 FROM token_blocklist WHERE jti=%s", (jti,)
+                ).fetchone()
+                if row:
+                    raise HTTPException(401, "Token has been revoked")
+        return payload
+    except HTTPException:
+        raise
     except jwt.ExpiredSignatureError:
         raise HTTPException(401, "Token has expired")
     except jwt.InvalidTokenError as e:
@@ -380,6 +393,25 @@ def refresh_token(current_user: dict = Depends(get_current_user)):
         "expires_in_hours": EXPIRE_HOURS,
     }
 
+
+@router.post("/logout")
+def logout(credentials: HTTPAuthorizationCredentials = Depends(bearer),
+           current_user: dict = Depends(get_current_user)):
+    """Invalidate the current JWT by adding its jti to the blocklist."""
+    payload = decode_token(credentials.credentials)
+    jti = payload.get("jti")
+    if not jti:
+        return {"success": True, "message": "Logged out"}
+    expires_at = payload.get("exp")
+    from datetime import datetime, timezone
+    expires_dt = datetime.fromtimestamp(expires_at, tz=timezone.utc)
+    with get_conn("default") as conn:
+        conn.execute(
+            """INSERT INTO token_blocklist (jti, firm_id, user_id, expires_at)
+               VALUES (%s, %s, %s, %s) ON CONFLICT (jti) DO NOTHING""",
+            (jti, current_user.get("firm_id", "default"), current_user["id"], expires_dt)
+        )
+    return {"success": True, "message": "Logged out successfully"}
 
 @router.put("/password")
 def change_password(body: ChangePasswordBody,
