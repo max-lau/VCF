@@ -241,6 +241,17 @@ def poll_gmail_account(account: dict):
         creds = _refresh_credentials(account)
     except Exception as e:
         logger.error(f"Token refresh failed for {account['email_address']}: {e}")
+        if "invalid_grant" in str(e).lower():
+            from .pg import get_conn
+            try:
+                with get_conn(firm_id) as conn:
+                    conn.execute(
+                        "UPDATE attorney_email_accounts SET is_active=FALSE WHERE id=%s",
+                        (account["id"],)
+                    )
+                logger.warning(f"[Gmail] Auto-deactivated {account['email_address']} — invalid_grant. Re-authenticate via Settings.")
+            except Exception as db_err:
+                logger.error(f"[Gmail] Failed to deactivate account: {db_err}")
         return
 
     # Update refreshed token

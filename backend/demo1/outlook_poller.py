@@ -356,6 +356,17 @@ def poll_outlook_account(account: dict):
         new_refresh   = token_result.get("refresh_token", account["refresh_token"])
     except Exception as e:
         logger.error(f"[Outlook] Token refresh failed for {account['email_address']}: {e}")
+        if "invalid_grant" in str(e).lower():
+            from .pg import get_conn
+            try:
+                with get_conn(firm_id) as conn:
+                    conn.execute(
+                        "UPDATE attorney_email_accounts SET is_active=FALSE WHERE id=%s",
+                        (account["id"],)
+                    )
+                logger.warning(f"[Outlook] Auto-deactivated {account['email_address']} — invalid_grant. Re-authenticate via Settings.")
+            except Exception as db_err:
+                logger.error(f"[Outlook] Failed to deactivate account: {db_err}")
         return
 
     # Save refreshed tokens
