@@ -1,53 +1,43 @@
 import os
-import io, csv, sqlite3, zipfile
+import io, csv, zipfile
 from pathlib import Path
 from datetime import datetime, timezone
 from typing import Optional
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, Request
 from fastapi.responses import StreamingResponse
-from pydantic import BaseModel
+
+from backend.demo1.pg import get_conn
 
 router = APIRouter(prefix="/production", tags=["Production Bundler"])
 
-DB_PATH   = os.environ.get("PARAIQ_DB", str(Path(__file__).parent / "analyses.db"))
-BATES_DIR = Path(os.environ.get("BATES_DIR", str(Path(__file__).parent.parent.parent / "uploads" / "bates")))
+BATES_DIR = Path(os.environ.get("BATES_DIR",
+    str(Path(__file__).parent.parent.parent / "uploads" / "bates")))
 
-def get_conn():
-    conn = sqlite3.connect(DB_PATH)
-    conn.row_factory = sqlite3.Row
-    return conn
-
-# ── Routes ────────────────────────────────────────────────────────────────────
 
 @router.get("/sets")
-def list_sets():
-    """List all production sets that have stamped documents."""
-    conn = get_conn()
-    rows = conn.execute("""
-        SELECT set_id, COUNT(*) as doc_count,
-               SUM(page_count) as total_pages,
-               MIN(bates_start) as range_start,
-               MAX(bates_end)   as range_end,
-               MAX(stamped_at)  as last_stamped
-        FROM bates_log
-        GROUP BY set_id
-        ORDER BY last_stamped DESC
-    """).fetchall()
-    conn.close()
+def list_sets(request: Request):
+    firm_id = getattr(request.state, "firm_id", "default")
+    with get_conn(firm_id) as conn:
+        rows = conn.execute("""
+            SELECT set_id, COUNT(*) as doc_count,
+                   SUM(page_count) as total_pages,
+                   MIN(bates_start) as range_start,
+                   MAX(bates_end)   as range_end,
+                   MAX(stamped_at)  as last_stamped
+            FROM bates_log WHERE firm_id=%s
+            GROUP BY set_id ORDER BY last_stamped DESC
+        """, (firm_id,)).fetchall()
     return {"sets": [dict(r) for r in rows]}
 
+
 @router.get("/bundle/{set_id}")
-def download_bundle(set_id: str, max_mb: int = 100):
-    """
-    Stream a ZIP of all Bates-stamped PDFs for a production set.
-    Splits into multiple ZIPs if total exceeds max_mb (default 100 MB).
-    Includes a production_catalog.csv manifest inside the ZIP.
-    """
-    conn = get_conn()
-    rows = conn.execute(
-        "SELECT * FROM bates_log WHERE set_id=? ORDER BY id ASC", (set_id,)
-    ).fetchall()
-    conn.close()
+def download_bundle(set_id: str, request: Request, max_mb: int = 100):
+    firm_id = getattr(request.state, "firm_id", "default")
+    with get_conn(firm_id) as conn:
+        rows = conn.execute(
+            "SELECT * FROM bates_log WHERE set_id=%s AND firm_id=%s ORDER BY id ASC",
+            (set_id, firm_id)
+        ).fetchall()
 
     if not rows:
         raise HTTPException(404, f"No stamped documents found for set '{set_id}'")
@@ -56,30 +46,23 @@ def download_bundle(set_id: str, max_mb: int = 100):
     if not set_dir.exists():
         raise HTTPException(404, f"Production set directory not found: {set_dir}")
 
-    max_bytes = max_mb * 1024 * 1024
-
-    # Build catalog rows and collect files
+    max_bytes    = max_mb * 1024 * 1024
     catalog_rows = []
-    file_entries  = []
+    file_entries = []
+
     for r in rows:
         p = Path(r["stamped_path"]) if r["stamped_path"] else None
         if not p or not p.exists():
-            # Try to find by name in set_dir
             matches = list(set_dir.glob(f"*{r['filename']}"))
             p = matches[0] if matches else None
         size = p.stat().st_size if p else 0
         catalog_rows.append({
-            "bates_start": r["bates_start"],
-            "bates_end":   r["bates_end"],
-            "pages":       r["page_count"],
-            "filename":    r["filename"],
-            "stamped_at":  r["stamped_at"],
-            "size_bytes":  size,
-            "path":        str(p) if p else "MISSING",
+            "bates_start": r["bates_start"], "bates_end": r["bates_end"],
+            "pages": r["page_count"], "filename": r["filename"],
+            "stamped_at": r["stamped_at"], "size_bytes": size,
         })
         file_entries.append((r, p, size))
 
-    # Build catalog CSV in memory
     def make_catalog_csv(entries):
         buf = io.StringIO()
         w = csv.writer(buf)
@@ -89,67 +72,49 @@ def download_bundle(set_id: str, max_mb: int = 100):
                         e["filename"], e["size_bytes"], e["stamped_at"]])
         return buf.getvalue().encode()
 
-    # Check if everything fits in one ZIP
     total_size = sum(e[2] for e in file_entries)
+    zip_buf    = io.BytesIO()
 
     if total_size <= max_bytes:
-        # Single ZIP
-        zip_buf = io.BytesIO()
         with zipfile.ZipFile(zip_buf, "w", zipfile.ZIP_DEFLATED) as zf:
-            catalog_data = make_catalog_csv(catalog_rows)
-            zf.writestr("production_catalog.csv", catalog_data)
+            zf.writestr("production_catalog.csv", make_catalog_csv(catalog_rows))
             for r, p, size in file_entries:
                 if p and p.exists():
                     zf.write(p, p.name)
-        zip_buf.seek(0)
         filename = f"Production_{set_id}_{datetime.now(timezone.utc).strftime('%Y%m%d')}.zip"
-        return StreamingResponse(
-            zip_buf,
-            media_type="application/zip",
-            headers={"Content-Disposition": f"attachment; filename={filename}"}
-        )
     else:
-        # Split into batches — return first batch, note others
-        # (For simplicity, return batch 1; full multi-part needs client coordination)
-        batch, batch_size, batch_num = [], 0, 1
-        zip_buf = io.BytesIO()
+        batch_catalog, batch_size = [], 0
         with zipfile.ZipFile(zip_buf, "w", zipfile.ZIP_DEFLATED) as zf:
-            batch_catalog = []
             for r, p, size in file_entries:
-                if batch_size + size > max_bytes and batch:
+                if batch_size + size > max_bytes and batch_catalog:
                     break
                 if p and p.exists():
                     zf.write(p, p.name)
                     batch_catalog.append({
-                        "bates_start": dict(r)["bates_start"],
-                        "bates_end":   dict(r)["bates_end"],
-                        "pages":       dict(r)["page_count"],
-                        "filename":    dict(r)["filename"],
-                        "size_bytes":  size,
-                        "stamped_at":  dict(r)["stamped_at"],
+                        "bates_start": dict(r)["bates_start"], "bates_end": dict(r)["bates_end"],
+                        "pages": dict(r)["page_count"], "filename": dict(r)["filename"],
+                        "size_bytes": size, "stamped_at": dict(r)["stamped_at"],
                     })
                     batch_size += size
             zf.writestr("production_catalog.csv", make_catalog_csv(batch_catalog))
             zf.writestr("SPLIT_NOTICE.txt",
-                f"This is batch 1 of a split production set '{set_id}'.\n"
-                f"Total set size: {total_size/1024/1024:.1f} MB exceeds {max_mb} MB limit.\n"
-                f"Increase limit with ?max_mb=N or download remaining batches.")
-        zip_buf.seek(0)
+                f"Batch 1 of split production set '{set_id}'.\n"
+                f"Total: {total_size/1024/1024:.1f} MB exceeds {max_mb} MB limit.")
         filename = f"Production_{set_id}_Part1_{datetime.now(timezone.utc).strftime('%Y%m%d')}.zip"
-        return StreamingResponse(
-            zip_buf,
-            media_type="application/zip",
-            headers={"Content-Disposition": f"attachment; filename={filename}"}
-        )
+
+    zip_buf.seek(0)
+    return StreamingResponse(zip_buf, media_type="application/zip",
+        headers={"Content-Disposition": f"attachment; filename={filename}"})
+
 
 @router.get("/catalog/{set_id}")
-def get_catalog(set_id: str):
-    """Return the production catalog as JSON without downloading the ZIP."""
-    conn = get_conn()
-    rows = conn.execute(
-        "SELECT * FROM bates_log WHERE set_id=? ORDER BY id ASC", (set_id,)
-    ).fetchall()
-    conn.close()
+def get_catalog(set_id: str, request: Request):
+    firm_id = getattr(request.state, "firm_id", "default")
+    with get_conn(firm_id) as conn:
+        rows = conn.execute(
+            "SELECT * FROM bates_log WHERE set_id=%s AND firm_id=%s ORDER BY id ASC",
+            (set_id, firm_id)
+        ).fetchall()
     if not rows:
         raise HTTPException(404, f"No documents found for set '{set_id}'")
     total_pages = sum(r["page_count"] for r in rows)
