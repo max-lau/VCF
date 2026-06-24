@@ -113,7 +113,7 @@ def save_work_product(endpoint: str, result: dict, firm_id: str, case_id=None, u
 
 
 
-EXEMPT_PATHS = {"/health", "/openapi.json", "/docs", "/redoc", "/favicon.ico"}
+EXEMPT_PATHS = {"/health", "/openapi.json", "/docs", "/redoc", "/favicon.ico", "/metrics"}
 EXEMPT_PREFIXES = ("/auth/", "/api/auth/", "/docs/", "/redoc/", "/client-portal/view/")
 STATIC_EXTS = (".html", ".js", ".css", ".ico", ".png", ".svg", ".woff", ".woff2", ".json")
 
@@ -147,12 +147,32 @@ class APIKeyMiddleware(BaseHTTPMiddleware):
         return await call_next(request)
 
 app = FastAPI(title="NLP Text Analyzer API")
+
+# ── Prometheus metrics ────────────────────────────────────────────────────────
+from prometheus_fastapi_instrumentator import Instrumentator
+Instrumentator.instrument(app).expose(app, endpoint="/metrics", include_in_schema=False)
+
 @app.on_event("startup")
 async def startup_event():
     import asyncio, logging
     # 1. DB pool — must be first
     init_pool()
-    # 2. Poller tasks — keep references so GC cannot collect them
+    # 2. Table init (moved from module scope to startup for test isolation)
+    init_db()
+    init_audit_table()
+    init_webhook_table()
+    init_custom_entity_table()
+    init_auth_table()
+    init_notify_table()
+    init_model_table()
+    init_intake_table()
+    init_redaction_table()
+    init_bates_tables()
+    init_privilege_table()
+    init_transcription_table()
+    init_messages_table()
+    init_enclave_tables()
+    # 3. Poller tasks — keep references so GC cannot collect them
     from backend.demo1.email_poller import GmailPollerService
     from backend.demo1.outlook_poller import OutlookPollerService
     _poller_tasks: set = set()
@@ -250,20 +270,6 @@ app.add_middleware(
     allow_credentials=True,
 )
 
-init_db()
-init_audit_table()
-init_webhook_table()
-init_custom_entity_table()
-init_auth_table()
-init_notify_table()
-init_model_table()
-init_intake_table()
-init_redaction_table()
-init_bates_tables()
-init_privilege_table()
-init_transcription_table()
-init_messages_table()
-init_enclave_tables()
 client = anthropic.Anthropic(api_key=os.getenv("ANTHROPIC_API_KEY"))
 
 LLM_FAST   = os.getenv("LLM_FAST",  "claude-haiku-4-5-20251001")  # high-volume tasks
@@ -503,7 +509,7 @@ async def analyze_batch(body: BatchInput, request: Request):
         raise HTTPException(status_code=400, detail="Max 20 documents per batch")
     labels = body.labels + [""] * (len(body.documents) - len(body.labels))
     firm_id = getattr(request.state, 'firm_id', 'default')
-    loop   = asyncio.get_event_loop()
+    loop   = asyncio.get_running_loop()
     tasks  = [
         loop.run_in_executor(executor, run_analysis, doc, label, firm_id)
         for doc, label in zip(body.documents, labels)
@@ -537,7 +543,7 @@ async def analyze_batch_csv(body: BatchInput, request: Request):
         raise HTTPException(status_code=400, detail="Max 20 documents per batch")
     labels = body.labels + [""] * (len(body.documents) - len(body.labels))
     firm_id = getattr(request.state, 'firm_id', 'default')
-    loop   = asyncio.get_event_loop()
+    loop   = asyncio.get_running_loop()
     tasks  = [
         loop.run_in_executor(executor, run_analysis, doc, label, firm_id)
         for doc, label in zip(body.documents, labels)

@@ -97,13 +97,15 @@ def _run_presidio(text: str, threshold: float, style: str):
     return anon_result.text, findings, avg_conf
 
 
-def _claude_enhance(text: str, existing_findings: list, style: str):
-    import anthropic as _ant
-    client  = _ant.Anthropic(api_key=os.getenv("ANTHROPIC_API_KEY", ""))
+def _claude_enhance(text: str, existing_findings: list, style: str, firm_id: str = "default"):
+    """Use the centralized Claude infrastructure (retry, rate limit, tracing)."""
+    from backend.demo1.main import claude_with_retry, client, LLM_FAST, LEGAL_SYSTEM_PROMPT, clean_json
     already = [f["text"] for f in existing_findings]
-    msg = client.messages.create(
-        model="claude-haiku-4-5-20251001",
+    msg = claude_with_retry(
+        client.messages.create,
+        model=LLM_FAST,
         max_tokens=1024,
+        system=LEGAL_SYSTEM_PROMPT,
         messages=[{"role": "user", "content": (
             "You are a PII detection assistant. Find any personally identifiable "
             "information in the text that was NOT already detected.\n"
@@ -114,10 +116,11 @@ def _claude_enhance(text: str, existing_findings: list, style: str):
             '"score":0.9}]\n\n'
             f"Text:\n{text[:3000]}"
         )}],
+        firm_id=firm_id,
     )
     try:
         raw    = msg.content[0].text.strip()
-        raw    = re.sub(r"^```json|^```|```$", "", raw, flags=re.MULTILINE).strip()
+        raw    = clean_json(raw)
         extras = json.loads(raw)
         existing_spans = {(f["start"], f["end"]) for f in existing_findings if "start" in f}
         for cf in extras:
@@ -167,7 +170,7 @@ async def redact_text_endpoint(request: Request, req: RedactTextRequest):
         raise HTTPException(500, f"Presidio error: {str(e)}")
     if req.use_claude:
         try:
-            findings = _claude_enhance(req.text, findings, req.style)
+            findings = _claude_enhance(req.text, findings, req.style, firm_id=getattr(request.state, "firm_id", "default"))
             redacted = _apply_claude_extras(redacted, findings, req.style)
         except Exception:
             pass
@@ -227,7 +230,7 @@ async def redact_pdf(
 
     if use_claude:
         try:
-            findings = _claude_enhance(text, findings, style)
+            findings = _claude_enhance(text, findings, style, firm_id=firm_id)
             redacted = _apply_claude_extras(redacted, findings, style)
         except Exception:
             pass
