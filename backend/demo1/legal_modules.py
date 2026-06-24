@@ -1,68 +1,21 @@
 import os
 """
-legal_modules.py — Depositions, Motions, Contracts routers
+legal_modules.py -- Depositions, Motions, Contracts routers
 """
-import sqlite3, os
 from datetime import datetime, timezone
 from typing import Optional
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, Request
 from pydantic import BaseModel
 
-DB = os.environ.get("PARAIQ_DB", str(__import__("pathlib").Path(__file__).parent / "analyses.db"))
+from backend.demo1.pg import get_conn
 
-def get_conn():
-    conn = sqlite3.connect(DB)
-    conn.row_factory = sqlite3.Row
-    return conn
 
-# ── Tables ────────────────────────────────────────────────────────────────────
 def init_legal_tables():
-    conn = get_conn()
-    conn.executescript("""
-    CREATE TABLE IF NOT EXISTS depositions (
-        id             INTEGER PRIMARY KEY AUTOINCREMENT,
-        case_number    TEXT NOT NULL,
-        witness_name   TEXT NOT NULL,
-        witness_role   TEXT,
-        depo_date      TEXT,
-        location       TEXT,
-        status         TEXT DEFAULT 'scheduled',
-        notes          TEXT,
-        created_at     TEXT DEFAULT (datetime('now'))
-    );
-    CREATE TABLE IF NOT EXISTS motions (
-        id             INTEGER PRIMARY KEY AUTOINCREMENT,
-        case_number    TEXT NOT NULL,
-        title          TEXT NOT NULL,
-        motion_type    TEXT NOT NULL,
-        filed_date     TEXT,
-        hearing_date   TEXT,
-        status         TEXT DEFAULT 'draft',
-        notes          TEXT,
-        created_at     TEXT DEFAULT (datetime('now'))
-    );
-    CREATE TABLE IF NOT EXISTS contracts (
-        id             INTEGER PRIMARY KEY AUTOINCREMENT,
-        case_number    TEXT NOT NULL,
-        contract_name  TEXT NOT NULL,
-        contract_type  TEXT NOT NULL,
-        parties        TEXT,
-        execution_date TEXT,
-        expiry_date    TEXT,
-        status         TEXT DEFAULT 'draft',
-        notes          TEXT,
-        created_at     TEXT DEFAULT (datetime('now'))
-    );
-    """)
-    conn.commit()
-    conn.close()
-    print("[LegalModules] Tables initialized ✓")
+    """No-op -- tables exist in Supabase Postgres."""
+    print("[LegalModules] Tables initialized OK")
 
-init_legal_tables()
 
-# ══════════════════════════════════════════════════════════════════════════════
-# DEPOSITIONS
-# ══════════════════════════════════════════════════════════════════════════════
+# ── DEPOSITIONS ───────────────────────────────────────────────────────────────
 depo_router = APIRouter(prefix="/depositions", tags=["Depositions"])
 
 class DepoIn(BaseModel):
@@ -75,52 +28,63 @@ class DepoIn(BaseModel):
     notes:        Optional[str] = None
 
 @depo_router.get("/")
-def list_depositions(case_number: str = None):
-    conn = get_conn()
-    if case_number:
-        rows = conn.execute("SELECT * FROM depositions WHERE case_number=? ORDER BY depo_date", (case_number,)).fetchall()
-    else:
-        rows = conn.execute("SELECT * FROM depositions ORDER BY depo_date").fetchall()
-    conn.close()
+def list_depositions(request: Request, case_number: str = None):
+    firm_id = getattr(request.state, "firm_id", "default")
+    with get_conn(firm_id) as conn:
+        if case_number:
+            rows = conn.execute(
+                "SELECT * FROM depositions WHERE firm_id=%s AND case_number=%s ORDER BY depo_date",
+                (firm_id, case_number)
+            ).fetchall()
+        else:
+            rows = conn.execute(
+                "SELECT * FROM depositions WHERE firm_id=%s ORDER BY depo_date",
+                (firm_id,)
+            ).fetchall()
     return {"total": len(rows), "depositions": [dict(r) for r in rows]}
 
 @depo_router.get("/stats")
-def depo_stats():
-    conn = get_conn()
-    total = conn.execute("SELECT COUNT(*) FROM depositions").fetchone()[0]
-    by_status = conn.execute("SELECT status, COUNT(*) as count FROM depositions GROUP BY status").fetchall()
-    conn.close()
+def depo_stats(request: Request):
+    firm_id = getattr(request.state, "firm_id", "default")
+    with get_conn(firm_id) as conn:
+        total    = conn.execute("SELECT COUNT(*) as c FROM depositions WHERE firm_id=%s", (firm_id,)).fetchone()["c"]
+        by_status = conn.execute(
+            "SELECT status, COUNT(*) as count FROM depositions WHERE firm_id=%s GROUP BY status", (firm_id,)
+        ).fetchall()
     return {"total": total, "by_status": {r["status"]: r["count"] for r in by_status}}
 
 @depo_router.post("/")
-def create_depo(body: DepoIn):
-    conn = get_conn()
-    cur = conn.execute("""INSERT INTO depositions (case_number,witness_name,witness_role,depo_date,location,status,notes)
-        VALUES (?,?,?,?,?,?,?)""",
-        (body.case_number, body.witness_name, body.witness_role,
-         body.depo_date, body.location, body.status, body.notes))
-    conn.commit(); conn.close()
-    return {"success": True, "id": cur.lastrowid}
+def create_depo(body: DepoIn, request: Request):
+    firm_id = getattr(request.state, "firm_id", "default")
+    with get_conn(firm_id) as conn:
+        cur = conn.execute("""
+            INSERT INTO depositions (firm_id,case_number,witness_name,witness_role,depo_date,location,status,notes)
+            VALUES (%s,%s,%s,%s,%s,%s,%s,%s) RETURNING id
+        """, (firm_id, body.case_number, body.witness_name, body.witness_role,
+              body.depo_date, body.location, body.status, body.notes))
+        row_id = cur.fetchone()["id"]
+    return {"success": True, "id": row_id}
 
 @depo_router.put("/{depo_id}")
-def update_depo(depo_id: int, body: DepoIn):
-    conn = get_conn()
-    conn.execute("""UPDATE depositions SET witness_name=?,witness_role=?,depo_date=?,location=?,status=?,notes=?
-        WHERE id=?""", (body.witness_name, body.witness_role, body.depo_date,
-                        body.location, body.status, body.notes, depo_id))
-    conn.commit(); conn.close()
+def update_depo(depo_id: int, body: DepoIn, request: Request):
+    firm_id = getattr(request.state, "firm_id", "default")
+    with get_conn(firm_id) as conn:
+        conn.execute("""
+            UPDATE depositions SET witness_name=%s,witness_role=%s,depo_date=%s,
+            location=%s,status=%s,notes=%s WHERE id=%s AND firm_id=%s
+        """, (body.witness_name, body.witness_role, body.depo_date,
+              body.location, body.status, body.notes, depo_id, firm_id))
     return {"success": True}
 
 @depo_router.delete("/{depo_id}")
-def delete_depo(depo_id: int):
-    conn = get_conn()
-    conn.execute("DELETE FROM depositions WHERE id=?", (depo_id,))
-    conn.commit(); conn.close()
+def delete_depo(depo_id: int, request: Request):
+    firm_id = getattr(request.state, "firm_id", "default")
+    with get_conn(firm_id) as conn:
+        conn.execute("DELETE FROM depositions WHERE id=%s AND firm_id=%s", (depo_id, firm_id))
     return {"success": True}
 
-# ══════════════════════════════════════════════════════════════════════════════
-# MOTIONS
-# ══════════════════════════════════════════════════════════════════════════════
+
+# ── MOTIONS ───────────────────────────────────────────────────────────────────
 motion_router = APIRouter(prefix="/motions", tags=["Motions"])
 
 class MotionIn(BaseModel):
@@ -133,54 +97,66 @@ class MotionIn(BaseModel):
     notes:        Optional[str] = None
 
 @motion_router.get("/")
-def list_motions(case_number: str = None):
-    conn = get_conn()
-    if case_number:
-        rows = conn.execute("SELECT * FROM motions WHERE case_number=? ORDER BY filed_date DESC", (case_number,)).fetchall()
-    else:
-        rows = conn.execute("SELECT * FROM motions ORDER BY filed_date DESC").fetchall()
-    conn.close()
+def list_motions(request: Request, case_number: str = None):
+    firm_id = getattr(request.state, "firm_id", "default")
+    with get_conn(firm_id) as conn:
+        if case_number:
+            rows = conn.execute(
+                "SELECT * FROM motions WHERE firm_id=%s AND case_number=%s ORDER BY filed_date DESC",
+                (firm_id, case_number)
+            ).fetchall()
+        else:
+            rows = conn.execute(
+                "SELECT * FROM motions WHERE firm_id=%s ORDER BY filed_date DESC", (firm_id,)
+            ).fetchall()
     return {"total": len(rows), "motions": [dict(r) for r in rows]}
 
 @motion_router.get("/stats")
-def motion_stats():
-    conn = get_conn()
-    total = conn.execute("SELECT COUNT(*) FROM motions").fetchone()[0]
-    by_status = conn.execute("SELECT status, COUNT(*) as count FROM motions GROUP BY status").fetchall()
-    by_type   = conn.execute("SELECT motion_type, COUNT(*) as count FROM motions GROUP BY motion_type").fetchall()
-    conn.close()
+def motion_stats(request: Request):
+    firm_id = getattr(request.state, "firm_id", "default")
+    with get_conn(firm_id) as conn:
+        total     = conn.execute("SELECT COUNT(*) as c FROM motions WHERE firm_id=%s", (firm_id,)).fetchone()["c"]
+        by_status = conn.execute(
+            "SELECT status, COUNT(*) as count FROM motions WHERE firm_id=%s GROUP BY status", (firm_id,)
+        ).fetchall()
+        by_type   = conn.execute(
+            "SELECT motion_type, COUNT(*) as count FROM motions WHERE firm_id=%s GROUP BY motion_type", (firm_id,)
+        ).fetchall()
     return {"total": total, "by_status": {r["status"]: r["count"] for r in by_status},
             "by_type": {r["motion_type"]: r["count"] for r in by_type}}
 
 @motion_router.post("/")
-def create_motion(body: MotionIn):
-    conn = get_conn()
-    cur = conn.execute("""INSERT INTO motions (case_number,title,motion_type,filed_date,hearing_date,status,notes)
-        VALUES (?,?,?,?,?,?,?)""",
-        (body.case_number, body.title, body.motion_type,
-         body.filed_date, body.hearing_date, body.status, body.notes))
-    conn.commit(); conn.close()
-    return {"success": True, "id": cur.lastrowid}
+def create_motion(body: MotionIn, request: Request):
+    firm_id = getattr(request.state, "firm_id", "default")
+    with get_conn(firm_id) as conn:
+        cur = conn.execute("""
+            INSERT INTO motions (firm_id,case_number,title,motion_type,filed_date,hearing_date,status,notes)
+            VALUES (%s,%s,%s,%s,%s,%s,%s,%s) RETURNING id
+        """, (firm_id, body.case_number, body.title, body.motion_type,
+              body.filed_date, body.hearing_date, body.status, body.notes))
+        row_id = cur.fetchone()["id"]
+    return {"success": True, "id": row_id}
 
 @motion_router.put("/{motion_id}")
-def update_motion(motion_id: int, body: MotionIn):
-    conn = get_conn()
-    conn.execute("""UPDATE motions SET title=?,motion_type=?,filed_date=?,hearing_date=?,status=?,notes=?
-        WHERE id=?""", (body.title, body.motion_type, body.filed_date,
-                        body.hearing_date, body.status, body.notes, motion_id))
-    conn.commit(); conn.close()
+def update_motion(motion_id: int, body: MotionIn, request: Request):
+    firm_id = getattr(request.state, "firm_id", "default")
+    with get_conn(firm_id) as conn:
+        conn.execute("""
+            UPDATE motions SET title=%s,motion_type=%s,filed_date=%s,
+            hearing_date=%s,status=%s,notes=%s WHERE id=%s AND firm_id=%s
+        """, (body.title, body.motion_type, body.filed_date,
+              body.hearing_date, body.status, body.notes, motion_id, firm_id))
     return {"success": True}
 
 @motion_router.delete("/{motion_id}")
-def delete_motion(motion_id: int):
-    conn = get_conn()
-    conn.execute("DELETE FROM motions WHERE id=?", (motion_id,))
-    conn.commit(); conn.close()
+def delete_motion(motion_id: int, request: Request):
+    firm_id = getattr(request.state, "firm_id", "default")
+    with get_conn(firm_id) as conn:
+        conn.execute("DELETE FROM motions WHERE id=%s AND firm_id=%s", (motion_id, firm_id))
     return {"success": True}
 
-# ══════════════════════════════════════════════════════════════════════════════
-# CONTRACTS
-# ══════════════════════════════════════════════════════════════════════════════
+
+# ── CONTRACTS ─────────────────────────────────────────────────────────────────
 contract_router = APIRouter(prefix="/contracts", tags=["Contracts"])
 
 class ContractIn(BaseModel):
@@ -194,47 +170,64 @@ class ContractIn(BaseModel):
     notes:          Optional[str] = None
 
 @contract_router.get("/")
-def list_contracts(case_number: str = None):
-    conn = get_conn()
-    if case_number:
-        rows = conn.execute("SELECT * FROM contracts WHERE case_number=? ORDER BY execution_date DESC", (case_number,)).fetchall()
-    else:
-        rows = conn.execute("SELECT * FROM contracts ORDER BY execution_date DESC").fetchall()
-    conn.close()
+def list_contracts(request: Request, case_number: str = None):
+    firm_id = getattr(request.state, "firm_id", "default")
+    with get_conn(firm_id) as conn:
+        if case_number:
+            rows = conn.execute(
+                "SELECT * FROM contracts WHERE firm_id=%s AND case_number=%s ORDER BY execution_date DESC",
+                (firm_id, case_number)
+            ).fetchall()
+        else:
+            rows = conn.execute(
+                "SELECT * FROM contracts WHERE firm_id=%s ORDER BY execution_date DESC", (firm_id,)
+            ).fetchall()
     return {"total": len(rows), "contracts": [dict(r) for r in rows]}
 
 @contract_router.get("/stats")
-def contract_stats():
-    conn = get_conn()
-    total = conn.execute("SELECT COUNT(*) FROM contracts").fetchone()[0]
-    by_status = conn.execute("SELECT status, COUNT(*) as count FROM contracts GROUP BY status").fetchall()
-    by_type   = conn.execute("SELECT contract_type, COUNT(*) as count FROM contracts GROUP BY contract_type").fetchall()
-    conn.close()
+def contract_stats(request: Request):
+    firm_id = getattr(request.state, "firm_id", "default")
+    with get_conn(firm_id) as conn:
+        total     = conn.execute("SELECT COUNT(*) as c FROM contracts WHERE firm_id=%s", (firm_id,)).fetchone()["c"]
+        by_status = conn.execute(
+            "SELECT status, COUNT(*) as count FROM contracts WHERE firm_id=%s GROUP BY status", (firm_id,)
+        ).fetchall()
+        by_type   = conn.execute(
+            "SELECT contract_type, COUNT(*) as count FROM contracts WHERE firm_id=%s GROUP BY contract_type", (firm_id,)
+        ).fetchall()
     return {"total": total, "by_status": {r["status"]: r["count"] for r in by_status},
             "by_type": {r["contract_type"]: r["count"] for r in by_type}}
 
 @contract_router.post("/")
-def create_contract(body: ContractIn):
-    conn = get_conn()
-    cur = conn.execute("""INSERT INTO contracts (case_number,contract_name,contract_type,parties,execution_date,expiry_date,status,notes)
-        VALUES (?,?,?,?,?,?,?,?)""",
-        (body.case_number, body.contract_name, body.contract_type, body.parties,
-         body.execution_date, body.expiry_date, body.status, body.notes))
-    conn.commit(); conn.close()
-    return {"success": True, "id": cur.lastrowid}
+def create_contract(body: ContractIn, request: Request):
+    firm_id = getattr(request.state, "firm_id", "default")
+    with get_conn(firm_id) as conn:
+        cur = conn.execute("""
+            INSERT INTO contracts
+              (firm_id,case_number,contract_name,contract_type,parties,
+               execution_date,expiry_date,status,notes)
+            VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s) RETURNING id
+        """, (firm_id, body.case_number, body.contract_name, body.contract_type,
+              body.parties, body.execution_date, body.expiry_date, body.status, body.notes))
+        row_id = cur.fetchone()["id"]
+    return {"success": True, "id": row_id}
 
 @contract_router.put("/{contract_id}")
-def update_contract(contract_id: int, body: ContractIn):
-    conn = get_conn()
-    conn.execute("""UPDATE contracts SET contract_name=?,contract_type=?,parties=?,execution_date=?,expiry_date=?,status=?,notes=?
-        WHERE id=?""", (body.contract_name, body.contract_type, body.parties,
-                        body.execution_date, body.expiry_date, body.status, body.notes, contract_id))
-    conn.commit(); conn.close()
+def update_contract(contract_id: int, body: ContractIn, request: Request):
+    firm_id = getattr(request.state, "firm_id", "default")
+    with get_conn(firm_id) as conn:
+        conn.execute("""
+            UPDATE contracts SET contract_name=%s,contract_type=%s,parties=%s,
+            execution_date=%s,expiry_date=%s,status=%s,notes=%s
+            WHERE id=%s AND firm_id=%s
+        """, (body.contract_name, body.contract_type, body.parties,
+              body.execution_date, body.expiry_date, body.status, body.notes,
+              contract_id, firm_id))
     return {"success": True}
 
 @contract_router.delete("/{contract_id}")
-def delete_contract(contract_id: int):
-    conn = get_conn()
-    conn.execute("DELETE FROM contracts WHERE id=?", (contract_id,))
-    conn.commit(); conn.close()
+def delete_contract(contract_id: int, request: Request):
+    firm_id = getattr(request.state, "firm_id", "default")
+    with get_conn(firm_id) as conn:
+        conn.execute("DELETE FROM contracts WHERE id=%s AND firm_id=%s", (contract_id, firm_id))
     return {"success": True}

@@ -30,7 +30,7 @@ import re
 import json
 import time
 import logging
-import sqlite3
+from backend.demo1.pg import get_conn
 import io
 from datetime import datetime, timezone
 from typing import Optional
@@ -53,7 +53,6 @@ PACER_BASE     = "https://pacer.uscourts.gov"
 PACER_AUTH_URL = f"{PACER_BASE}/services/cso-auth"
 PACER_API_BASE = "https://pcl.uscourts.gov/pcl-public-api/rest"
 CL_BASE        = "https://www.courtlistener.com/api/rest/v3"
-DB_PATH        = os.environ.get("PARAIQ_DB", str(__import__("pathlib").Path(__file__).parent / "analyses.db"))
 TOKEN_TTL_SECS = 3600
 
 # ── CourtListener token (free at courtlistener.com/profile/api/) ───────────────
@@ -220,20 +219,19 @@ def run_nlp_pipeline(text: str) -> dict:
 def add_to_case(case_id: int, document_name: str, doc_text: str,
                 nlp: dict, source: str = "pacer",
                 pacer_doc_id: str = "", pacer_seq_no: str = "") -> bool:
-    conn = sqlite3.connect(DB_PATH)
     try:
-        conn.execute("""
-            INSERT INTO case_documents
-              (case_id, document_name, source, doc_text, sentiment, risk_score,
-               events_json, entities_json, summary, language, pacer_doc_id, pacer_seq_no)
-            VALUES (?,?,?,?,?,?,?,?,?,?,?,?)
-        """, (case_id, document_name, source, doc_text,
-              nlp.get("sentiment"), nlp.get("risk_score"),
-              json.dumps(nlp.get("events",[])),
-              json.dumps(nlp.get("entities",[])),
-              nlp.get("summary",""), nlp.get("language","en"),
-              pacer_doc_id, pacer_seq_no))
-        conn.commit()
+        with get_conn("default") as conn:
+            conn.execute("""
+                INSERT INTO case_documents
+                  (case_id, document_name, source, doc_text, sentiment, risk_score,
+                   events_json, entities_json, summary, language, pacer_doc_id, pacer_seq_no)
+                VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)
+            """, (case_id, document_name, source, doc_text,
+                  nlp.get("sentiment"), nlp.get("risk_score"),
+                  json.dumps(nlp.get("events",[])),
+                  json.dumps(nlp.get("entities",[])),
+                  nlp.get("summary",""), nlp.get("language","en"),
+                  pacer_doc_id, pacer_seq_no))
         return True
     except Exception as e:
         logger.error(f"add_to_case failed: {e}")

@@ -19,7 +19,6 @@ Endpoints:
 
 import os
 import json
-import sqlite3
 import threading
 from datetime import datetime, timezone
 from fastapi import APIRouter, BackgroundTasks, HTTPException
@@ -27,7 +26,6 @@ from pydantic import BaseModel
 from typing import Optional
 
 router  = APIRouter()
-DB_PATH = os.environ.get("PARAIQ_DB", str(__import__("pathlib").Path(__file__).parent / "analyses.db"))
 MODEL_DIR = "models/legal_classifier"
 
 # ── Training state (in-memory) ─────────────────────────────────────────────────
@@ -117,31 +115,12 @@ ID_TO_LABEL = {v: k for k, v in LABEL_MAP.items()}
 
 # ── DB Setup ───────────────────────────────────────────────────────────────────
 
-def get_conn():
-    conn = sqlite3.connect(DB_PATH)
-    conn.row_factory = sqlite3.Row
-    return conn
+from backend.demo1.pg import get_conn
 
 
 def init_model_table():
-    conn = get_conn()
-    conn.execute("""
-        CREATE TABLE IF NOT EXISTS model_runs (
-            id           INTEGER PRIMARY KEY AUTOINCREMENT,
-            started_at   TEXT,
-            completed_at TEXT,
-            status       TEXT,
-            accuracy     REAL,
-            f1_score     REAL,
-            train_size   INTEGER,
-            epochs       INTEGER,
-            model_path   TEXT,
-            notes        TEXT
-        )
-    """)
-    conn.commit()
-    conn.close()
-    print("[FineTune] Model table initialized ✓")
+    """No-op -- table exists in Supabase Postgres."""
+    print("[FineTune] Model table initialized OK")
 
 
 # ── Training engine ────────────────────────────────────────────────────────────
@@ -305,19 +284,17 @@ def run_training(epochs: int = 3):
 
         # Log to DB
         completed = datetime.now(timezone.utc).isoformat()
-        conn = get_conn()
-        conn.execute("""
-            INSERT INTO model_runs
-              (started_at, completed_at, status, accuracy, f1_score,
-               train_size, epochs, model_path, notes)
-            VALUES (?,?,?,?,?,?,?,?,?)
-        """, (
-            training_state["started_at"], completed, "complete",
-            accuracy, f1, len(train_texts), epochs, MODEL_DIR,
-            f"Legal classifier · {len(TRAINING_DATA)} samples"
-        ))
-        conn.commit()
-        conn.close()
+        with get_conn("default") as conn:
+            conn.execute("""
+                INSERT INTO model_runs
+                  (started_at, completed_at, status, accuracy, f1_score,
+                   train_size, epochs, model_path, notes)
+                VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s)
+            """, (
+                training_state["started_at"], completed, "complete",
+                accuracy, f1, len(train_texts), epochs, MODEL_DIR,
+                f"Legal classifier - {len(TRAINING_DATA)} samples"
+            ))
 
         training_state.update({
             "status":       "complete",
@@ -460,11 +437,10 @@ def model_info():
         meta = json.load(f)
 
     # Latest DB run
-    conn = get_conn()
-    run  = conn.execute(
-        "SELECT * FROM model_runs ORDER BY id DESC LIMIT 1"
-    ).fetchone()
-    conn.close()
+    with get_conn("default") as conn:
+        run = conn.execute(
+            "SELECT * FROM model_runs ORDER BY id DESC LIMIT 1"
+        ).fetchone()
 
     return {
         "success":      True,

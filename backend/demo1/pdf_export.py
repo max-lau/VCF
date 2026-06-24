@@ -13,7 +13,6 @@ Uses ReportLab for PDF generation.
 """
 
 import io
-import sqlite3
 import json
 from datetime import datetime, timezone
 from fastapi import APIRouter, HTTPException
@@ -32,15 +31,14 @@ from reportlab.platypus import (
 from reportlab.lib.enums import TA_LEFT, TA_CENTER, TA_RIGHT
 
 router  = APIRouter()
-DB_PATH = os.environ.get("PARAIQ_DB", str(Path(__file__).parent / "analyses.db"))
 
 
 # ── DB helper ──────────────────────────────────────────────────────────────────
 
-def get_conn():
-    conn = sqlite3.connect(DB_PATH)
-    conn.row_factory = sqlite3.Row
-    return conn
+from backend.demo1.pg import get_conn as _pg_get_conn
+
+def get_conn(firm_id="default"):
+    return _pg_get_conn(firm_id)
 
 
 # ── Style helpers ──────────────────────────────────────────────────────────────
@@ -593,15 +591,13 @@ def export_intake_pdf(body: IntakeExportBody):
 @router.get("/brief/{case_id}")
 def export_brief_pdf(case_id: int):
     """Export the most recent AI Case Brief for a case as a PDF."""
-    import sqlite3 as _sq
-    conn = _sq.connect("analyses.db")
-    conn.row_factory = _sq.Row
-    row  = conn.execute(
-        "SELECT brief_json FROM case_briefs WHERE case_id=? ORDER BY generated_at DESC LIMIT 1",
-        (case_id,)
-    ).fetchone()
+    with get_conn("default") as conn:
+        row = conn.execute(
+            "SELECT brief_json FROM case_briefs WHERE case_id=%s ORDER BY generated_at DESC LIMIT 1",
+            (case_id,)
+        ).fetchone()
     if not row:
-        raise HTTPException(404, "No brief found — generate one first from the case detail page")
+        raise HTTPException(404, "No brief found -- generate one first from the case detail page")
     brief = json.loads(row["brief_json"])
     conn.close()
     pdf   = build_brief_pdf(brief)
