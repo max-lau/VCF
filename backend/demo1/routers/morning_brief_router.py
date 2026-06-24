@@ -19,7 +19,17 @@ from backend.demo1.pg import get_conn
 router = APIRouter()
 log    = logging.getLogger(__name__)
 
-FIRMS  = ["default", "firm_abc", "meridian_legal"]
+def get_active_firms() -> list:
+    """Fetch all active firm_ids from the database."""
+    try:
+        with get_conn("default") as conn:
+            rows = conn.execute(
+                "SELECT DISTINCT firm_id FROM users WHERE active=TRUE AND firm_id IS NOT NULL"
+            ).fetchall()
+            return [r["firm_id"] for r in rows] if rows else ["default"]
+    except Exception as e:
+        log.warning(f"[MorningBrief] Could not fetch firms: {e}")
+        return ["default", "firm_abc", "meridian_legal"]
 
 
 # ── Generator (called by scheduler + manually) ────────────────────────────────
@@ -222,7 +232,7 @@ def generate_morning_brief(firm_id: str) -> dict:
 
 def run_all_firms_brief():
     """Called by scheduler at 8am daily."""
-    for firm_id in FIRMS:
+    for firm_id in get_active_firms():
         try:
             generate_morning_brief(firm_id)
         except Exception as e:
