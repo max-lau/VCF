@@ -1,15 +1,28 @@
-import os, io, sqlite3, subprocess, tempfile
+import os, io, subprocess, tempfile
+import json as _json
 from pathlib import Path
 from datetime import datetime, timezone
 from typing import Optional
-from fastapi import APIRouter, UploadFile, File, Form, HTTPException
+from fastapi import APIRouter, UploadFile, File, Form, HTTPException, Request
 from fastapi.responses import JSONResponse
+from pydantic import BaseModel as _BM
+
+from backend.demo1.pg import get_conn
 
 router = APIRouter(prefix="/media", tags=["Media Transcription"])
 
-DB_PATH    = os.environ.get("PARAIQ_DB", str(Path(__file__).parent / "analyses.db"))
-MEDIA_DIR  = Path(os.environ.get("MEDIA_DIR", str(Path(__file__).parent.parent.parent / "uploads" / "media")))
+MEDIA_DIR = Path(os.environ.get("MEDIA_DIR",
+    str(Path(__file__).parent.parent.parent / "uploads" / "media")))
 MEDIA_DIR.mkdir(parents=True, exist_ok=True)
+
+AUDIO_EXTS = {".mp3", ".wav", ".m4a", ".ogg", ".flac", ".webm", ".aac"}
+VIDEO_EXTS = {".mp4", ".mov", ".avi", ".mkv", ".wmv", ".webm"}
+
+
+def init_transcription_table():
+    """No-op — table exists in Supabase Postgres."""
+    print("[Media] Transcription table initialized ✓")
+
 
 def get_client():
     from openai import OpenAI
@@ -18,51 +31,21 @@ def get_client():
         raise RuntimeError("OPENAI_API_KEY not set")
     return OpenAI(api_key=key)
 
-AUDIO_EXTS = {".mp3",".wav",".m4a",".ogg",".flac",".webm",".aac"}
-VIDEO_EXTS = {".mp4",".mov",".avi",".mkv",".wmv",".webm"}
-
-def get_conn():
-    conn = sqlite3.connect(DB_PATH)
-    conn.row_factory = sqlite3.Row
-    return conn
-
-def init_transcription_table():
-    conn = get_conn()
-    conn.execute("""
-        CREATE TABLE IF NOT EXISTS transcriptions (
-            id            INTEGER PRIMARY KEY AUTOINCREMENT,
-            filename      TEXT NOT NULL,
-            file_type     TEXT NOT NULL,
-            duration_s    REAL,
-            case_number   TEXT,
-            language      TEXT,
-            transcript    TEXT,
-            segments      TEXT,
-            word_count    INTEGER,
-            created_at    TEXT DEFAULT (datetime('now'))
-        )
-    """)
-    conn.commit()
-    conn.close()
-
-init_transcription_table()
 
 # ── Helpers ───────────────────────────────────────────────────────────────────
 
 def extract_audio_from_video(video_path: Path) -> Path:
-    """Use ffmpeg to extract audio track as mp3."""
     out = video_path.with_suffix(".extracted.mp3")
     result = subprocess.run([
         "ffmpeg", "-y", "-i", str(video_path),
-        "-vn", "-ar", "16000", "-ac", "1", "-q:a", "4",
-        str(out)
+        "-vn", "-ar", "16000", "-ac", "1", "-q:a", "4", str(out)
     ], capture_output=True, timeout=120)
     if result.returncode != 0:
         raise RuntimeError(f"ffmpeg error: {result.stderr.decode()[:300]}")
     return out
 
+
 def whisper_transcribe(audio_path: Path) -> dict:
-    """Send audio to OpenAI Whisper and return transcript + segments."""
     with open(audio_path, "rb") as f:
         response = get_client().audio.transcriptions.create(
             model="whisper-1",
@@ -85,40 +68,42 @@ def whisper_transcribe(audio_path: Path) -> dict:
         "segments": segments,
     }
 
-import json as _json
 
-def save_transcription(filename, file_type, result, case_number):
-    conn = get_conn()
-    cur = conn.execute("""
-        INSERT INTO transcriptions
-          (filename, file_type, duration_s, case_number, language,
-           transcript, segments, word_count)
-        VALUES (?,?,?,?,?,?,?,?)
-    """, (
-        filename, file_type,
-        result.get("duration"), case_number,
-        result.get("language"), result.get("text"),
-        _json.dumps(result.get("segments",[])),
-        len(result.get("text","").split())
-    ))
-    row_id = cur.lastrowid
-    conn.commit()
-    conn.close()
-    return row_id
+def save_transcription(filename, file_type, result, case_number,
+                       firm_id: str = "default"):
+    with get_conn(firm_id) as conn:
+        cur = conn.execute("""
+            INSERT INTO transcriptions
+              (firm_id, filename, file_type, duration_s, case_number, language,
+               transcript, segments, word_count, created_at)
+            VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)
+            RETURNING id
+        """, (
+            firm_id, filename, file_type,
+            result.get("duration"), case_number,
+            result.get("language"), result.get("text"),
+            _json.dumps(result.get("segments", [])),
+            len(result.get("text", "").split()),
+            datetime.now(timezone.utc).isoformat(),
+        ))
+        return cur.fetchone()["id"]
+
 
 # ── Routes ────────────────────────────────────────────────────────────────────
 
 @router.post("/transcribe/audio")
 async def transcribe_audio(
+    request: Request,
     file: UploadFile = File(...),
     case_number: Optional[str] = Form(None)
 ):
+    firm_id = getattr(request.state, "firm_id", "default")
     ext = Path(file.filename).suffix.lower()
     if ext not in AUDIO_EXTS:
-        raise HTTPException(400, f"Unsupported audio format '{ext}'. Supported: {', '.join(AUDIO_EXTS)}")
+        raise HTTPException(400, f"Unsupported audio format '{ext}'")
 
     data = await file.read()
-    if len(data) == 0:
+    if not data:
         raise HTTPException(400, "Uploaded file is empty")
 
     ts = datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S")
@@ -127,10 +112,10 @@ async def transcribe_audio(
 
     try:
         result = whisper_transcribe(save_path)
-    except Exception as e:
-        raise HTTPException(500, f"Transcription failed: {str(e)}")
+    except Exception:
+        raise HTTPException(500, "Transcription failed")
 
-    row_id = save_transcription(file.filename, "audio", result, case_number)
+    row_id = save_transcription(file.filename, "audio", result, case_number, firm_id)
 
     return {
         "success":     True,
@@ -145,17 +130,20 @@ async def transcribe_audio(
         "case_number": case_number,
     }
 
+
 @router.post("/transcribe/video")
 async def transcribe_video(
+    request: Request,
     file: UploadFile = File(...),
     case_number: Optional[str] = Form(None)
 ):
+    firm_id = getattr(request.state, "firm_id", "default")
     ext = Path(file.filename).suffix.lower()
     if ext not in VIDEO_EXTS:
-        raise HTTPException(400, f"Unsupported video format '{ext}'. Supported: {', '.join(VIDEO_EXTS)}")
+        raise HTTPException(400, f"Unsupported video format '{ext}'")
 
     data = await file.read()
-    if len(data) == 0:
+    if not data:
         raise HTTPException(400, "Uploaded file is empty")
 
     ts = datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S")
@@ -164,17 +152,17 @@ async def transcribe_video(
 
     try:
         audio_path = extract_audio_from_video(video_path)
-    except Exception as e:
-        raise HTTPException(500, f"Audio extraction failed: {str(e)}")
+    except Exception:
+        raise HTTPException(500, "Audio extraction failed")
 
     try:
         result = whisper_transcribe(audio_path)
-    except Exception as e:
-        raise HTTPException(500, f"Transcription failed: {str(e)}")
+    except Exception:
+        raise HTTPException(500, "Transcription failed")
     finally:
         audio_path.unlink(missing_ok=True)
 
-    row_id = save_transcription(file.filename, "video", result, case_number)
+    row_id = save_transcription(file.filename, "video", result, case_number, firm_id)
 
     return {
         "success":     True,
@@ -189,27 +177,40 @@ async def transcribe_video(
         "case_number": case_number,
     }
 
+
 @router.get("/transcriptions")
-def list_transcriptions(case_number: Optional[str] = None, limit: int = 50):
-    conn = get_conn()
-    if case_number:
-        rows = conn.execute(
-            "SELECT id,filename,file_type,duration_s,case_number,language,word_count,created_at FROM transcriptions WHERE case_number=? ORDER BY id DESC LIMIT ?",
-            (case_number, limit)
-        ).fetchall()
-    else:
-        rows = conn.execute(
-            "SELECT id,filename,file_type,duration_s,case_number,language,word_count,created_at FROM transcriptions ORDER BY id DESC LIMIT ?",
-            (limit,)
-        ).fetchall()
-    conn.close()
+def list_transcriptions(
+    request: Request,
+    case_number: Optional[str] = None,
+    limit: int = 50
+):
+    firm_id = getattr(request.state, "firm_id", "default")
+    with get_conn(firm_id) as conn:
+        if case_number:
+            rows = conn.execute(
+                """SELECT id,filename,file_type,duration_s,case_number,language,
+                          word_count,created_at FROM transcriptions
+                   WHERE firm_id=%s AND case_number=%s ORDER BY id DESC LIMIT %s""",
+                (firm_id, case_number, limit)
+            ).fetchall()
+        else:
+            rows = conn.execute(
+                """SELECT id,filename,file_type,duration_s,case_number,language,
+                          word_count,created_at FROM transcriptions
+                   WHERE firm_id=%s ORDER BY id DESC LIMIT %s""",
+                (firm_id, limit)
+            ).fetchall()
     return {"transcriptions": [dict(r) for r in rows], "total": len(rows)}
 
+
 @router.get("/transcriptions/{tid}")
-def get_transcription(tid: int):
-    conn = get_conn()
-    row = conn.execute("SELECT * FROM transcriptions WHERE id=?", (tid,)).fetchone()
-    conn.close()
+def get_transcription(tid: int, request: Request):
+    firm_id = getattr(request.state, "firm_id", "default")
+    with get_conn(firm_id) as conn:
+        row = conn.execute(
+            "SELECT * FROM transcriptions WHERE id=%s AND firm_id=%s",
+            (tid, firm_id)
+        ).fetchone()
     if not row:
         raise HTTPException(404, "Transcription not found")
     r = dict(row)
@@ -219,34 +220,40 @@ def get_transcription(tid: int):
         r["segments"] = []
     return r
 
+
 @router.delete("/transcriptions/{tid}")
-def delete_transcription(tid: int):
-    conn = get_conn()
-    conn.execute("DELETE FROM transcriptions WHERE id=?", (tid,))
-    conn.commit()
-    conn.close()
+def delete_transcription(tid: int, request: Request):
+    firm_id = getattr(request.state, "firm_id", "default")
+    with get_conn(firm_id) as conn:
+        row = conn.execute(
+            "SELECT id FROM transcriptions WHERE id=%s AND firm_id=%s",
+            (tid, firm_id)
+        ).fetchone()
+        if not row:
+            raise HTTPException(404, "Transcription not found")
+        conn.execute(
+            "DELETE FROM transcriptions WHERE id=%s AND firm_id=%s",
+            (tid, firm_id)
+        )
     return {"success": True}
 
 
-# ── Transcribe directly from discovery queue (no re-upload) ───────────────────
-from pydantic import BaseModel as _BM
-
 @router.post("/transcribe/discovery/{file_id}")
-async def transcribe_from_discovery(file_id: int, case_number: Optional[str] = None):
+async def transcribe_from_discovery(
+    request: Request,
+    file_id: int,
+    case_number: Optional[str] = None
+):
     """Transcribe a discovery file already on disk by its queue ID."""
-    import sqlite3 as _sq
-    DISC_DIR = Path(os.environ.get("DISCOVERY_UPLOAD_DIR", str(Path(__file__).parent.parent.parent / "uploads" / "discovery")))
+    firm_id = getattr(request.state, "firm_id", "default")
+    DISC_DIR = Path(os.environ.get("DISCOVERY_UPLOAD_DIR",
+        str(Path(__file__).parent.parent.parent / "uploads" / "discovery")))
 
-    # Look up file record
-    try:
-        con = _sq.connect("/root/nlp-portfolio/backend/demo1/analyses.db")
-        con.row_factory = _sq.Row
-        row = con.execute(
-            "SELECT * FROM discovery_files WHERE id = ?", (file_id,)
+    with get_conn(firm_id) as conn:
+        row = conn.execute(
+            "SELECT * FROM discovery_files WHERE id=%s AND firm_id=%s",
+            (file_id, firm_id)
         ).fetchone()
-        con.close()
-    except Exception as e:
-        raise HTTPException(500, f"DB error: {e}")
 
     if not row:
         raise HTTPException(404, f"Discovery file {file_id} not found")
@@ -261,34 +268,21 @@ async def transcribe_from_discovery(file_id: int, case_number: Optional[str] = N
 
     try:
         result = whisper_transcribe(file_path)
-    except Exception as e:
-        raise HTTPException(500, f"Transcription failed: {e}")
-
-    # Save transcription record
-    cn = case_number or row["case_number"] or None
-    row_id = save_transcription(row["original_name"], "audio", result, cn)
-
-    # Update discovery status + write transcript into case_documents
-    try:
-        con = _sq.connect("/root/nlp-portfolio/backend/demo1/analyses.db")
-        con.execute(
-            "UPDATE discovery_files SET status = 'transcribed' WHERE id = ?",
-            (file_id,)
-        )
-        con.commit()
-        con.close()
     except Exception:
-        pass
-    try:
-        cases_con = _sq.connect("/root/nlp-portfolio/analyses.db")
-        cases_con.execute(
-            "UPDATE case_documents SET doc_text = ? WHERE document_name = ?",
-            (result["text"], row["original_name"])
+        raise HTTPException(500, "Transcription failed")
+
+    cn = case_number or row.get("case_number") or None
+    row_id = save_transcription(row["original_name"], "audio", result, cn, firm_id)
+
+    with get_conn(firm_id) as conn:
+        conn.execute(
+            "UPDATE discovery_files SET status='transcribed' WHERE id=%s AND firm_id=%s",
+            (file_id, firm_id)
         )
-        cases_con.commit()
-        cases_con.close()
-    except Exception:
-        pass
+        conn.execute(
+            "UPDATE case_documents SET doc_text=%s WHERE document_name=%s AND firm_id=%s",
+            (result["text"], row["original_name"], firm_id)
+        )
 
     return {
         "success":      True,
