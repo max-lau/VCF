@@ -11,7 +11,7 @@ from fastapi.responses import RedirectResponse
 from google_auth_oauthlib.flow import Flow
 
 from .auth import get_current_user
-from .pg import db_dep, PgConn
+from .pg import db_dep, PgConn, get_conn
 
 logger = logging.getLogger(__name__)
 router = APIRouter(tags=["email"])
@@ -280,6 +280,12 @@ def _send_gmail_reply(account: dict, intake: dict, reply_text: str) -> bool:
     )
     if creds.expired and creds.refresh_token:
         creds.refresh(Request())
+        # Persist refreshed token back to DB to avoid expiry loop
+        with get_conn(account.get("firm_id", "default")) as _db:
+            _db.execute(
+                "UPDATE attorney_email_accounts SET access_token=%s, token_expiry=%s, updated_at=NOW() WHERE id=%s",
+                (creds.token, creds.expiry, account["id"])
+            )
 
     service = build("gmail", "v1", credentials=creds)
 
