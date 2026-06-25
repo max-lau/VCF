@@ -21,7 +21,9 @@ from backend.demo1.ab_testing.logger import log_experiment_result
 from dotenv import load_dotenv
 
 load_dotenv()
-# Claude client imported lazily via claude_with_retry
+
+# Claude client — imported from main to avoid creating a separate Anthropic instance
+from backend.demo1.main import client as _client
 
 
 def _get_db(firm_id="default"):
@@ -141,7 +143,7 @@ def _save_contradictions(case_id, doc_a, doc_b, items):
             """INSERT INTO case_contradictions
                (case_id, doc_a_id, doc_b_id, doc_a_name, doc_b_name,
                 severity, c_type, entity, claim_a, claim_b, explanation)
-               VALUES (?,?,?,?,?,?,?,?,?,?,?)""",
+               VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)""",
             (
                 case_id,
                 doc_a["id"], doc_b["id"],
@@ -172,7 +174,7 @@ def get_case_contradictions(case_id: int) -> list:
 def get_unreviewed_count(case_id: int) -> int:
     conn = _get_db()
     n = conn.execute(
-        "SELECT COUNT(*) FROM case_contradictions WHERE case_id=? AND reviewed=FALSE",
+        "SELECT COUNT(*) FROM case_contradictions WHERE case_id=%s AND reviewed=FALSE",
         (case_id,)
     ).fetchone()[0]
     conn.close()

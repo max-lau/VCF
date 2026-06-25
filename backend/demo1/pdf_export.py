@@ -15,7 +15,7 @@ Uses ReportLab for PDF generation.
 import io
 import json
 from datetime import datetime, timezone
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, Request
 from fastapi.responses import StreamingResponse, Response
 from pydantic import BaseModel
 from typing import Optional
@@ -490,22 +490,20 @@ def export_risk_pdf(body: RiskExportBody):
 
 
 @router.get("/case/{case_id}")
-def export_case_pdf(case_id: int):
+def export_case_pdf(case_id: int, request: Request):
     """Export a full case summary as PDF from case management DB."""
-    conn = get_conn()
+    firm_id = getattr(request.state, "firm_id", "default")
+    with get_conn(firm_id) as conn:
+        case = conn.execute(
+            "SELECT * FROM cases WHERE id=%s AND deleted=0", (case_id,)
+        ).fetchone()
+        if not case:
+            raise HTTPException(404, f"Case {case_id} not found")
 
-    case = conn.execute(
-        "SELECT * FROM cases WHERE id=? AND deleted=0", (case_id,)
-    ).fetchone()
-    if not case:
-        conn.close()
-        raise HTTPException(404, f"Case {case_id} not found")
-
-    docs = conn.execute(
-        "SELECT * FROM case_documents WHERE case_id=? ORDER BY upload_date DESC",
-        (case_id,)
-    ).fetchall()
-    conn.close()
+        docs = conn.execute(
+            "SELECT * FROM case_documents WHERE case_id=%s ORDER BY upload_date DESC",
+            (case_id,)
+        ).fetchall()
 
     pdf_bytes = build_case_pdf(dict(case), [dict(d) for d in docs])
     case_num  = dict(case).get("case_number", str(case_id)).replace("/", "-")
@@ -589,9 +587,10 @@ def export_intake_pdf(body: IntakeExportBody):
 
 
 @router.get("/brief/{case_id}")
-def export_brief_pdf(case_id: int):
+def export_brief_pdf(case_id: int, request: Request):
     """Export the most recent AI Case Brief for a case as a PDF."""
-    with get_conn("default") as conn:
+    firm_id = getattr(request.state, "firm_id", "default")
+    with get_conn(firm_id) as conn:
         row = conn.execute(
             "SELECT brief_json FROM case_briefs WHERE case_id=%s ORDER BY generated_at DESC LIMIT 1",
             (case_id,)
@@ -599,7 +598,6 @@ def export_brief_pdf(case_id: int):
     if not row:
         raise HTTPException(404, "No brief found -- generate one first from the case detail page")
     brief = json.loads(row["brief_json"])
-    conn.close()
     pdf   = build_brief_pdf(brief)
     fname = f"ParaIQ_Brief_{brief.get('case_number','case').replace('/','-').replace(' ','_')}.pdf"
     return Response(

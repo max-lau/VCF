@@ -81,8 +81,21 @@ SCOPED_ROLES = {"paralegal", "client_viewer"}
 # ── DB Setup ───────────────────────────────────────────────────────────────────
 
 def init_auth_table():
-    """No-op — table exists in Supabase Postgres."""
-    print("[Auth] Users table initialized ✓")
+    """Create token_blocklist table if not exists (idempotent)."""
+    try:
+        with get_conn("default") as conn:
+            conn.execute("""
+                CREATE TABLE IF NOT EXISTS token_blocklist (
+                    jti         TEXT PRIMARY KEY,
+                    firm_id     TEXT NOT NULL DEFAULT 'default',
+                    user_id     INTEGER,
+                    blocked_at  TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+                    expires_at  TIMESTAMPTZ
+                )
+            """)
+        print("[Auth] Users + token_blocklist tables initialized ✓")
+    except Exception as e:
+        print(f"[Auth] Table init skipped (non-fatal): {e}")
 
 
 # ── Password helpers ───────────────────────────────────────────────────────────
@@ -212,6 +225,10 @@ def decode_token(token: str) -> dict:
         raise HTTPException(401, "Token has expired")
     except jwt.InvalidTokenError as e:
         raise HTTPException(401, f"Invalid token: {e}")
+    except Exception as e:
+        import logging as _log
+        _log.warning(f"[Auth] Blocklist check failed, failing open: {e}")
+        return payload
 
 
 def get_current_user(credentials: HTTPAuthorizationCredentials = Depends(bearer)) -> dict:
