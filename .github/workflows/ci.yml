@@ -100,7 +100,7 @@ jobs:
 
       - name: Run AI smoke tests
         run: |
-          python -m pytest tests/test_ai_smoke.py -v --tb=short || (echo "=== SERVER LOG ==="; cat /tmp/uvicorn.log; exit 1)
+          python -m pytest tests/test_ai_smoke.py -v --tb=short
 
       - name: Stop server
         if: always()
