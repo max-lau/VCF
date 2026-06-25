@@ -12,6 +12,7 @@ from backend.demo1.interrogation_export import router as interrogation_export_ro
 from backend.demo1.audit_trail import AuditMiddleware, init_audit_table, router as audit_router
 from backend.demo1.rate_limit import check_rate_limit
 from backend.demo1.observability.tracer import trace_claude_call
+from backend.demo1.mlops.tracker import log_inference as _mlflow_log
 from backend.demo1.pii import redact_text as _pii_redact, redaction_summary as _pii_summary
 from backend.demo1.risk_scorer import router as risk_router
 from backend.demo1.document_comparison import router as comparison_router
@@ -378,7 +379,8 @@ def claude_with_retry(func, *args, max_retries=3, firm_id: str = "default", **kw
     # Route through Langfuse tracer when func is client.messages.create
     # and all required kwargs (model, messages, max_tokens) are present
     _can_trace = (
-        func is client.messages.create
+        getattr(func, "__name__", "") == "create"
+        and "messages" in str(type(getattr(func, "__self__", None)))
         and "model" in kwargs
         and "messages" in kwargs
         and "max_tokens" in kwargs
@@ -386,6 +388,8 @@ def claude_with_retry(func, *args, max_retries=3, firm_id: str = "default", **kw
     for attempt in range(max_retries):
         try:
             if _can_trace:
+                import time as _time
+                _t0 = _time.perf_counter()
                 try:
                     response, _trace_id = trace_claude_call(
                         client=client,
@@ -393,11 +397,27 @@ def claude_with_retry(func, *args, max_retries=3, firm_id: str = "default", **kw
                         firm_id=firm_id,
                         **kwargs,
                     )
-                    return response
                 except Exception as _trace_err:
                     import logging as _log
                     _log.warning(f"[Tracer] Langfuse trace failed, falling back to direct call: {_trace_err}")
-                    return func(*args, **kwargs)
+                    response = func(*args, **kwargs)
+                _latency_ms = (_time.perf_counter() - _t0) * 1000
+                # Log to MLflow — fire and forget, never block the response
+                try:
+                    _mlflow_log(
+                        experiment="paraiq_claude_calls",
+                        endpoint=kwargs.get("_endpoint", "unknown"),
+                        model=kwargs.get("model", "unknown"),
+                        prompt_tokens=response.usage.input_tokens,
+                        completion_tokens=response.usage.output_tokens,
+                        latency_ms=_latency_ms,
+                        firm_id=firm_id,
+                        status="success",
+                    )
+                except Exception as _mf_err:
+                    import logging as _log
+                    _log.debug(f"[MLflow] Log failed (non-fatal): {_mf_err}")
+                return response
             else:
                 return func(*args, **kwargs)
         except anthropic.RateLimitError:
