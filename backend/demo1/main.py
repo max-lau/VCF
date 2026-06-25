@@ -386,13 +386,18 @@ def claude_with_retry(func, *args, max_retries=3, firm_id: str = "default", **kw
     for attempt in range(max_retries):
         try:
             if _can_trace:
-                response, _trace_id = trace_claude_call(
-                    client=client,
-                    name=f"paraiq/{firm_id}",
-                    firm_id=firm_id,
-                    **kwargs,
-                )
-                return response
+                try:
+                    response, _trace_id = trace_claude_call(
+                        client=client,
+                        name=f"paraiq/{firm_id}",
+                        firm_id=firm_id,
+                        **kwargs,
+                    )
+                    return response
+                except Exception as _trace_err:
+                    import logging as _log
+                    _log.warning(f"[Tracer] Langfuse trace failed, falling back to direct call: {_trace_err}")
+                    return func(*args, **kwargs)
             else:
                 return func(*args, **kwargs)
         except anthropic.RateLimitError:
