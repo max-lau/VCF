@@ -375,6 +375,12 @@ def start_scheduler(app):
         run_all_firms_brief,
         'cron', hour=8, minute=0, id='morning_brief', replace_existing=True,
     )
+    # Drift monitor — check Claude response quality every hour
+    from backend.demo1.mlops.drift_monitor import check_drift, log_drift_check
+    scheduler.add_job(
+        lambda: log_drift_check(check_drift()),
+        "interval", hours=1, id="drift_monitor", replace_existing=True,
+    )
     scheduler.start()
     log.info("[RiskWatcher] Scheduler started — running every 30 minutes")
     return scheduler
