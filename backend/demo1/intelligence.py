@@ -22,8 +22,15 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
-# Claude client — imported from main to avoid creating a separate Anthropic instance
-from backend.demo1.main import client as _client
+# Claude client — lazily imported from main at call time to avoid circular import
+_client = None
+
+def _get_client():
+    global _client
+    if _client is None:
+        from backend.demo1.main import client as _c
+        _client = _c
+    return _client
 
 
 def _get_db(firm_id="default"):
@@ -118,7 +125,7 @@ def _detect_contradictions(doc_a: dict, doc_b: dict) -> dict:
     )
     try:
         msg, _tid = trace_claude_call(
-            client=_client,
+            client=_get_client(),
             name="contradiction_detection",
             model="claude-haiku-4-5-20251001",
             max_tokens=900,
@@ -261,7 +268,7 @@ def generate_case_brief(case_id: int) -> dict:
     import time as _time
     _t0 = _time.time()
     msg, _tid = trace_claude_call(
-        client=_client,
+        client=_get_client(),
         name=f"matter_intelligence_{variant.value}",
         model="claude-sonnet-4-6",
         max_tokens=2000,

@@ -30,8 +30,8 @@ def build_brief_prompt(variant: PromptVariant, case: dict, doc_context: str,
     schema = (
         "RESPOND ONLY WITH VALID JSON. No markdown, no backticks.\n\n"
         "{\n"
-        f'  "case_number": "{case['case_number']}",\n'
-        f'  "matter": "{case['client_name']}",\n'
+        f"  \"case_number\": \"{case['case_number']}\",\n"
+        f"  \"matter\": \"{case['client_name']}\",\n"
         f'  "generated_at": "{today_str}",\n'
         f'  "risk_score": {avg_risk},\n'
         '  "sections": {\n'
