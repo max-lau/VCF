@@ -2,6 +2,8 @@ from backend.demo1.ocr_intake import init_intake_table, router as intake_router
 from backend.demo1.voice_router import router as voice_router
 from backend.demo1.voice_shortcuts_router import router as voice_shortcuts_router
 from backend.demo1.fine_tune import init_model_table, router as model_router
+from backend.demo1.mlops.pytorch_trainer import train as pytorch_train
+from backend.demo1.mlops.lora_trainer import train as lora_train
 from backend.demo1.slack_teams import init_notify_table, router as notify_router
 from backend.demo1.auth import init_auth_table, router as auth_router
 from backend.demo1.custom_entities import init_custom_entity_table, router as custom_entities_router
@@ -200,6 +202,61 @@ async def startup_event():
 
 app.include_router(intake_router, prefix="/intake", tags=["OCR Intake"])
 app.include_router(model_router, prefix="/model", tags=["Fine-Tuned Model"])
+
+
+# ── MLOps Module 2+3: PyTorch + LoRA training endpoints ───────────────────────
+
+class TrainMLOpsBody(BaseModel):
+    epochs:       int   = 5
+    batch_size:   int   = 8
+    lr:           float = 2e-5
+    seed:         int   = 42
+
+class LoRATrainBody(BaseModel):
+    epochs:       int   = 5
+    batch_size:   int   = 8
+    lr:           float = 3e-4
+    lora_r:       int   = 8
+    lora_alpha:   int   = 32
+    lora_dropout: float = 0.1
+    seed:         int   = 42
+
+@app.post("/model/pytorch-train", tags=["Fine-Tuned Model"])
+def start_pytorch_training(body: TrainMLOpsBody, background_tasks: BackgroundTasks):
+    """Module 2: Raw PyTorch training loop with per-epoch MLflow tracking."""
+    background_tasks.add_task(
+        pytorch_train,
+        epochs=body.epochs,
+        batch_size=body.batch_size,
+        lr=body.lr,
+        seed=body.seed,
+    )
+    return {
+        "success": True,
+        "message": f"PyTorch training started — {body.epochs} epochs, lr={body.lr}",
+        "mlflow_experiment": "paraiq_pytorch_training",
+        "model_output": "models/legal_classifier_pytorch/",
+    }
+
+@app.post("/model/lora-train", tags=["Fine-Tuned Model"])
+def start_lora_training(body: LoRATrainBody, background_tasks: BackgroundTasks):
+    """Module 3: LoRA/PEFT fine-tuning — trains only ~0.5% of parameters."""
+    background_tasks.add_task(
+        lora_train,
+        epochs=body.epochs,
+        batch_size=body.batch_size,
+        lr=body.lr,
+        lora_r=body.lora_r,
+        lora_alpha=body.lora_alpha,
+        lora_dropout=body.lora_dropout,
+        seed=body.seed,
+    )
+    return {
+        "success": True,
+        "message": f"LoRA training started — r={body.lora_r}, alpha={body.lora_alpha}, {body.epochs} epochs",
+        "mlflow_experiment": "paraiq_lora_training",
+        "model_output": "models/legal_classifier_lora/",
+    }
 app.include_router(notify_router, prefix="/notify", tags=["Slack & Teams"])
 app.include_router(auth_router, prefix="/auth", tags=["Authentication"])
 app.include_router(custom_entities_router, prefix="/entities/custom", tags=["Custom Entities"])
