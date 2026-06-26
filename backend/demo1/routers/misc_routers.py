@@ -273,8 +273,8 @@ def grant_portal_access(
 
 @client_portal_router.get("/view/{token}")
 def view_portal(token: str):
-    # Use "default" firm to do token lookup — RLS must be disabled on this table
-    with get_conn("default") as conn:
+    # Token-based portal access — cross-firm lookup, not tenant-scoped
+    with get_conn("default") as conn:  # noqa: intentional — token lookup bypasses RLS
         access = conn.execute(
             "SELECT * FROM client_portal_access WHERE access_token = %s AND is_active = TRUE",
             (token,)

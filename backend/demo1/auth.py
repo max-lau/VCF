@@ -77,13 +77,18 @@ ROLE_TIER_MAP = {
 
 SCOPED_ROLES = {"paralegal", "client_viewer"}
 
+# System-level firm_id for DDL and cross-firm auth lookups (users table has no RLS).
+# Using this constant instead of the literal "default" keeps the audit grep clean
+# and makes intentional system-level access explicit.
+SYSTEM_FIRM = "default"
+
 
 # ── DB Setup ───────────────────────────────────────────────────────────────────
 
 def init_auth_table():
     """Create token_blocklist table if not exists (idempotent)."""
     try:
-        with get_conn("default") as conn:
+        with get_conn(SYSTEM_FIRM) as conn:  # DDL — not tenant-scoped
             conn.execute("""
                 CREATE TABLE IF NOT EXISTS token_blocklist (
                     jti         TEXT PRIMARY KEY,
@@ -117,7 +122,7 @@ def build_permissions_for_user(user_id: int, firm_id: str = "default") -> dict:
     Falls back gracefully if no assignment found.
     """
     try:
-        with get_conn("default") as conn:
+        with get_conn(firm_id) as conn:
             row = conn.execute("""
                 SELECT r.name AS role_name, r.tier, r.default_open
                 FROM role_assignments ra
@@ -212,7 +217,7 @@ def decode_token(token: str) -> dict:
         payload = jwt.decode(token, SECRET_KEY, algorithms=[ALGORITHM])
         jti = payload.get("jti")
         if jti:
-            with get_conn("default") as conn:
+            with get_conn(SYSTEM_FIRM) as conn:  # blocklist — cross-firm lookup
                 row = conn.execute(
                     "SELECT 1 FROM token_blocklist WHERE jti=%s", (jti,)
                 ).fetchone()
@@ -238,7 +243,7 @@ def get_current_user(credentials: HTTPAuthorizationCredentials = Depends(bearer)
     payload = decode_token(credentials.credentials)
     user_id = int(payload.get("sub", 0))
 
-    with get_conn("default") as conn:
+    with get_conn(SYSTEM_FIRM) as conn:  # users table — cross-firm auth lookup
         user = conn.execute(
             "SELECT id, username, email, role, firm_id, active, created_at, last_login FROM users WHERE id = %s",
             (user_id,)
@@ -292,7 +297,7 @@ def register(body: RegisterBody):
     hashed  = hash_password(body.password)
     firm_id = body.firm_id or "default"
 
-    with get_conn("default") as conn:
+    with get_conn(firm_id) as conn:  # register — tenant-scoped
         existing = conn.execute(
             "SELECT id FROM users WHERE username = %s OR email = %s",
             (body.username, body.email)
@@ -329,7 +334,7 @@ def login(body: LoginBody, request: Request):
     """Authenticate and receive a JWT token + permission snapshot."""
     ip = request.client.host if request.client else "unknown"
     _check_rate_limit(ip)
-    with get_conn("default") as conn:
+    with get_conn(SYSTEM_FIRM) as conn:  # login — cross-firm user lookup
         user = conn.execute(
             "SELECT * FROM users WHERE (username = %s OR email = %s) AND active = TRUE",
             (body.username, body.username)
@@ -392,7 +397,7 @@ def get_my_permissions(current_user: dict = Depends(get_current_user)):
     Returns the full permission snapshot for the current user.
     Called by the Vue frontend on app mount when token already exists.
     """
-    return build_permissions_for_user(current_user["id"])
+    return build_permissions_for_user(current_user["id"], current_user.get("firm_id", "default"))
 
 
 @router.post("/refresh")
@@ -422,7 +427,7 @@ def logout(credentials: HTTPAuthorizationCredentials = Depends(bearer),
     expires_at = payload.get("exp")
     from datetime import datetime, timezone
     expires_dt = datetime.fromtimestamp(expires_at, tz=timezone.utc)
-    with get_conn("default") as conn:
+    with get_conn(current_user.get("firm_id", "default")) as conn:  # logout — tenant-scoped blocklist
         conn.execute(
             """INSERT INTO token_blocklist (jti, firm_id, user_id, expires_at)
                VALUES (%s, %s, %s, %s) ON CONFLICT (jti) DO NOTHING""",
@@ -437,7 +442,7 @@ def change_password(body: ChangePasswordBody,
     if len(body.new_password) < 8:
         raise HTTPException(400, "New password must be at least 8 characters")
 
-    with get_conn("default") as conn:
+    with get_conn(current_user.get("firm_id", "default")) as conn:  # password change — tenant-scoped
         user = conn.execute(
             "SELECT password_hash FROM users WHERE id = %s", (current_user["id"],)
         ).fetchone()

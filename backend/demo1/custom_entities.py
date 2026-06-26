@@ -2,11 +2,12 @@ import os
 import re
 import json
 from datetime import datetime, timezone
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, Depends
 from pydantic import BaseModel
 from typing import Optional
 
 from backend.demo1.pg import get_conn
+from backend.demo1.auth import get_current_firm_id
 
 router = APIRouter()
 
@@ -37,8 +38,8 @@ def init_custom_entity_table():
     print("[CustomEntities] Table initialized OK")
 
 
-def extract_custom_entities(text: str, types: list = None) -> list:
-    with get_conn("default") as conn:
+def extract_custom_entities(text: str, types: list = None, firm_id: str = "default") -> list:
+    with get_conn(firm_id) as conn:
         query  = "SELECT * FROM custom_entity_types WHERE active=TRUE"
         params = []
         if types:
@@ -83,10 +84,10 @@ class ExtractBody(BaseModel):
 
 
 @router.post("/extract")
-def extract_entities(body: ExtractBody):
+def extract_entities(body: ExtractBody, firm_id: str = Depends(get_current_firm_id)):
     if not body.text.strip():
         raise HTTPException(400, "Text is required")
-    entities = extract_custom_entities(body.text, types=body.types)
+    entities = extract_custom_entities(body.text, types=body.types, firm_id=firm_id)
     by_type  = {}
     for e in entities:
         by_type.setdefault(e["type"], []).append(e)
@@ -96,8 +97,8 @@ def extract_entities(body: ExtractBody):
 
 
 @router.get("/types")
-def list_types():
-    with get_conn("default") as conn:
+def list_types(firm_id: str = Depends(get_current_firm_id)):
+    with get_conn(firm_id) as conn:
         rows = conn.execute(
             "SELECT * FROM custom_entity_types WHERE active=TRUE ORDER BY builtin DESC, type ASC"
         ).fetchall()
@@ -116,12 +117,12 @@ def list_types():
 
 
 @router.post("/types")
-def add_entity_type(body: AddEntityType):
+def add_entity_type(body: AddEntityType, firm_id: str = Depends(get_current_firm_id)):
     try:
         re.compile(body.pattern)
     except re.error as e:
         raise HTTPException(400, f"Invalid regex pattern: {e}")
-    with get_conn("default") as conn:
+    with get_conn(firm_id) as conn:
         cur = conn.execute("""
             INSERT INTO custom_entity_types
               (type, label, pattern, examples, builtin, active, created_at)
@@ -134,8 +135,8 @@ def add_entity_type(body: AddEntityType):
 
 
 @router.delete("/types/{pattern_id}")
-def delete_entity_type(pattern_id: int):
-    with get_conn("default") as conn:
+def delete_entity_type(pattern_id: int, firm_id: str = Depends(get_current_firm_id)):
+    with get_conn(firm_id) as conn:
         row = conn.execute(
             "SELECT builtin FROM custom_entity_types WHERE id=%s", (pattern_id,)
         ).fetchone()

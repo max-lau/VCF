@@ -52,7 +52,7 @@ def enqueue(firm_id: str, item_type: str, title: str,
                 context_json={...}, recommended='assign_to_thornton', priority=2)
     """
     try:
-        with get_conn("default") as conn:
+        with get_conn(firm_id) as conn:
             conn.execute("""
                 INSERT INTO approval_queue
                   (firm_id, item_type, title, context_json, recommended,

@@ -22,7 +22,7 @@ log    = logging.getLogger(__name__)
 def get_active_firms() -> list:
     """Fetch all active firm_ids from the database."""
     try:
-        with get_conn("default") as conn:
+        with get_conn("default") as conn:  # cross-firm query — system level
             rows = conn.execute(
                 "SELECT DISTINCT firm_id FROM users WHERE active=TRUE AND firm_id IS NOT NULL"
             ).fetchall()
@@ -55,7 +55,7 @@ def generate_morning_brief(firm_id: str) -> dict:
         "unconfirmed_docketing": [],
     }
 
-    with get_conn("default") as conn:
+    with get_conn(firm_id) as conn:
 
         # 1. Deadlines in next 72h
         try:
@@ -212,7 +212,7 @@ def generate_morning_brief(firm_id: str) -> dict:
 
     # Save to DB (upsert by firm+date)
     try:
-        with get_conn("default") as conn:
+        with get_conn(firm_id) as conn:
             conn.execute("""
                 INSERT INTO morning_briefs (firm_id, brief_date, brief_json, summary_text, delivered)
                 VALUES (%s, %s, %s, %s, false)

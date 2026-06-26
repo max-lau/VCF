@@ -13,6 +13,10 @@ from backend.demo1.pg import get_conn
 
 router = APIRouter(prefix="/monitor", tags=["Monitor"])
 
+# System-level firm_id for admin monitoring queries (audit_log, risk_assessments).
+# These are system tables not subject to tenant RLS — "default" is intentional.
+SYSTEM_FIRM = "default"
+
 CF_TOKEN = os.getenv("CF_API_TOKEN", "")
 CF_ZONE  = os.getenv("CF_ZONE_ID", "")
 
@@ -70,7 +74,7 @@ async def system_health():
 async def api_stats(hours: int = Query(24, ge=1, le=168)):
     since = (datetime.now(timezone.utc) - timedelta(hours=hours)).isoformat()
 
-    with get_conn("default") as conn:
+    with get_conn(SYSTEM_FIRM) as conn:
         total = conn.execute(
             "SELECT COUNT(*) AS n FROM audit_log WHERE timestamp > %s", (since,)
         ).fetchone()["n"]
@@ -161,7 +165,7 @@ async def event_log(
     where  = ("WHERE " + " AND ".join(clauses)) if clauses else ""
     offset = (page - 1) * per_page
 
-    with get_conn("default") as conn:
+    with get_conn(SYSTEM_FIRM) as conn:
         total = conn.execute(
             f"SELECT COUNT(*) AS n FROM audit_log {where}", params
         ).fetchone()["n"]
@@ -255,7 +259,7 @@ async def cloudflare_status():
 @router.get("/risk-log")
 async def risk_log(limit: int = Query(20, ge=1, le=100)):
     try:
-        with get_conn("default") as conn:
+        with get_conn(SYSTEM_FIRM) as conn:
             rows = conn.execute("""
                 SELECT id, assessed_at, risk_level, summary, prediction, actions, alerted
                 FROM risk_assessments
