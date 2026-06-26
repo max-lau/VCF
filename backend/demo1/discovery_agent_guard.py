@@ -18,7 +18,6 @@ resolves paths from discovery_files, then runs all 7 stages with hard guards.
 import asyncio
 import time
 import logging
-import sqlite3
 import os
 import httpx
 from dataclasses import dataclass, field
@@ -26,10 +25,11 @@ from typing import Optional
 from enum import Enum
 from pathlib import Path
 
+from backend.demo1.pg import get_conn
+
 logger = logging.getLogger("paraiq.discovery_agent")
 
 UPLOAD_DIR = Path(os.environ.get("DISCOVERY_UPLOAD_DIR", str(Path(__file__).parent.parent.parent / "uploads" / "discovery")))
-DB_PATH    = os.environ.get("PARAIQ_DB", str(Path(__file__).parent / "analyses.db"))
 API_KEY    = os.environ.get("PARAIQ_API_KEY", "")
 BASE_URL   = "http://localhost:5003"
 
@@ -261,14 +261,12 @@ class GuardedDiscoveryRunner:
         # Resolve file rows from DB
         if not file_ids:
             return self._result("no_files")
-
-        conn  = sqlite3.connect(DB_PATH)
-        conn.row_factory = sqlite3.Row
-        ph    = ",".join("?" * len(file_ids))
-        rows  = conn.execute(
-            f"SELECT * FROM discovery_files WHERE id IN ({ph})", file_ids
-        ).fetchall()
-        conn.close()
+        # Resolve file rows from DB
+        with get_conn(self.state.firm_id) as conn:
+            rows = conn.execute(
+                "SELECT * FROM discovery_files WHERE id = ANY(%s)",
+                (file_ids,),
+            ).fetchall()
 
         file_records = [dict(r) for r in rows]
 
@@ -407,13 +405,11 @@ class GuardedDiscoveryRunner:
                         firm_id=state.firm_id,
                     )
                     # Read verdict back from DB
-                    conn = sqlite3.connect(DB_PATH)
-                    conn.row_factory = sqlite3.Row
-                    row  = conn.execute(
-                        "SELECT privilege_flag, privilege_type, privilege_confidence, requires_review "
-                        "FROM discovery_files WHERE id=?", (file_id,)
-                    ).fetchone()
-                    conn.close()
+                    with get_conn(state.firm_id) as conn:
+                        row = conn.execute(
+                            "SELECT privilege_flag, privilege_type, privilege_confidence, requires_review "
+                            "FROM discovery_files WHERE id=%s", (file_id,)
+                        ).fetchone()
                     if row:
                         privilege_result = {
                             "is_privileged":  bool(row["privilege_flag"]),
@@ -471,11 +467,12 @@ class GuardedDiscoveryRunner:
                     if not guard.check_llm_call(estimated_input_tokens=250):
                         logger.warning(f"[{state.case_id}] Enrichment skipped — LLM budget exhausted")
                     elif ocr_text:
-                        import anthropic as _anthropic
-                        _client = _anthropic.Anthropic()
-                        _resp = _client.messages.create(
+                        from backend.demo1.main import client, claude_with_retry
+                        _resp = claude_with_retry(
+                            client.messages.create,
                             model="claude-haiku-4-5-20251001",
                             max_tokens=120,
+                            firm_id=state.firm_id,
                             messages=[{
                                 "role": "user",
                                 "content": (
@@ -527,44 +524,42 @@ class GuardedDiscoveryRunner:
                 }
 
                 # Write to privilege_log table (existing privilege_log.py pattern)
-                conn = sqlite3.connect(DB_PATH)
-                conn.execute("""
-                    CREATE TABLE IF NOT EXISTS privilege_log (
-                        id              INTEGER PRIMARY KEY AUTOINCREMENT,
-                        case_id         TEXT,
-                        file_id         INTEGER,
-                        bates           TEXT,
-                        original_name   TEXT,
-                        is_privileged   INTEGER,
-                        privilege_type  TEXT,
-                        confidence      REAL,
-                        requires_review INTEGER,
-                        risk_score      REAL,
-                        risk_label      TEXT,
-                        ai_summary      TEXT,
-                        created_at      DATETIME DEFAULT CURRENT_TIMESTAMP
+                with get_conn(state.firm_id) as conn:
+                    conn.execute("""
+                        CREATE TABLE IF NOT EXISTS privilege_log (
+                            id              SERIAL PRIMARY KEY,
+                            case_id         TEXT,
+                            file_id         INTEGER,
+                            bates           TEXT,
+                            original_name   TEXT,
+                            is_privileged   INTEGER,
+                            privilege_type  TEXT,
+                            confidence      REAL,
+                            requires_review INTEGER,
+                            risk_score      REAL,
+                            risk_label      TEXT,
+                            ai_summary      TEXT,
+                            created_at      TIMESTAMPTZ DEFAULT NOW()
+                        )
+                    """)
+                    conn.execute("""
+                        INSERT INTO privilege_log
+                        (case_number, filename, privilege_type, basis, file_id, bates,
+                         is_privileged, confidence, requires_review, risk_score, risk_label, ai_summary)
+                        VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)
+                    """, (
+                        log_row["case_id"], log_row["original_name"],
+                        log_row["privilege_type"] or "none", "none",
+                        log_row["file_id"], log_row["bates"],
+                        int(log_row["is_privileged"]),
+                        log_row["confidence"],
+                        int(log_row["requires_review"] or 0),
+                        log_row["risk_score"], log_row["risk_label"], log_row["ai_summary"],
+                    ))
+                    # Update discovery_files status
+                    conn.execute(
+                        "UPDATE discovery_files SET status='processed' WHERE id=%s", (file_id,)
                     )
-                """)
-                conn.execute("""
-                    INSERT INTO privilege_log
-                    (case_number, filename, privilege_type, basis, file_id, bates,
-                     is_privileged, confidence, requires_review, risk_score, risk_label, ai_summary)
-                    VALUES (?,?,?,?,?,?,?,?,?,?,?,?)
-                """, (
-                    log_row["case_id"], log_row["original_name"],
-                    log_row["privilege_type"] or "none", "none",
-                    log_row["file_id"], log_row["bates"],
-                    int(log_row["is_privileged"]),
-                    log_row["confidence"],
-                    int(log_row["requires_review"] or 0),
-                    log_row["risk_score"], log_row["risk_label"], log_row["ai_summary"],
-                ))
-                # Update discovery_files status
-                conn.execute(
-                    "UPDATE discovery_files SET status='processed' WHERE id=?", (file_id,)
-                )
-                conn.commit()
-                conn.close()
 
                 state.privilege_log_rows.append(log_row)
                 guard.record_doc()
@@ -606,39 +601,37 @@ class GuardedDiscoveryRunner:
     def _persist_run_summary(self):
         try:
             s = self.state.to_summary()
-            conn = sqlite3.connect(DB_PATH)
-            conn.execute("""
-                CREATE TABLE IF NOT EXISTS discovery_runs (
-                    id              INTEGER PRIMARY KEY AUTOINCREMENT,
-                    case_id         TEXT,
-                    firm_id         TEXT,
-                    status          TEXT,
-                    docs_processed  INTEGER,
-                    flagged_docs    INTEGER,
-                    llm_calls       INTEGER,
-                    estimated_cost  REAL,
-                    elapsed_seconds REAL,
-                    zip_path        TEXT,
-                    aborted         INTEGER,
-                    abort_reason    TEXT,
-                    created_at      DATETIME DEFAULT CURRENT_TIMESTAMP
-                )
-            """)
-            conn.execute("""
-                INSERT INTO discovery_runs
-                (case_id, firm_id, status, docs_processed, flagged_docs,
-                 llm_calls, estimated_cost, elapsed_seconds, zip_path, aborted, abort_reason)
-                VALUES (?,?,?,?,?,?,?,?,?,?,?)
-            """, (
-                s["case_id"], s["firm_id"],
-                "aborted" if s["aborted"] else "completed",
-                s["docs_processed"], s["flagged_docs"],
-                s["llm_calls"], s["estimated_cost_usd"],
-                s["elapsed_seconds"], s["zip_path"],
-                int(s["aborted"]), s["abort_reason"],
-            ))
-            conn.commit()
-            conn.close()
+            with get_conn(self.state.firm_id) as conn:
+                conn.execute("""
+                    CREATE TABLE IF NOT EXISTS discovery_runs (
+                        id              SERIAL PRIMARY KEY,
+                        case_id         TEXT,
+                        firm_id         TEXT,
+                        status          TEXT,
+                        docs_processed  INTEGER,
+                        flagged_docs    INTEGER,
+                        llm_calls       INTEGER,
+                        estimated_cost  REAL,
+                        elapsed_seconds REAL,
+                        zip_path        TEXT,
+                        aborted         INTEGER,
+                        abort_reason    TEXT,
+                        created_at      TIMESTAMPTZ DEFAULT NOW()
+                    )
+                """)
+                conn.execute("""
+                    INSERT INTO discovery_runs
+                    (case_id, firm_id, status, docs_processed, flagged_docs,
+                     llm_calls, estimated_cost, elapsed_seconds, zip_path, aborted, abort_reason)
+                    VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)
+                """, (
+                    s["case_id"], s["firm_id"],
+                    "aborted" if s["aborted"] else "completed",
+                    s["docs_processed"], s["flagged_docs"],
+                    s["llm_calls"], s["estimated_cost_usd"],
+                    s["elapsed_seconds"], s["zip_path"],
+                    int(s["aborted"]), s["abort_reason"],
+                ))
         except Exception as e:
             logger.warning(f"[{self.state.case_id}] Persist summary failed: {e}")
 
