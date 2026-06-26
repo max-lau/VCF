@@ -36,7 +36,8 @@ def get_all_entities(firm_id: str = "default") -> List[Dict]:
                     "analysis_id":   row["id"],
                     "text":          ent.get("text", ""),
                     "type":          ent.get("type", "OTHER"),
-                    "doc_preview":   row["text"][:100],
+                    "doc_preview":   row["text"][:300],   # Run 3: extended preview
+                    "full_text":     row["text"],           # Run 3: full text for retrieval
                     "doc_sentiment": row["sentiment"],
                     "created_at":    row["created_at"]
                 })

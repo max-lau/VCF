@@ -39,14 +39,17 @@ def migrate(dry_run: bool, backend: str):
     seeded = 0
     for row in rows:
         doc_id = f"analysis_{row['id']}"
-        text = (row['text'] or '')[:500]
-        if not text.strip():
+        text = (row['text'] or '').strip()
+        if not text:
             continue
-        embedding = embedder.encode([text], convert_to_numpy=True)[0].tolist()
+        # Embed on first 500 chars (model context limit) but store full text
+        embed_text = text[:500]
+        embedding = embedder.encode([embed_text], convert_to_numpy=True)[0].tolist()
         metadata = {
             "analysis_id": str(row['id']),
             "sentiment":   str(row['sentiment'] or ''),
-            "preview":     text[:300],
+            "preview":     text[:300],        # kept for backward compat
+            "full_text":   text,              # Run 3: full document for retrieval
             "created_at":  str(row['created_at'] or '')
         }
         if dry_run:

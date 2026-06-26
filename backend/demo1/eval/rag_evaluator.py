@@ -36,7 +36,8 @@ def retrieve(question: str, top_k: int = 5):
     results = store.query(vec, top_k=top_k)
     contexts = []
     for doc_id, distance, meta in results:
-        text = meta.get("preview", "")
+        # Run 3: prefer full_text; fall back to preview for backward compat
+        text = meta.get("full_text") or meta.get("preview", "")
         if text:
             contexts.append(text)
     return contexts

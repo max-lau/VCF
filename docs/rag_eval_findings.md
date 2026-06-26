@@ -56,10 +56,50 @@ Faithfulness improved by +0.048 as predicted. Expanding preview from 100 to 300
 characters gave Claude more context on short documents, reducing hallucination.
 Small drops in relevancy and recall are within noise range at n=15.
 
-## What to Try Next (Run 3)
-1. Increase metadata preview from 100 → 300 chars, re-seed, re-run eval
-2. Expected improvement: faithfulness on short docs should rise from 0.50 → 0.75+
-3. Store full document text in metadata (not just preview) for complete retrieval
+## Run 3 — Full Document Text in ChromaDB Metadata (June 2026)
+
+### Change
+
+Stored the complete document text in ChromaDB metadata under the key `full_text`
+(no truncation), alongside the existing `preview` field (kept for backward compat).
+The RAG evaluator's retrieval step now reads `full_text` first, falling back to
+`preview` for older indexed documents.
+
+Three files changed:
+- `scripts/seed_vector_store.py`: metadata now includes `full_text: text` (full string)
+- `backend/demo1/entity_linker.py`: seeding block extended `doc_preview` to 300 chars
+  and added `full_text` field
+- `backend/demo1/eval/rag_evaluator.py`: retrieval reads `meta.get("full_text") or meta.get("preview")`
+
+After re-seeding on the VPS, re-run the eval with:
+```bash
+cd /root/nlp-portfolio
+.venv/bin/python3 scripts/eval_report.py
+```
+
+### Expected Impact
+
+The core Run 2 finding was that short 1-sentence documents (e.g., "The defendant
+was convicted of wire fraud.") had faithfulness scores of 0.50 because the 300-char
+preview already captured the full sentence — yet Claude still hallucinated beyond it.
+Storing the full text means:
+
+1. Claude's prompt now contains the complete document, not a truncated fragment
+2. For short docs, context is the same — but for multi-sentence documents the
+   additional content gives Claude more grounding, further reducing hallucination
+3. Context precision should remain high (retrieval is unchanged); faithfulness
+   should improve another +0.02–0.05 on the 15-item eval set
+
+### Predicted Run 3 Results
+
+| Metric            | Run 1 | Run 2 | Run 3 (predicted) |
+|-------------------|-------|-------|-------------------|
+| Faithfulness      | 0.883 | 0.931 | 0.940–0.960       |
+| Answer Relevancy  | 0.814 | 0.761 | 0.770–0.790       |
+| Context Precision | 0.961 | 0.958 | 0.955–0.965       |
+| Context Recall    | 1.000 | 0.933 | 0.940–0.960       |
+
+*Actual results require re-seeding ChromaDB on VPS and running eval_report.py.*
 
 ## Infrastructure
 - Eval dataset: `backend/demo1/eval/dataset.py` (15 Q&A pairs)
