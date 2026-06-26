@@ -29,7 +29,7 @@ def get_active_firms() -> list:
             return [r["firm_id"] for r in rows] if rows else ["default"]
     except Exception as e:
         log.warning(f"[MorningBrief] Could not fetch firms: {e}")
-        return ["default", "firm_abc", "meridian_legal"]
+        return ["default"]  # safe fallback — only serve super-admin firm on DB error
 
 
 # ── Generator (called by scheduler + manually) ────────────────────────────────

@@ -17,7 +17,7 @@ import psutil
 from anthropic import Anthropic
 from backend.demo1.hermes_kanban import run_hermes_kanban
 from backend.demo1.notifications_router import generate_notifications
-from backend.demo1.routers.morning_brief_router import run_all_firms_brief
+from backend.demo1.routers.morning_brief_router import run_all_firms_brief, get_active_firms as _get_active_firms
 
 log = logging.getLogger("risk_watcher")
 
@@ -368,7 +368,7 @@ def start_scheduler(app):
         args=[os.getenv("HERMES_SERVICE_JWT", "")]
     )
     scheduler.add_job(
-        lambda: [generate_notifications(firm) for firm in ["default", "firm_abc", "meridian_legal"]],
+        lambda: [generate_notifications(firm) for firm in _get_active_firms()],
         "interval", minutes=30, id="notifications_gen", replace_existing=True,
     )
     scheduler.add_job(
