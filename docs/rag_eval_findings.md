@@ -90,16 +90,47 @@ Storing the full text means:
 3. Context precision should remain high (retrieval is unchanged); faithfulness
    should improve another +0.02–0.05 on the 15-item eval set
 
-### Predicted Run 3 Results
+### Run 3 Actual Results (2026-06-26)
 
-| Metric            | Run 1 | Run 2 | Run 3 (predicted) |
-|-------------------|-------|-------|-------------------|
-| Faithfulness      | 0.883 | 0.931 | 0.940–0.960       |
-| Answer Relevancy  | 0.814 | 0.761 | 0.770–0.790       |
-| Context Precision | 0.961 | 0.958 | 0.955–0.965       |
-| Context Recall    | 1.000 | 0.933 | 0.940–0.960       |
+| Metric            | Run 1 | Run 2 | Run 3 | Δ Run2→3 |
+|-------------------|-------|-------|-------|----------|
+| Faithfulness      | 0.883 | 0.931 | 0.879 | -0.052   |
+| Answer Relevancy  | 0.814 | 0.761 | 0.762 | +0.001   |
+| Context Precision | 0.961 | 0.958 | 0.973 | +0.015   |
+| Context Recall    | 1.000 | 0.933 | 0.933 | +0.000   |
 
-*Actual results require re-seeding ChromaDB on VPS and running eval_report.py.*
+### Run 3 Analysis
+
+**Faithfulness regressed (-0.052).** Counter to prediction. The weakest items:
+
+| Question (truncated)                              | Faithfulness | Precision |
+|---------------------------------------------------|:------------:|:---------:|
+| What court issued the indictment (S. District)?   | 0.33         | 1.00      |
+| What did the court do with all charges?           | 0.50         | 1.00      |
+| What type of document is confidential work product? | 0.60       | 1.00      |
+
+Precision is 1.00 on all three — retrieval is finding the right documents.
+The faithfulness drop means Claude is hallucinating *beyond* the retrieved context
+even when given full text. This is a generation problem, not a retrieval problem.
+
+**Context Precision improved (+0.015, best across all runs at 0.973)** — storing
+full text gives the retriever richer signal to score chunk relevance.
+
+**Root cause of faithfulness regression:** Providing full document text (sometimes
+several paragraphs) gives Claude more surface area to stray from. With short
+preview text, Claude was constrained to a small window. With full text it has
+more content to misinterpret or extend beyond.
+
+### What to Try Next (Run 4)
+
+The generation prompt needs tightening, not the retrieval:
+
+1. **Stricter system prompt** — add "Answer in one sentence. Quote the exact phrase
+   from context. Do not infer or extend." to the RAG generation prompt
+2. **Reduce max_tokens** — currently 300; try 150 to force concise answers
+3. **Hybrid retrieval** — combine full_text semantic search with BM25 keyword
+   search; short factual questions (court names, statute numbers) are better
+   served by exact keyword match than embedding similarity
 
 ## Infrastructure
 - Eval dataset: `backend/demo1/eval/dataset.py` (15 Q&A pairs)
