@@ -284,7 +284,7 @@ def run_training(epochs: int = 3):
 
         # Log to DB
         completed = datetime.now(timezone.utc).isoformat()
-        with get_conn("default") as conn:
+        with get_conn("default") as conn:  # noqa: intentional — model training logs to system-level model_runs table
             conn.execute("""
                 INSERT INTO model_runs
                   (started_at, completed_at, status, accuracy, f1_score,
@@ -436,8 +436,7 @@ def model_info():
     with open(meta_path) as f:
         meta = json.load(f)
 
-    # Latest DB run
-    with get_conn("default") as conn:
+    with get_conn("default") as conn:  # noqa: intentional — model status query, system-level table
         run = conn.execute(
             "SELECT * FROM model_runs ORDER BY id DESC LIMIT 1"
         ).fetchone()

@@ -358,7 +358,7 @@ def _scan_text_for_dates(text: str) -> list:
 def get_deadline_radar() -> dict:
     """Scan all open cases for upcoming dates extracted from documents."""
     try:
-        with _pg_get_conn("default") as conn:
+        with _pg_get_conn("default") as conn:  # noqa: intentional — deadline radar scans all firms' cases
             cases = conn.execute("""
                 SELECT id, case_number, client_name, description
                 FROM cases WHERE status='open' AND deleted=FALSE
@@ -371,7 +371,7 @@ def get_deadline_radar() -> dict:
             case_id, case_number, client_name, matter = case[0], case[1], case[2], case[3]
 
             # Pull dates extracted from documents
-            with _pg_get_conn("default") as conn2:
+            with _pg_get_conn("default") as conn2:  # noqa: intentional — deadline radar, cross-firm case scan
                 docs = conn2.execute("""
                     SELECT doc_text FROM case_documents
                     WHERE case_id=%s AND doc_text IS NOT NULL AND doc_text!=''

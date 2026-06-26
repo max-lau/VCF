@@ -21,7 +21,7 @@ def _now():
 
 def init_enclave_tables():
     """Call this once from the cloud app's startup (alongside init_db())."""
-    with get_conn("default") as conn:
+    with get_conn("default") as conn:  # noqa: intentional — DDL runs at startup, cross-firm
         conn.execute("""
             CREATE TABLE IF NOT EXISTS client_enclaves (
                 client_id    TEXT PRIMARY KEY,

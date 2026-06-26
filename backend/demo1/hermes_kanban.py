@@ -57,7 +57,7 @@ CONDITION_MAP = {
 }
 
 def check_case_for_advances(case_id: int, firm_id: str, jwt_token: str):
-    with get_conn("default") as conn:
+    with get_conn(firm_id) as conn:
         for (from_col, condition_fn_name, to_col, confidence, label) in ADVANCE_RULES:
             condition_fn = CONDITION_MAP[condition_fn_name]
             cards = conn.execute(
@@ -82,7 +82,7 @@ def check_case_for_advances(case_id: int, firm_id: str, jwt_token: str):
                     log.warning("Hermes signal failed for card %d: %s", card_row["id"], e)
 
 async def run_hermes_kanban(jwt_token: str):
-    with get_conn("default") as conn:
+    with get_conn("default") as conn:  # noqa: intentional — background task scans all firms' kanban boards
         rows = conn.execute(
             "SELECT DISTINCT case_id, firm_id FROM kanban_cards WHERE column_id NOT IN ('closed') LIMIT 200"
         ).fetchall()

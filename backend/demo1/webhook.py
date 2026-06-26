@@ -2,11 +2,12 @@ import os
 import httpx
 import asyncio
 from datetime import datetime, timezone
-from fastapi import APIRouter, HTTPException, BackgroundTasks
+from fastapi import APIRouter, HTTPException, BackgroundTasks, Depends
 from pydantic import BaseModel
 from typing import Optional
 
 from backend.demo1.pg import get_conn
+from backend.demo1.auth import get_current_firm_id
 
 router = APIRouter()
 
@@ -36,7 +37,7 @@ class FireEventBody(BaseModel):
     payload: dict
 
 
-async def deliver_webhook(subscription_id: int, event: str, url: str, payload: dict):
+async def deliver_webhook(subscription_id: int, event: str, url: str, payload: dict, firm_id: str = "default"):
     fired_at    = datetime.now(timezone.utc).isoformat()
     payload_str = str(payload)[:200]
     status_code = None
@@ -59,7 +60,7 @@ async def deliver_webhook(subscription_id: int, event: str, url: str, payload: d
         error = str(e)
 
     try:
-        with get_conn("default") as conn:
+        with get_conn(firm_id) as conn:
             conn.execute("""
                 INSERT INTO webhook_log
                   (subscription_id, event, fired_at, status_code, success, error, payload_preview)
@@ -74,30 +75,30 @@ async def deliver_webhook(subscription_id: int, event: str, url: str, payload: d
         print(f"[Webhooks] Log error: {e}")
 
 
-async def fire_event(event: str, payload: dict):
+async def fire_event(event: str, payload: dict, firm_id: str = "default"):
     if event not in VALID_EVENTS:
         return
-    with get_conn("default") as conn:
+    with get_conn(firm_id) as conn:
         subs = conn.execute(
             "SELECT id, url FROM webhook_subscriptions WHERE event=%s AND active=TRUE",
             (event,)
         ).fetchall()
-    tasks = [deliver_webhook(row["id"], event, row["url"], payload) for row in subs]
+    tasks = [deliver_webhook(row["id"], event, row["url"], payload, firm_id=firm_id) for row in subs]
     if tasks:
         await asyncio.gather(*tasks, return_exceptions=True)
 
 
-def fire_event_sync(event: str, payload: dict, background_tasks: BackgroundTasks):
-    background_tasks.add_task(fire_event, event, payload)
+def fire_event_sync(event: str, payload: dict, background_tasks: BackgroundTasks, firm_id: str = "default"):
+    background_tasks.add_task(fire_event, event, payload, firm_id)
 
 
 @router.post("/subscribe")
-def register_webhook(body: RegisterWebhook):
+def register_webhook(body: RegisterWebhook, firm_id: str = Depends(get_current_firm_id)):
     if body.event not in VALID_EVENTS:
         raise HTTPException(400, f"Invalid event. Valid events: {sorted(VALID_EVENTS)}")
     if not body.url.startswith("http"):
         raise HTTPException(400, "URL must start with http:// or https://")
-    with get_conn("default") as conn:
+    with get_conn(firm_id) as conn:
         cur = conn.execute("""
             INSERT INTO webhook_subscriptions (event, url, label, created_at)
             VALUES (%s,%s,%s,%s) RETURNING id
@@ -108,13 +109,13 @@ def register_webhook(body: RegisterWebhook):
 
 
 @router.get("/subscriptions")
-def list_subscriptions(event: Optional[str] = None):
+def list_subscriptions(event: Optional[str] = None, firm_id: str = Depends(get_current_firm_id)):
     where, args = [], []
     if event:
         where.append("event=%s")
         args.append(event)
     where_sql = ("WHERE " + " AND ".join(where)) if where else ""
-    with get_conn("default") as conn:
+    with get_conn(firm_id) as conn:
         rows = conn.execute(
             f"SELECT * FROM webhook_subscriptions {where_sql} ORDER BY id DESC", args
         ).fetchall()
@@ -122,8 +123,8 @@ def list_subscriptions(event: Optional[str] = None):
 
 
 @router.delete("/subscriptions/{sub_id}")
-def delete_subscription(sub_id: int):
-    with get_conn("default") as conn:
+def delete_subscription(sub_id: int, firm_id: str = Depends(get_current_firm_id)):
+    with get_conn(firm_id) as conn:
         conn.execute(
             "UPDATE webhook_subscriptions SET active=FALSE WHERE id=%s", (sub_id,)
         )
@@ -131,35 +132,35 @@ def delete_subscription(sub_id: int):
 
 
 @router.post("/test/{sub_id}")
-async def test_webhook(sub_id: int):
-    with get_conn("default") as conn:
+async def test_webhook(sub_id: int, firm_id: str = Depends(get_current_firm_id)):
+    with get_conn(firm_id) as conn:
         row = conn.execute(
             "SELECT * FROM webhook_subscriptions WHERE id=%s", (sub_id,)
         ).fetchone()
     if not row:
         raise HTTPException(404, f"Subscription {sub_id} not found")
     await deliver_webhook(sub_id, row["event"], row["url"],
-        {"test": True, "message": "Test webhook from ParaIQ", "subscription_id": sub_id})
+        {"test": True, "message": "Test webhook from ParaIQ", "subscription_id": sub_id}, firm_id=firm_id)
     return {"success": True, "message": f"Test webhook fired to {row['url']}"}
 
 
 @router.post("/fire")
-async def manually_fire_event(body: FireEventBody):
+async def manually_fire_event(body: FireEventBody, firm_id: str = Depends(get_current_firm_id)):
     if body.event not in VALID_EVENTS:
         raise HTTPException(400, f"Invalid event. Valid: {sorted(VALID_EVENTS)}")
-    await fire_event(body.event, body.payload)
+    await fire_event(body.event, body.payload, firm_id=firm_id)
     return {"success": True, "event": body.event, "message": "Event fired to all active subscribers"}
 
 
 @router.get("/logs")
-def webhook_logs(subscription_id: Optional[int] = None, limit: int = 50):
+def webhook_logs(subscription_id: Optional[int] = None, limit: int = 50, firm_id: str = Depends(get_current_firm_id)):
     limit = min(limit, 200)
     where, args = [], []
     if subscription_id:
         where.append("subscription_id=%s")
         args.append(subscription_id)
     where_sql = ("WHERE " + " AND ".join(where)) if where else ""
-    with get_conn("default") as conn:
+    with get_conn(firm_id) as conn:
         rows = conn.execute(
             f"SELECT * FROM webhook_log {where_sql} ORDER BY id DESC LIMIT %s",
             args + [limit]

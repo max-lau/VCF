@@ -39,7 +39,7 @@ def init_risk_table():
     log.info("[RiskWatcher] Table initialized")
 
 def save_assessment(risk_level, summary, signals, prediction, actions, alerted):
-    with _pg_get_conn("default") as conn:
+    with _pg_get_conn("default") as conn:  # noqa: intentional — risk watcher is a system-level monitor, cross-firm
         conn.execute("""
             INSERT INTO risk_assessments
               (assessed_at, risk_level, summary, signals, prediction, actions, alerted)
@@ -72,7 +72,7 @@ def collect_system_signals():
         from backend.demo1.pg import get_conn as _get_conn
         since = (datetime.now(timezone.utc) - timedelta(hours=1))
         recent_since = (datetime.now(timezone.utc) - timedelta(minutes=10))
-        with _get_conn("default") as pg:
+        with _get_conn("default") as pg:  # noqa: intentional — risk watcher queries system audit_log, cross-firm
             total = pg.execute(
                 "SELECT COUNT(*) AS n FROM audit_log WHERE timestamp > %s", (since,)
             ).fetchone()["n"]

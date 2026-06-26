@@ -218,9 +218,10 @@ def run_nlp_pipeline(text: str) -> dict:
 
 def add_to_case(case_id: int, document_name: str, doc_text: str,
                 nlp: dict, source: str = "pacer",
-                pacer_doc_id: str = "", pacer_seq_no: str = "") -> bool:
+                pacer_doc_id: str = "", pacer_seq_no: str = "",
+                firm_id: str = "default") -> bool:
     try:
-        with get_conn("default") as conn:
+        with get_conn(firm_id) as conn:
             conn.execute("""
                 INSERT INTO case_documents
                   (case_id, document_name, source, doc_text, sentiment, risk_score,

@@ -310,7 +310,7 @@ def _get_firm_settings(firm_id: str) -> dict:
 
 def _get_active_accounts() -> list:
     from .pg import get_conn
-    with get_conn("default") as conn:
+    with get_conn("default") as conn:  # noqa: intentional — background poller scans all firms
         cur = conn.execute(
             "SELECT * FROM attorney_email_accounts WHERE provider=%s AND is_active=TRUE",
             ("gmail",)
