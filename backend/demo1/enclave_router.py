@@ -49,6 +49,10 @@ def get_client_id_from_request(request: Request) -> str:
     return client_id
 
 
+def _firm_id(request: Request) -> str:
+    return getattr(request.state, "firm_id", "default")
+
+
 # ── Schemas ───────────────────────────────────────────────────────────────────
 
 class ScreenPayload(BaseModel):
@@ -76,12 +80,12 @@ class ReviewPayload(BaseModel):
 
 # ── Core routing logic ────────────────────────────────────────────────────────
 
-async def _call_enclave(client_id: str, path: str, method: str = "POST", payload: dict = None) -> dict:
+async def _call_enclave(client_id: str, path: str, method: str = "POST", payload: dict = None, firm_id: str = "default") -> dict:
     """
     Generic enclave call. Raises HTTPException on failure.
     All calls use the per-client API key — no cross-client calls possible.
     """
-    enclave = get_client_enclave(client_id)
+    enclave = get_client_enclave(client_id, firm_id=firm_id)
     if not enclave:
         raise HTTPException(
             status_code=404,
@@ -123,12 +127,14 @@ async def screen_document(payload: ScreenPayload, request: Request):
     The cloud NEVER stores the raw document text — only the verdict fields.
     """
     client_id = get_client_id_from_request(request)
+    fid = _firm_id(request)
 
     result = await _call_enclave(
         client_id=client_id,
         path="/screen",
         method="POST",
         payload=payload.model_dump(),
+        firm_id=fid,
     )
 
     # Log ONLY the verdict to the cloud DB (no raw text, no document content)
@@ -136,6 +142,7 @@ async def screen_document(payload: ScreenPayload, request: Request):
         client_id=client_id,
         doc_id=payload.doc_id,
         verdict=result,
+        firm_id=fid,
     )
 
     return result
@@ -155,6 +162,7 @@ async def get_privilege_log(
         client_id=client_id,
         path=f"/privilege-log?skip={skip}&limit={limit}&only_flagged={only_flagged}&only_review_queue={only_review_queue}",
         method="GET",
+        firm_id=_firm_id(request),
     )
 
 
@@ -167,6 +175,7 @@ async def attorney_review(payload: ReviewPayload, request: Request):
         path=f"/privilege-log/{payload.log_id}/review",
         method="PUT",
         payload=payload.model_dump(),
+        firm_id=_firm_id(request),
     )
 
 
@@ -174,7 +183,7 @@ async def attorney_review(payload: ReviewPayload, request: Request):
 async def enclave_stats(request: Request):
     """Get privilege screening stats for this client's enclave."""
     client_id = get_client_id_from_request(request)
-    return await _call_enclave(client_id=client_id, path="/stats", method="GET")
+    return await _call_enclave(client_id=client_id, path="/stats", method="GET", firm_id=_firm_id(request))
 
 
 @router.get("/health/{client_id}")
