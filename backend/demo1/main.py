@@ -2,8 +2,8 @@ from backend.demo1.ocr_intake import init_intake_table, router as intake_router
 from backend.demo1.voice_router import router as voice_router
 from backend.demo1.voice_shortcuts_router import router as voice_shortcuts_router
 from backend.demo1.fine_tune import init_model_table, router as model_router
-from backend.demo1.mlops.pytorch_trainer import train as pytorch_train
-from backend.demo1.mlops.lora_trainer import train as lora_train
+# pytorch_trainer and lora_trainer are imported lazily inside endpoints
+# to avoid pulling in torch/mlflow at server startup (keeps CI fast)
 from backend.demo1.slack_teams import init_notify_table, router as notify_router
 from backend.demo1.auth import init_auth_table, router as auth_router
 from backend.demo1.custom_entities import init_custom_entity_table, router as custom_entities_router
@@ -224,6 +224,7 @@ class LoRATrainBody(BaseModel):
 @app.post("/model/pytorch-train", tags=["Fine-Tuned Model"])
 def start_pytorch_training(body: TrainMLOpsBody, background_tasks: BackgroundTasks):
     """Module 2: Raw PyTorch training loop with per-epoch MLflow tracking."""
+    from backend.demo1.mlops.pytorch_trainer import train as pytorch_train
     background_tasks.add_task(
         pytorch_train,
         epochs=body.epochs,
@@ -241,6 +242,7 @@ def start_pytorch_training(body: TrainMLOpsBody, background_tasks: BackgroundTas
 @app.post("/model/lora-train", tags=["Fine-Tuned Model"])
 def start_lora_training(body: LoRATrainBody, background_tasks: BackgroundTasks):
     """Module 3: LoRA/PEFT fine-tuning — trains only ~0.5% of parameters."""
+    from backend.demo1.mlops.lora_trainer import train as lora_train
     background_tasks.add_task(
         lora_train,
         epochs=body.epochs,

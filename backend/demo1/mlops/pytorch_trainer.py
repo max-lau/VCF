@@ -28,16 +28,10 @@ import logging
 from datetime import datetime, timezone
 from pathlib import Path
 
-import torch
-import torch.nn as nn
-import torch.nn.functional as F
-from torch.utils.data import Dataset, DataLoader
-from torch.optim import AdamW
-from torch.optim.lr_scheduler import LinearLR
-
-import mlflow
-
 log = logging.getLogger(__name__)
+
+# Heavy imports (torch, mlflow) are deferred to train() to keep CI startup fast.
+# At import time only stdlib is needed.
 
 # ── Paths ──────────────────────────────────────────────────────────────────────
 MODEL_DIR   = Path("models/legal_classifier_pytorch")
@@ -56,10 +50,11 @@ from backend.demo1.fine_tune import TRAINING_DATA
 
 # ── Dataset ────────────────────────────────────────────────────────────────────
 
-class LegalDataset(Dataset):
+class LegalDataset:
     """Tokenised legal sentence dataset for PyTorch DataLoader."""
 
     def __init__(self, texts: list[str], labels: list[int], tokenizer, max_len: int = 128):
+        import torch
         self.encodings = tokenizer(
             texts,
             truncation=True,
@@ -82,11 +77,11 @@ class LegalDataset(Dataset):
 
 # ── Metrics helpers ────────────────────────────────────────────────────────────
 
-def accuracy(preds: torch.Tensor, labels: torch.Tensor) -> float:
+def accuracy(preds, labels) -> float:
     return (preds.argmax(dim=-1) == labels).float().mean().item()
 
 
-def per_class_f1(preds: torch.Tensor, labels: torch.Tensor, num_classes: int = 3) -> dict:
+def per_class_f1(preds, labels, num_classes: int = 3) -> dict:
     """Compute per-class F1 and macro-average without sklearn dependency at runtime."""
     pred_ids = preds.argmax(dim=-1)
     f1s = {}
@@ -117,6 +112,13 @@ def train(
 
     Returns final metrics dict.
     """
+    import torch
+    import torch.nn as nn
+    from torch.utils.data import DataLoader
+    from torch.optim import AdamW
+    from torch.optim.lr_scheduler import LinearLR
+    import mlflow
+
     torch.manual_seed(seed)
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     log.info(f"[PyTorchTrainer] device={device}, epochs={epochs}, lr={lr}")

@@ -37,21 +37,10 @@ import logging
 from datetime import datetime, timezone
 from pathlib import Path
 
-import torch
-import torch.nn as nn
-from torch.utils.data import DataLoader
-from torch.optim import AdamW
-from torch.optim.lr_scheduler import LinearLR
-
-import mlflow
-from peft import (
-    LoraConfig,
-    TaskType,
-    get_peft_model,
-    PeftModel,
-)
-
 log = logging.getLogger(__name__)
+
+# Heavy imports (torch, mlflow, peft) are deferred to train()/load_lora_model()
+# to keep CI startup fast. At import time only stdlib is needed.
 
 # ── Paths ──────────────────────────────────────────────────────────────────────
 MODEL_DIR  = Path("models/legal_classifier_lora")
@@ -102,6 +91,14 @@ def train(
 
     Per-epoch metrics logged to MLflow experiment "paraiq_lora_training".
     """
+    import torch
+    import torch.nn as nn
+    from torch.utils.data import DataLoader
+    from torch.optim import AdamW
+    from torch.optim.lr_scheduler import LinearLR
+    import mlflow
+    from peft import LoraConfig, TaskType, get_peft_model
+
     torch.manual_seed(seed)
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     log.info(f"[LoRATrainer] device={device}, epochs={epochs}, r={lora_r}, alpha={lora_alpha}")
@@ -317,6 +314,7 @@ def load_lora_model():
     (< 5MB) and can be swapped per firm without reloading the base.
     """
     from transformers import DistilBertTokenizerFast, DistilBertForSequenceClassification
+    from peft import PeftModel
 
     if not (MODEL_DIR / "adapter_config.json").exists():
         raise FileNotFoundError(
