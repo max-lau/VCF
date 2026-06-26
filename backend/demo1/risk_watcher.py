@@ -381,6 +381,12 @@ def start_scheduler(app):
         lambda: log_drift_check(check_drift()),
         "interval", hours=1, id="drift_monitor", replace_existing=True,
     )
+    # Purge expired JWT blocklist rows daily at 03:00 UTC
+    from backend.demo1.auth import purge_expired_blocklist
+    scheduler.add_job(
+        purge_expired_blocklist,
+        "cron", hour=3, minute=0, id="blocklist_cleanup", replace_existing=True,
+    )
     scheduler.start()
     log.info("[RiskWatcher] Scheduler started — running every 30 minutes")
     return scheduler

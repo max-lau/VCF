@@ -166,7 +166,8 @@ async def create_case(
     except Exception as e:
         if "unique" in str(e).lower():
             raise HTTPException(409, "Case number already exists")
-        raise HTTPException(500, str(e))
+        import logging; logging.getLogger(__name__).error(f"[case_management] DB error: {e}")
+        raise HTTPException(500, "A database error occurred. Please try again.")
 
 
 @router.get("/stats")
@@ -585,7 +586,8 @@ async def extract_timeline_ai(
                 "timeline": events, "docs_scanned": len(texts),
                 "risk_level": _level, "risk_score": round(_score, 1)}
     except Exception as e:
-        raise HTTPException(500, "AI extraction failed: " + str(e))
+        import logging; logging.getLogger(__name__).error(f"[case_management] AI extraction error: {e}")
+        raise HTTPException(500, "AI extraction failed. Please try again.")
 
 
 # ══════════════════════════════════════════════════════════════════════════════

@@ -64,4 +64,5 @@ async def chat_message(req: ChatRequest):
         return ChatResponse(reply=reply, suggest_escalation=escalate)
 
     except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+        import logging; logging.getLogger(__name__).error(f"[chat_router] Error: {e}")
+        raise HTTPException(status_code=500, detail="An internal error occurred. Please try again.")

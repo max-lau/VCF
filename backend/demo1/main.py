@@ -653,7 +653,8 @@ Rules: extract ALL dates in chronological order, max 20 events."""
         save_work_product('/timeline', _timeline_result, getattr(request.state, 'firm_id', 'default'), getattr(body, 'case_id', None), input_preview=body.text[:100])
         return _timeline_result
     except json.JSONDecodeError as e:
-        raise HTTPException(status_code=500, detail=f"JSON parse error: {str(e)}")
+        import logging; logging.getLogger(__name__).warning(f"[paraiq] JSON parse error: {e}")
+        raise HTTPException(status_code=500, detail="AI response could not be parsed. Please try again.")
     except Exception as e:
         import logging
         logging.error(f'[paraiq-api] Unhandled error: {e}')
@@ -771,7 +772,8 @@ Transcript:
         save_work_product("/interrogate", json.loads(cleaned), getattr(request.state, "firm_id", "default"), body.case_id, input_preview=body.transcript[:100])
         return json.loads(cleaned)
     except json.JSONDecodeError as e:
-        raise HTTPException(status_code=500, detail=f"JSON parse error: {str(e)}")
+        import logging; logging.getLogger(__name__).warning(f"[paraiq] JSON parse error: {e}")
+        raise HTTPException(status_code=500, detail="AI response could not be parsed. Please try again.")
     except Exception as e:
         import logging
         logging.error(f'[paraiq-api] Unhandled error: {e}')
@@ -813,7 +815,8 @@ def lease_diff(body: LeaseDiffInput, request: Request):
         save_work_product("/documents/lease-diff", _lease_result, getattr(request.state, "firm_id", "default"), body.case_id, input_preview=body.doc_a[:100])
         return _lease_result
     except json.JSONDecodeError as e:
-        raise HTTPException(status_code=500, detail="JSON parse error: " + str(e))
+        import logging; logging.getLogger(__name__).warning(f"[paraiq] JSON parse error: {e}")
+        raise HTTPException(status_code=500, detail="AI response could not be parsed. Please try again.")
     except Exception as e:
         import logging
         logging.error(f'[paraiq-api] Unhandled error: {e}')
@@ -880,7 +883,8 @@ def credibility_score(body: CredibilityInput, request: Request):
         save_work_product("/credibility/score", _cred_result, getattr(request.state, "firm_id", "default"), body.case_id, input_preview=body.witness_name)
         return _cred_result
     except json.JSONDecodeError as e:
-        raise HTTPException(status_code=500, detail="JSON parse error: " + str(e))
+        import logging; logging.getLogger(__name__).warning(f"[paraiq] JSON parse error: {e}")
+        raise HTTPException(status_code=500, detail="AI response could not be parsed. Please try again.")
     except Exception as e:
         import logging
         logging.error(f'[paraiq-api] Unhandled error: {e}')
@@ -954,7 +958,8 @@ def deposition_summarize(body: DepositionInput, request: Request):
         save_work_product('/deposition/summarize', _depo_result, getattr(request.state, 'firm_id', 'default'), body.case_id, input_preview=body.deponent)
         return _depo_result
     except json.JSONDecodeError as e:
-        raise HTTPException(status_code=500, detail="JSON parse error: " + str(e))
+        import logging; logging.getLogger(__name__).warning(f"[paraiq] JSON parse error: {e}")
+        raise HTTPException(status_code=500, detail="AI response could not be parsed. Please try again.")
     except Exception as e:
         import logging
         logging.error(f'[paraiq-api] Unhandled error: {e}')

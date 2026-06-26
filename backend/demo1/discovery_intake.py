@@ -680,7 +680,8 @@ async def extract_text_to_case(file_id: int, request: Request, background_tasks:
             extracted_text = pdf_extract(str(file_path))
             extracted_text = " ".join(extracted_text.split())[:10000]
         except Exception as e:
-            raise HTTPException(500, "PDF extraction failed: " + str(e))
+            import logging; logging.getLogger(__name__).error(f"[discovery_intake] PDF extraction error: {e}")
+        raise HTTPException(500, "PDF extraction failed. Please try again.")
 
     elif route == "audio":
         async with httpx.AsyncClient(timeout=120) as client:

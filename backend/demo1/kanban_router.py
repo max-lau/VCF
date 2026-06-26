@@ -98,7 +98,8 @@ def create_card(case_id: int, body: CardCreate,
         return {"id": row["id"], "created_at": str(row["created_at"])}
     except Exception as e:
         import traceback; traceback.print_exc()
-        raise HTTPException(500, detail=str(e))
+        import logging; logging.getLogger(__name__).error(f"[kanban_router] Error: {e}")
+        raise HTTPException(500, detail="An internal error occurred. Please try again.")
 
 @router.patch("/kanban/cases/{case_id}/cards/{card_id}/move")
 def move_card(case_id: int, card_id: int, body: CardMove,

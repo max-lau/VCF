@@ -87,3 +87,51 @@ class TestPermissions:
         headers = {**key_only_headers, 'Authorization': 'NotBearer token'}
         r = client.get('/auth/me/permissions', headers=headers)
         assert r.status_code in (401, 403)
+
+
+class TestLogout:
+    def test_logout_success(self, client, test_user, key_only_headers):
+        """Login, logout — should return success."""
+        from tests.conftest import TEST_USERNAME, TEST_PASSWORD
+        r = client.post('/auth/login', json={
+            'username': TEST_USERNAME,
+            'password': TEST_PASSWORD,
+        })
+        assert r.status_code == 200
+        token = r.json()['token']
+        headers = {**key_only_headers, 'Authorization': f'Bearer {token}'}
+        r2 = client.post('/auth/logout', headers=headers)
+        assert r2.status_code == 200
+        assert r2.json().get('success') is True
+
+    def test_blocklisted_token_rejected(self, client, test_user, key_only_headers):
+        """Login, logout, then reuse the same token — must be rejected with 401."""
+        from tests.conftest import TEST_USERNAME, TEST_PASSWORD
+        r = client.post('/auth/login', json={
+            'username': TEST_USERNAME,
+            'password': TEST_PASSWORD,
+        })
+        assert r.status_code == 200
+        token = r.json()['token']
+        headers = {**key_only_headers, 'Authorization': f'Bearer {token}'}
+
+        # Logout invalidates the token
+        r2 = client.post('/auth/logout', headers=headers)
+        assert r2.status_code == 200
+
+        # Reuse the same token — must now be rejected
+        r3 = client.get('/auth/me/permissions', headers=headers)
+        assert r3.status_code in (401, 403), (
+            f"Expected 401/403 for blocklisted token, got {r3.status_code}: {r3.text}"
+        )
+
+    def test_logout_without_auth_rejected(self, client, key_only_headers):
+        """Logout with no JWT should fail."""
+        r = client.post('/auth/logout', headers=key_only_headers)
+        assert r.status_code in (401, 403)
+
+    def test_logout_with_invalid_token_rejected(self, client, key_only_headers):
+        """Logout with a malformed token should fail."""
+        headers = {**key_only_headers, 'Authorization': 'Bearer not.a.valid.token'}
+        r = client.post('/auth/logout', headers=headers)
+        assert r.status_code in (401, 403)

@@ -167,7 +167,8 @@ async def redact_text_endpoint(request: Request, req: RedactTextRequest):
     except HTTPException:
         raise
     except Exception as e:
-        raise HTTPException(500, f"Presidio error: {str(e)}")
+        import logging; logging.getLogger(__name__).error(f"[redaction] Presidio error: {e}")
+        raise HTTPException(500, "Redaction service encountered an error. Please try again.")
     if req.use_claude:
         try:
             findings = _claude_enhance(req.text, findings, req.style, firm_id=getattr(request.state, "firm_id", "default"))
@@ -226,7 +227,8 @@ async def redact_pdf(
     except HTTPException:
         raise
     except Exception as e:
-        raise HTTPException(500, f"Redaction error: {str(e)}")
+        import logging; logging.getLogger(__name__).error(f"[redaction] Redaction error: {e}")
+        raise HTTPException(500, "Redaction failed. Please try again.")
 
     if use_claude:
         try:

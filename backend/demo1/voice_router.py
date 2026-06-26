@@ -407,4 +407,5 @@ async def voice_run(
             None, 0, False, str(e),
             int((time.time()-t_start)*1000)
         )
-        raise HTTPException(status_code=500, detail=str(e))
+        import logging; logging.getLogger(__name__).error(f"[voice_router] Error: {e}")
+        raise HTTPException(status_code=500, detail="An internal error occurred. Please try again.")

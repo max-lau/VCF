@@ -571,7 +571,8 @@ def download_invoice_pdf(
     except Exception as e:
         import traceback
         log.error(f"[Billing] PDF build failed: {e}\n{traceback.format_exc()}")
-        raise HTTPException(500, f"PDF generation failed: {str(e)}")
+        import logging; logging.getLogger(__name__).error(f"[billing_router] PDF generation error: {e}")
+        raise HTTPException(500, "PDF generation failed. Please try again.")
     filename    = f"invoice_{inv_d['invoice_number']}.pdf"
     disposition = f'inline; filename="{filename}"' if inline else f'attachment; filename="{filename}"'
     return Response(

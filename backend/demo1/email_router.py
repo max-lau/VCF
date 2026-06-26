@@ -175,7 +175,8 @@ def outlook_callback(code: str, state: str, db: PgConn = Depends(db_dep)):
     try:
         result = exchange_code(code, state)
     except ValueError as e:
-        raise HTTPException(status_code=400, detail=str(e))
+        import logging; logging.getLogger(__name__).warning(f"[email_router] Bad request: {e}")
+        raise HTTPException(status_code=400, detail="Invalid request. Please check your input.")
     email_address = result.get("id_token_claims", {}).get("email") or \
                     result.get("id_token_claims", {}).get("preferred_username", "unknown")
     db.execute(
@@ -395,7 +396,8 @@ def send_reply(
         raise
     except Exception as e:
         logger.error(f"Reply send failed: {e}")
-        raise HTTPException(500, f"Failed to send reply: {str(e)}")
+        import logging; logging.getLogger(__name__).error(f"[email_router] Send reply error: {e}")
+        raise HTTPException(500, "Failed to send reply. Please try again.")
 
     # Log the reply
     db.execute(

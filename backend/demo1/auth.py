@@ -435,6 +435,26 @@ def logout(credentials: HTTPAuthorizationCredentials = Depends(bearer),
         )
     return {"success": True, "message": "Logged out successfully"}
 
+def purge_expired_blocklist() -> int:
+    """Delete expired rows from token_blocklist. Called by scheduler daily at 03:00 UTC."""
+    import logging
+    log = logging.getLogger(__name__)
+    try:
+        from backend.demo1.pg import get_conn
+        from datetime import datetime, timezone
+        with get_conn("default") as conn:  # noqa: intentional — DDL/maintenance, cross-firm
+            cur = conn.execute(
+                "DELETE FROM token_blocklist WHERE expires_at < %s",
+                (datetime.now(timezone.utc),)
+            )
+            deleted = cur.rowcount if cur else 0
+        log.info(f"[Auth] Blocklist cleanup: {deleted} expired token(s) purged")
+        return deleted
+    except Exception as e:
+        log.error(f"[Auth] Blocklist cleanup failed: {e}")
+        return 0
+
+
 @router.put("/password")
 def change_password(body: ChangePasswordBody,
                     current_user: dict = Depends(get_current_user)):
