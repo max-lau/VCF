@@ -6,11 +6,11 @@ import json
 import re
 import os
 import spacy
-import anthropic
 from dotenv import load_dotenv
+from backend.demo1.ai_client import get_client
 
 load_dotenv()
-client = anthropic.Anthropic(api_key=os.getenv("ANTHROPIC_API_KEY"))
+client = get_client()
 
 nlp = spacy.load("en_core_web_sm")
 
@@ -89,7 +89,7 @@ Rules: max 10 entities, max 5 graph pairs, confidence 0.0-1.0."""
             "disambiguated": [],
             "entity_graph":  [],
             "raw_entities":  entities,
-            "summary":       f"Failed: {str(e)}"
+            "summary":       "Analysis failed — see server logs"
         }
 
 def resolve_coreferences(text: str) -> dict:
@@ -153,5 +153,5 @@ Rules: max 8 chains, max 3 ambiguous pronouns."""
             "ambiguous_pronouns": [],
             "statistics":         {},
             "raw_entities":       entities,
-            "error":              str(e)
+            "error":              "Internal error occurred"
         }

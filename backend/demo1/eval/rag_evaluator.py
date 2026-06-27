@@ -11,7 +11,7 @@ load_dotenv("/root/nlp-portfolio/.env")
 from sentence_transformers import SentenceTransformer
 from backend.demo1.retrieval.factory import get_vector_store
 from backend.demo1.eval.dataset import EVAL_DATASET
-import anthropic
+from backend.demo1.ai_client import get_client as _get_client
 
 _embedder = None
 _client = None
@@ -25,7 +25,7 @@ def get_embedder():
 def get_client():
     global _client
     if _client is None:
-        _client = anthropic.Anthropic(api_key=os.getenv("ANTHROPIC_API_KEY"))
+        _client = _get_client()
     return _client
 
 def retrieve(question: str, top_k: int = 5):

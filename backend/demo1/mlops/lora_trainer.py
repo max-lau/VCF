@@ -332,6 +332,7 @@ def load_lora_model():
 
 def predict_lora(text: str) -> dict:
     """Classify legal text using the saved LoRA adapter."""
+    import torch
     model, tokenizer = load_lora_model()
     inputs = tokenizer(text, return_tensors="pt", truncation=True, padding=True, max_length=128)
     with torch.no_grad():

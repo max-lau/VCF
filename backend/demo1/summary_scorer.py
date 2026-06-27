@@ -7,12 +7,13 @@ import os
 import re
 import json
 import math
-import anthropic
 from dotenv import load_dotenv
 from typing import Dict
 
+from backend.demo1.ai_client import get_client
+
 load_dotenv()
-client = anthropic.Anthropic(api_key=os.getenv("ANTHROPIC_API_KEY"))
+client = get_client()
 
 def clean_json(raw: str) -> str:
     raw = raw.strip()
@@ -101,7 +102,7 @@ Scoring rules:
             "recall":           0.0,
             "f1":               0.0,
             "verdict":          "error",
-            "feedback":         f"Scoring failed: {str(e)}",
+            "feedback":         "Scoring failed — see server logs",
             "method":           "semantic-similarity (BERTScore-equivalent)",
             "source_length":    len(source_text.split()),
             "summary_length":   len(summary.split()),

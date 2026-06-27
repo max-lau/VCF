@@ -444,7 +444,7 @@ def get_deadline_radar() -> dict:
         return {"deadlines": unique, "count": len(unique)}
 
     except Exception as e:
-        return {"deadlines": [], "count": 0, "error": str(e)}
+        return {"deadlines": [], "count": 0, "error": "Internal error occurred"}
 
     """
     Scans all open case documents for future dates within 30 days.

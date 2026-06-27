@@ -135,8 +135,8 @@ async def send_to_platform(platform: str, payload: dict, event_type: str, mock: 
                 success = resp.status_code < 400
                 log_delivery(platform, event_type, resp.status_code, success, preview=str(payload)[:100], firm_id=firm_id)
                 results.append({"label": cfg["label"], "status": resp.status_code, "success": success})
-            except Exception as e:
-                log_delivery(platform, event_type, None, False, error=str(e), firm_id=firm_id)
+            except Exception:
+                log_delivery(platform, event_type, None, False, error="Delivery failed", firm_id=firm_id)
                 results.append({"label": cfg["label"], "error": "Delivery failed", "success": False})
     return {"sent": len(results), "results": results}
 

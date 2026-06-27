@@ -120,7 +120,7 @@ def get_latest_model_version(model_name: str = "paraiq-legal-classifier") -> dic
             "created_at":  latest.creation_timestamp,
         }
     except Exception as e:
-        return {"error": str(e)}
+        return {"error": "Internal error occurred"}
 
 
 def list_model_versions(model_name: str = "paraiq-legal-classifier") -> list:
@@ -142,4 +142,4 @@ def list_model_versions(model_name: str = "paraiq-legal-classifier") -> list:
             })
         return results
     except Exception as e:
-        return [{"error": str(e)}]
+        return [{"error": "Internal error occurred"}]

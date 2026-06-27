@@ -329,8 +329,8 @@ app.add_middleware(
     allow_headers=["Authorization", "Content-Type", "X-API-Key", "X-Client-ID"],
     allow_credentials=True,
 )
-
-client = anthropic.Anthropic(api_key=os.getenv("ANTHROPIC_API_KEY"))
+from backend.demo1.ai_client import get_client
+client = get_client()
 
 LLM_FAST   = os.getenv("LLM_FAST",  "claude-haiku-4-5-20251001")  # high-volume tasks
 LLM_STRONG = os.getenv("LLM_STRONG", "claude-opus-4-5")            # deep analysis

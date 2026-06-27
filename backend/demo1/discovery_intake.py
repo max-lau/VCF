@@ -436,7 +436,7 @@ async def process_zip(file_id: int, request: Request):
                         "mime_type": mime,
                     })
                 except Exception as e:
-                    errors.append({"file": entry.filename, "error": str(e)})
+                    errors.append({"file": entry.filename, "error": "Processing failed"})
 
     except zipfile.BadZipFile:
         raise HTTPException(400, "Invalid or corrupted ZIP file")

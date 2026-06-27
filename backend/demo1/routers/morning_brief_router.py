@@ -22,7 +22,7 @@ log    = logging.getLogger(__name__)
 def get_active_firms() -> list:
     """Fetch all active firm_ids from the database."""
     try:
-        with get_conn("default") as conn:  # cross-firm query — system level
+        with get_conn("default") as conn:  # noqa: intentional — cross-firm query, system level
             rows = conn.execute(
                 "SELECT DISTINCT firm_id FROM users WHERE active=TRUE AND firm_id IS NOT NULL"
             ).fetchall()

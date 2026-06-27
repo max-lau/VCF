@@ -8,12 +8,12 @@ import numpy as np
 import faiss
 from sentence_transformers import SentenceTransformer
 from backend.demo1.pg import get_conn
-import anthropic
+from backend.demo1.ai_client import get_client
 from backend.demo1.observability.tracer import trace_claude_call
 from dotenv import load_dotenv
 
 load_dotenv()
-client   = anthropic.Anthropic(api_key=os.getenv("ANTHROPIC_API_KEY"))
+client   = get_client()
 
 _EMBEDDER = None
 
@@ -140,7 +140,7 @@ If no contradictions, return has_contradictions: false and empty array."""
             "contradictions":     [],
             "shared_entities":    [],
             "relationship":       "unrelated",
-            "summary":            f"Analysis failed: {str(e)}",
+            "summary":            "Analysis failed — see server logs",
             "doc_a_id":           doc_a["id"],
             "doc_b_id":           doc_b["id"],
             "doc_a_preview":      doc_a["text"][:100],

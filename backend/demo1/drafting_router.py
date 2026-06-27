@@ -11,14 +11,14 @@ from datetime import datetime
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
 from typing import Optional
-from anthropic import Anthropic
 
 from backend.demo1.auth import get_current_user, get_current_firm_id
 from backend.demo1.pg import get_conn
+from backend.demo1.ai_client import get_client
 
 router = APIRouter()
 log    = logging.getLogger(__name__)
-_ai    = Anthropic(api_key=os.getenv("ANTHROPIC_API_KEY"))
+_ai    = get_client()
 
 # ── Request models ────────────────────────────────────────────────────────────
 

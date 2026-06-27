@@ -15,6 +15,7 @@ from datetime import datetime, timezone, timedelta
 import httpx
 import psutil
 from anthropic import Anthropic
+from backend.demo1.ai_client import get_client as _get_ai_client
 from backend.demo1.hermes_kanban import run_hermes_kanban
 from backend.demo1.notifications_router import generate_notifications
 from backend.demo1.routers.morning_brief_router import run_all_firms_brief, get_active_firms as _get_active_firms
@@ -31,7 +32,7 @@ SMTP_PASS     = os.getenv("SMTP_PASS", "")
 ALERT_TO      = os.getenv("ALERT_EMAIL_TO", "")
 ANTHROPIC_KEY = os.getenv("ANTHROPIC_API_KEY", "")
 
-_anthropic = Anthropic(api_key=ANTHROPIC_KEY)
+_anthropic = _get_ai_client()
 
 # ── DB setup ───────────────────────────────────────────────────────────────────
 def init_risk_table():
@@ -64,8 +65,8 @@ def collect_system_signals():
         disk = psutil.disk_usage("/")
         signals["disk_percent"]   = round(disk.percent, 1)
         signals["disk_free_gb"]   = round(disk.free / 1024**3, 1)
-    except Exception as e:
-        signals["system_error"] = str(e)
+    except Exception:
+        signals["system_error"] = "system signal collection failed"
 
     # API error rate (last hour)
     try:
@@ -93,8 +94,8 @@ def collect_system_signals():
         signals["api_error_rate"]   = round(errors / total * 100, 2) if total else 0
         signals["api_avg_ms"]       = round(float(avg_ms), 1) if avg_ms else None
         signals["api_errors_10min"] = recent_errors
-    except Exception as e:
-        signals["db_error"] = str(e)
+    except Exception:
+        signals["db_error"] = "database query failed"
 
     # PM2 process health
     try:
@@ -109,8 +110,8 @@ def collect_system_signals():
         ]
         signals["processes_down"]         = down
         signals["paraiq_high_restarts"]   = high_restarts
-    except Exception as e:
-        signals["pm2_error"] = str(e)
+    except Exception:
+        signals["pm2_error"] = "pm2 status check failed"
 
     return signals
 
@@ -151,8 +152,8 @@ async def collect_cloudflare_signals():
             d3 = r3.json()
             signals["cf_platform_indicator"]   = d3["status"]["indicator"]
             signals["cf_platform_description"] = d3["status"]["description"]
-    except Exception as e:
-        signals["cf_error"] = str(e)
+    except Exception:
+        signals["cf_error"] = "cloudflare status check failed"
     return signals
 
 # ── Claude risk assessment ─────────────────────────────────────────────────────
@@ -197,7 +198,7 @@ Be specific. Reference actual signal values in your summary and prediction."""
             "summary": "Risk assessment unavailable — check system manually.",
             "prediction": "Unknown",
             "actions": ["Check system manually"],
-            "key_concerns": [str(e)],
+            "key_concerns": ["Claude assessment failed — see logs"],
         }
 
 # ── Alerts ────────────────────────────────────────────────────────────────────

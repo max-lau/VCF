@@ -103,7 +103,7 @@ def _build_report_content(matter_id: int, report_type: str, conn) -> str:
             return json.dumps([dict(r) for r in rows], indent=2, default=str)
 
     except Exception as e:
-        return json.dumps({"error": str(e)})
+        return json.dumps({"error": "Internal error occurred"})
     return ""
 
 

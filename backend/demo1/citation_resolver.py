@@ -146,7 +146,7 @@ def resolve_citation(raw: str, court: str = None) -> dict:
     except requests.exceptions.Timeout:
         return {"status": "timeout", "matches": []}
     except Exception as e:
-        return {"status": "error", "error": str(e), "matches": []}
+        return {"status": "error", "error": "Internal error occurred", "matches": []}
 
 
 def build_summary(citations: list) -> dict:

@@ -135,7 +135,7 @@ def pacer_login_request(username: str, password: str, client_code: str = "") -> 
                 "expires_at": time.time() + TOKEN_TTL_SECS,
                 "username": username}
     except Exception as e:
-        return {"success": False, "error": str(e)}
+        return {"success": False, "error": "Internal error occurred"}
 
 
 def get_token(username: str) -> Optional[str]:

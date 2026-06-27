@@ -200,9 +200,9 @@ def outlook_callback(code: str, state: str, db: PgConn = Depends(db_dep)):
 import base64, json as _json
 from email.mime.text import MIMEText
 from email.mime.multipart import MIMEMultipart
-from anthropic import Anthropic as _Anthropic
+from backend.demo1.ai_client import get_client as _get_ai_client
 
-_ai_client = _Anthropic(api_key=os.getenv("ANTHROPIC_API_KEY"))
+_ai_client = _get_ai_client()
 
 def _get_intake_and_account(intake_id: str, attorney_id: int, db: PgConn) -> tuple:
     """Fetch intake record and associated email account."""

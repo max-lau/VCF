@@ -56,8 +56,8 @@ async def deliver_webhook(subscription_id: int, event: str, url: str, payload: d
             success     = resp.status_code < 400
     except httpx.TimeoutException:
         error = "Timeout after 10s"
-    except Exception as e:
-        error = str(e)
+    except Exception:
+        error = "Webhook delivery failed"
 
     try:
         with get_conn(firm_id) as conn:

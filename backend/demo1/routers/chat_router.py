@@ -27,7 +27,9 @@ Guidelines:
 - Keep responses under 180 words unless a detailed walkthrough is genuinely needed
 - Never make up features that don't exist in ParaIQ"""
 
-_client = anthropic.Anthropic(api_key=os.getenv("ANTHROPIC_API_KEY"))
+from backend.demo1.ai_client import get_client as _get_client
+
+_client = _get_client()
 
 class ChatMsg(BaseModel):
     role: str

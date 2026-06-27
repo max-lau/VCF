@@ -63,8 +63,8 @@ async def system_health():
             }
             for p in procs
         ]
-    except Exception as e:
-        result["pm2_error"] = str(e)
+    except Exception:
+        result["pm2_error"] = "pm2 status check failed"
 
     return result
 
@@ -202,8 +202,8 @@ async def cloudflare_status():
                 "indicator":   d["status"]["indicator"],
                 "description": d["status"]["description"],
             }
-        except Exception as e:
-            result["public_status_error"] = str(e)
+        except Exception:
+            result["public_status_error"] = "cloudflare status check failed"
 
         if not (CF_TOKEN and CF_ZONE):
             return result
@@ -220,8 +220,8 @@ async def cloudflare_status():
                     "plan":   z.get("plan", {}).get("name"),
                     "paused": z.get("paused", False),
                 }
-        except Exception as e:
-            result["zone_error"] = str(e)
+        except Exception:
+            result["zone_error"] = "zone query failed"
 
         try:
             gql = """{ viewer { zones(filter: {zoneTag: "%s"}) {
@@ -249,8 +249,8 @@ async def cloudflare_status():
                     result["analytics_error"] = "no data in last hour"
             else:
                 result["analytics_error"] = str(d.get("errors", "no zones returned"))
-        except Exception as e:
-            result["analytics_error"] = str(e)
+        except Exception:
+            result["analytics_error"] = "analytics query failed"
 
     return result
 

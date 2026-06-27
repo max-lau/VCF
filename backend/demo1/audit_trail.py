@@ -104,8 +104,8 @@ class AuditMiddleware(BaseHTTPMiddleware):
         try:
             response    = await call_next(request)
             status_code = response.status_code
-        except Exception as e:
-            error    = str(e)
+        except Exception:
+            error    = "internal server error"
             response = JSONResponse({"detail": "Internal server error"}, status_code=500)
 
         elapsed_ms = (time.perf_counter() - start) * 1000

@@ -4,13 +4,14 @@ from pathlib import Path
 import httpx
 from fastapi import APIRouter, UploadFile, File, Form, Depends, HTTPException
 from fastapi.responses import JSONResponse
-import openai, anthropic
+import anthropic
+from backend.demo1.ai_client import get_client
 from backend.demo1.auth import get_current_user
 
 log = logging.getLogger("paraiq.voice")
 router = APIRouter(prefix="/voice", tags=["voice"])
 openai_client    = openai.AsyncOpenAI(api_key=os.environ.get("OPENAI_API_KEY",""))
-anthropic_client = anthropic.AsyncAnthropic(api_key=os.environ.get("ANTHROPIC_API_KEY",""))
+anthropic_client = get_client()  # use shared sync client singleton
 PARAIQ_BASE_URL  = os.environ.get("PARAIQ_BASE_URL","http://localhost:5003")
 
 COMMAND_CATALOGUE = """
@@ -404,7 +405,7 @@ async def voice_run(
         _log_voice_audit(
             current_user.get("firm_id","default"), current_user.get("id"),
             current_user.get("username",""), None, None,
-            None, 0, False, str(e),
+            None, 0, False, "Voice processing error",
             int((time.time()-t_start)*1000)
         )
         import logging; logging.getLogger(__name__).error(f"[voice_router] Error: {e}")

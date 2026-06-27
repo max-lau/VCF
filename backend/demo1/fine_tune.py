@@ -308,8 +308,8 @@ def run_training(epochs: int = 3):
     except Exception as e:
         training_state.update({
             "status":  "error",
-            "message": f"Training failed: {str(e)}",
-            "error":   str(e),
+            "message": "Training failed — see server logs",
+            "error":   "Internal error occurred",
         })
         print(f"[FineTune] Error: {e}")
 

@@ -527,7 +527,8 @@ async def extract_timeline_ai(
     combined = "\n\n".join(texts)[:8000]
 
     import anthropic as _ant, os as _os, json as _json, re as _re
-    _client = _ant.Anthropic(api_key=_os.getenv("ANTHROPIC_API_KEY"))
+    from backend.demo1.ai_client import get_client as _get_client
+    _client = _get_client()
 
     prompt = (
         "Extract a chronological timeline from these legal case documents.\n"
@@ -539,7 +540,7 @@ async def extract_timeline_ai(
     )
 
     try:
-        msg = _ant.Anthropic(api_key=_os.getenv("ANTHROPIC_API_KEY")).messages.create(
+        msg = _get_client().messages.create(
             model="claude-haiku-4-5-20251001",
             max_tokens=2000,
             messages=[{"role": "user", "content": prompt}]

@@ -85,6 +85,6 @@ def trace_claude_call(
             lf.flush()
             return response, trace_id
         except Exception as e:
-            obs.update(output=str(e), level="ERROR")
+            obs.update(output="error", level="ERROR")
             lf.flush()
             raise

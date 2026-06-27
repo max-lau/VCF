@@ -7,12 +7,13 @@ import os
 import re
 import json
 import spacy
-import anthropic
 from dotenv import load_dotenv
 from typing import Dict
 
+from backend.demo1.ai_client import get_client
+
 load_dotenv()
-client = anthropic.Anthropic(api_key=os.getenv("ANTHROPIC_API_KEY"))
+client = get_client()
 
 # Lazy-load language models
 _MODELS = {}
@@ -179,6 +180,6 @@ Rules:
 
     except Exception as e:
         return {
-            "error":    str(e),
+            "error":    "Internal error occurred",
             "language": {"code": lang_code, "name": lang_name}
         }
