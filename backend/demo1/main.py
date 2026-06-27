@@ -52,6 +52,7 @@ import anthropic
 from backend.demo1.intelligence import get_deadline_radar
 import os
 import json
+import logging
 import re
 import csv
 import io
@@ -59,6 +60,9 @@ import asyncio
 from concurrent.futures import ThreadPoolExecutor
 from typing import List, Optional
 from backend.demo1.enclave_router import router as enclave_privilege_router
+
+logger = logging.getLogger(__name__)
+
 from backend.demo1.db_enclaves import init_enclave_tables
 from backend.demo1.routers.correspondence_router import router as correspondence_router
 from backend.demo1.routers.feedback_router        import router as feedback_router
@@ -139,7 +143,8 @@ class APIKeyMiddleware(BaseHTTPMiddleware):
                 import jwt as _jwt
                 _jwt.decode(auth[7:], os.getenv("JWT_SECRET_KEY", ""), algorithms=["HS256"])
                 has_bearer = True
-            except Exception:
+            except Exception as e:
+                logger.debug(f"[main] JWT decode failed: {e}")
                 has_bearer = False
         if not PARAIQ_API_KEY or (key != PARAIQ_API_KEY and not has_bearer):
             return JSONResponse(
@@ -1215,8 +1220,8 @@ def case_wall(case_id: int, request: Request):
                                 "body": ev.get("description") or ev.get("detail") or "",
                                 "meta": {"source_doc": doc["document_name"]}
                             })
-                    except Exception:
-                        pass
+                    except (json.JSONDecodeError, KeyError, TypeError, ValueError) as e:
+                        logger.debug(f"[main] timeline events_json parse failed for doc {doc.get('document_name')}: {e}")
 
             # ── Notes ─────────────────────────────────────────────────
             notes = conn.execute("""
@@ -1306,8 +1311,8 @@ def case_intelligence(case_id: int, request: Request):
                             "title": f"Answer deadline may have passed ({answer_dl.strftime('%B %d, %Y')})",
                             "description": f"{rule_note} based on filing date appears to have elapsed. Verify current status with the court immediately."
                         })
-                except Exception:
-                    pass
+                except (ValueError, TypeError) as e:
+                    logger.debug(f"[main] answer deadline date parse failed: {e}")
 
             # ── 3. Dates in documents ──────────────────────────────────
             docs = conn.execute(
@@ -1324,8 +1329,8 @@ def case_intelligence(case_id: int, request: Request):
                         diff = (dl - today).days
                         if 0 <= diff <= 30:
                             doc_dates.append((dl, diff, doc["document_name"]))
-                    except Exception:
-                        pass
+                    except (ValueError, TypeError) as e:
+                        logger.debug(f"[main] doc date parse failed for '{ds}': {e}")
 
             for dl, diff, docname in sorted(doc_dates, key=lambda x: x[0])[:3]:
                 sev = "critical" if diff <= 7 else "warning" if diff <= 14 else "watch"
@@ -1347,8 +1352,8 @@ def case_intelligence(case_id: int, request: Request):
                         "title": f"{contr_count} contradiction{'s' if contr_count!=1 else ''} detected across documents",
                         "description": "The AI found conflicting statements between linked documents. Open the Contradictions tab to review each conflict and assess impact on case strategy."
                     })
-            except Exception:
-                pass
+            except Exception as e:
+                logger.debug(f"[main] contradiction count query failed: {e}")
 
             # ── 5. Document coverage ───────────────────────────────────
             doc_count  = len(docs)

@@ -10,11 +10,14 @@ per request. No WHERE firm_id = ? needed in any query.
 
 import os
 import json
+import logging
 import psycopg2
 import psycopg2.extras
 from psycopg2 import pool as pg_pool
 from fastapi import Request, Depends
 from typing import Generator
+
+logger = logging.getLogger(__name__)
 
 # ── connection pool (one global instance) ─────────────────────────────────────
 
@@ -51,7 +54,7 @@ def _checkout(firm_id: str = "default") -> psycopg2.extensions.connection:
 def _checkin(conn: psycopg2.extensions.connection) -> None:
     try:
         conn.rollback()   # clear any uncommitted state before returning
-    except Exception:
+    except psycopg2.Error:
         pass
     _pool.putconn(conn)
 
@@ -135,7 +138,8 @@ def db_dep(request: Request) -> Generator:
     try:
         yield pg
         conn.commit()
-    except Exception:
+    except psycopg2.Error as e:
+        logger.warning(f"[pg] commit failed: {e}")
         conn.rollback()
         raise
     finally:
@@ -171,7 +175,7 @@ def make_tenant_middleware():
                     firm_id = payload.get("firm_id") or "default"
                     request.state.role    = payload.get("role", "")
                     request.state.user_id = payload.get("sub", None)
-                except Exception:
+                except (pyjwt.InvalidTokenError, KeyError, ValueError):
                     pass
             request.state.firm_id = firm_id
             if not hasattr(request.state, "role"):

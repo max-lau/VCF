@@ -111,8 +111,8 @@ def list_queue(
             import json
             try:
                 d["context_json"] = json.loads(d["context_json"])
-            except Exception:
-                pass
+            except (json.JSONDecodeError, ValueError, TypeError) as e:
+                log.warning(f"[ApprovalQueue] context_json parse failed for item {d.get('id')}: {e}")
         items.append(d)
 
     return {"items": items, "pending_count": pending_count}

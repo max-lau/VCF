@@ -1,4 +1,4 @@
-import os, io, subprocess, tempfile
+import os, io, subprocess, tempfile, logging
 import json as _json
 from pathlib import Path
 from datetime import datetime, timezone
@@ -10,6 +10,7 @@ from pydantic import BaseModel as _BM
 from backend.demo1.pg import get_conn
 
 router = APIRouter(prefix="/media", tags=["Media Transcription"])
+logger = logging.getLogger(__name__)
 
 MEDIA_DIR = Path(os.environ.get("MEDIA_DIR",
     str(Path(__file__).parent.parent.parent / "uploads" / "media")))
@@ -112,7 +113,8 @@ async def transcribe_audio(
 
     try:
         result = whisper_transcribe(save_path)
-    except Exception:
+    except Exception as e:
+        logger.warning(f"[Media] audio transcription failed for {file.filename}: {e}")
         raise HTTPException(500, "Transcription failed")
 
     row_id = save_transcription(file.filename, "audio", result, case_number, firm_id)
@@ -152,12 +154,14 @@ async def transcribe_video(
 
     try:
         audio_path = extract_audio_from_video(video_path)
-    except Exception:
+    except Exception as e:
+        logger.warning(f"[Media] audio extraction failed for {file.filename}: {e}")
         raise HTTPException(500, "Audio extraction failed")
 
     try:
         result = whisper_transcribe(audio_path)
-    except Exception:
+    except Exception as e:
+        logger.warning(f"[Media] video transcription failed for {file.filename}: {e}")
         raise HTTPException(500, "Transcription failed")
     finally:
         audio_path.unlink(missing_ok=True)
@@ -216,7 +220,8 @@ def get_transcription(tid: int, request: Request):
     r = dict(row)
     try:
         r["segments"] = _json.loads(r["segments"] or "[]")
-    except Exception:
+    except (_json.JSONDecodeError, KeyError, TypeError, ValueError) as e:
+        logger.warning(f"[Media] failed to parse segments for transcription {tid}: {e}")
         r["segments"] = []
     return r
 
@@ -268,7 +273,8 @@ async def transcribe_from_discovery(
 
     try:
         result = whisper_transcribe(file_path)
-    except Exception:
+    except Exception as e:
+        logger.warning(f"[Media] discovery transcription failed for {row['original_name']}: {e}")
         raise HTTPException(500, "Transcription failed")
 
     cn = case_number or row.get("case_number") or None

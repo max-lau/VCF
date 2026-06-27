@@ -4,6 +4,7 @@ find_linked_entities: uses persisted ChromaDB vector store (swappable via VECTOR
 link_documents_by_entity: uses in-memory FAISS for pairwise doc comparison (stateless, kept as-is).
 """
 import json
+import logging
 import numpy as np
 import faiss
 from sentence_transformers import SentenceTransformer
@@ -11,6 +12,7 @@ from backend.demo1.pg import get_conn
 from backend.demo1.retrieval.factory import get_vector_store
 from typing import List, Dict
 
+logger = logging.getLogger(__name__)
 _EMBEDDER = None
 
 def get_embedder():
@@ -41,7 +43,8 @@ def get_all_entities(firm_id: str = "default") -> List[Dict]:
                     "doc_sentiment": row["sentiment"],
                     "created_at":    row["created_at"]
                 })
-        except Exception:
+        except (json.JSONDecodeError, KeyError, TypeError, ValueError) as e:
+            logger.warning(f"[EntityLinker] failed to parse entities for analysis {row['id']}: {e}")
             continue
     return all_entities
 

@@ -111,8 +111,8 @@ def _serialize(d: dict) -> dict:
         elif hasattr(v, "__float__"):
             try:
                 d[k] = float(v)
-            except Exception:
-                pass
+            except (ValueError, TypeError) as e:
+                log.debug(f"[Billing] Could not coerce field '{k}' to float: {e}")
     return d
 
 

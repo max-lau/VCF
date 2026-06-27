@@ -88,7 +88,8 @@ def gmail_callback(code:str, state:str, db:PgConn=Depends(db_dep)):
         from google.oauth2 import id_token as git
         from google.auth.transport import requests as gr
         email_address = git.verify_oauth2_token(creds.id_token, gr.Request(), GMAIL_CLIENT_ID).get("email","unknown")
-    except Exception:
+    except Exception as e:
+        logger.warning(f"[email_router] id_token verification failed: {e}")
         email_address = "unknown"
     db.execute(
         """INSERT INTO attorney_email_accounts (attorney_id,firm_id,provider,email_address,access_token,refresh_token,token_expiry)

@@ -1,6 +1,7 @@
 import os
 import httpx
 import asyncio
+import logging
 from datetime import datetime, timezone
 from fastapi import APIRouter, HTTPException, BackgroundTasks, Depends
 from pydantic import BaseModel
@@ -8,6 +9,8 @@ from typing import Optional
 
 from backend.demo1.pg import get_conn
 from backend.demo1.auth import get_current_firm_id
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter()
 
@@ -56,7 +59,8 @@ async def deliver_webhook(subscription_id: int, event: str, url: str, payload: d
             success     = resp.status_code < 400
     except httpx.TimeoutException:
         error = "Timeout after 10s"
-    except Exception:
+    except (httpx.HTTPError, OSError) as e:
+        logger.warning(f"[Webhooks] Delivery to {url} failed: {e}")
         error = "Webhook delivery failed"
 
     try:

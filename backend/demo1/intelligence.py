@@ -8,6 +8,7 @@ Three proactive AI features:
 """
 
 import json
+import logging
 import os
 import re
 from backend.demo1.pg import get_conn as _pg_get_conn
@@ -21,6 +22,8 @@ from backend.demo1.ab_testing.logger import log_experiment_result
 from dotenv import load_dotenv
 
 load_dotenv()
+
+logger = logging.getLogger(__name__)
 
 # Claude client — lazily imported from main at call time to avoid circular import
 _client = None
@@ -137,7 +140,8 @@ def _detect_contradictions(doc_a: dict, doc_b: dict) -> dict:
         raw = re.sub(r'^```\s*',     '', raw)
         raw = re.sub(r'\s*```$',     '', raw)
         return json.loads(raw)
-    except Exception:
+    except (json.JSONDecodeError, KeyError, IndexError, TypeError, ValueError) as e:
+        logger.warning(f"[intelligence] contradiction detection parse failed: {e}")
         return {"has_contradictions": False, "contradictions": []}
 
 
@@ -234,15 +238,15 @@ def generate_case_brief(case_id: int) -> dict:
         if d["events_json"]:
             try:
                 all_events.extend(json.loads(d["events_json"])[:5])
-            except Exception:
-                pass
+            except (json.JSONDecodeError, KeyError, TypeError, ValueError) as e:
+                logger.debug(f"[intelligence] events_json parse failed for doc {d.get('document_name')}: {e}")
         if d["entities_json"]:
             try:
                 all_entities.extend(
                     e.get("text", "") for e in json.loads(d["entities_json"])[:5]
                 )
-            except Exception:
-                pass
+            except (json.JSONDecodeError, KeyError, TypeError, ValueError) as e:
+                logger.debug(f"[intelligence] entities_json parse failed for doc {d.get('document_name')}: {e}")
 
     avg_risk     = round(sum(risk_scores) / len(risk_scores), 1) if risk_scores else "N/A"
     notes_text   = "\n".join(f"* [{n['author']}] {n['note']}" for n in notes) or "None."
@@ -338,7 +342,8 @@ def _parse_date_match(m, idx: int):
         if idx == 2:
             mo = _MONTHS.get(m.group(1).lower(), 0)
             return date(int(m.group(3)), mo, int(m.group(2).rstrip(",")))
-    except Exception:
+    except (ValueError, TypeError) as e:
+        logger.debug(f"[intelligence] date match parse failed: {e}")
         return None
 
 
@@ -404,8 +409,8 @@ def get_deadline_radar() -> dict:
                                 "label": case_number,
                                 "days_away": diff
                             })
-                    except Exception:
-                        pass
+                    except (ValueError, TypeError) as e:
+                        logger.debug(f"[intelligence] deadline radar date parse failed for '{ds}': {e}")
 
             # Also check filing_date + 30 days as a basic deadline
             row = filing_row
@@ -426,8 +431,8 @@ def get_deadline_radar() -> dict:
                             "days_away": diff,
                             "event": "30-day answer deadline"
                         })
-                except Exception:
-                    pass
+                except (ValueError, TypeError) as e:
+                    logger.debug(f"[intelligence] filing_date answer deadline parse failed: {e}")
 
         conn.close()
 
@@ -504,7 +509,7 @@ def get_deadline_radar() -> dict:
                         try:
                             d = datetime.strptime(ds, fmt).date()
                             break
-                        except Exception:
+                        except (ValueError, TypeError):
                             pass
                     if not d or d <= today:
                         continue
@@ -529,8 +534,8 @@ def get_deadline_radar() -> dict:
                         "context":      ev.get("description", ev.get("event", "")),
                         "is_deadline":  True,
                     })
-            except Exception:
-                pass
+            except (json.JSONDecodeError, KeyError, TypeError, ValueError) as e:
+                logger.debug(f"[intelligence] events_json scan failed: {e}")
 
     pri = {"CRITICAL": 0, "WARNING": 1, "WATCH": 2}
     deadlines.sort(key=lambda x: (pri.get(x["urgency"], 3), x["days_away"]))

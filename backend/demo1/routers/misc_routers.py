@@ -6,10 +6,11 @@ ai_config_router    — Per-firm AI model and feature settings
 client_portal_router — Read-only token-gated client views
 legal_bert_router   — Legal-BERT analysis endpoint
 """
-import csv, io, json, secrets, os
+import csv, io, json, secrets, os, logging
 from datetime import datetime, timedelta
 from typing import Optional
 
+import httpx
 from fastapi import APIRouter, HTTPException, Depends
 from fastapi.responses import StreamingResponse, JSONResponse
 from pydantic import BaseModel
@@ -22,6 +23,7 @@ from backend.demo1.auth import get_current_firm_id
 # EXPORTS ROUTER
 # ─────────────────────────────────────────────
 exports_router = APIRouter(prefix="/exports", tags=["exports"])
+logger = logging.getLogger(__name__)
 
 # Map table → FK column name (as stored in Postgres)
 _TABLE_FK = {
@@ -99,7 +101,8 @@ def export_matter_json(
                     f"SELECT * FROM {table} WHERE {fk} = %s", (matter_id,)
                 ).fetchall()
                 return [dict(r) for r in rows]
-            except Exception:
+            except (OSError, ValueError, KeyError) as e:
+                logger.warning(f"[Exports] fetch failed for {table}: {e}")
                 return []
 
         payload = {
@@ -141,7 +144,8 @@ def export_matter_summary(
                     f"SELECT COUNT(*) AS c FROM {table} WHERE {fk} = %s", (matter_id,)
                 ).fetchone()
                 counts[table] = row["c"] if row else 0
-            except Exception:
+            except (OSError, ValueError, KeyError) as e:
+                logger.warning(f"[Exports] count failed for {table}: {e}")
                 counts[table] = 0
     return counts
 
@@ -410,8 +414,8 @@ def analyze_text(
             if resp.status_code == 200:
                 result = resp.json()
                 source = "legal_bert_enclave"
-        except Exception:
-            pass
+        except (httpx.HTTPError, httpx.TimeoutException, KeyError, ValueError) as e:
+            logger.warning(f"[LegalBERT] enclave analyze failed: {e}")
 
     if result is None:
         text_lower = req.text.lower()
@@ -474,7 +478,7 @@ def bert_status():
             resp = httpx.get(f"{enclave_url}/health", timeout=5.0)
             if resp.status_code == 200:
                 return {"mode": "enclave", "url": enclave_url, "status": "online"}
-        except Exception:
-            pass
+        except (httpx.HTTPError, httpx.TimeoutException, KeyError, ValueError) as e:
+            logger.warning(f"[LegalBERT] enclave health check failed: {e}")
     return {"mode": "heuristic", "status": "online",
             "note": "Set ENCLAVE_LEGAL_BERT_URL env var to enable Legal-BERT enclave"}

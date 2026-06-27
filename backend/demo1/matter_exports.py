@@ -1,6 +1,6 @@
 from pathlib import Path
 import os
-import io, json, re as _re
+import io, json, re as _re, logging
 from datetime import datetime
 from fastapi import APIRouter, Request
 from fastapi.responses import Response
@@ -13,6 +13,7 @@ from reportlab.lib.units import inch
 from backend.demo1.pg import get_conn
 
 router = APIRouter()
+logger = logging.getLogger(__name__)
 
 
 def base_styles():
@@ -233,8 +234,8 @@ def export_timeline_pdf(case_id: int, request: Request):
                 for ev in json.loads(d["events_json"]):
                     ev["source"] = d["document_name"]
                     events.append(ev)
-            except Exception:
-                pass
+            except (json.JSONDecodeError, KeyError, TypeError, ValueError) as e:
+                logger.warning(f"[MatterExports] failed to parse events_json for {d.get('document_name','?')}: {e}")
 
     events.sort(key=lambda x: (x.get("date") or x.get("event_date") or "0000")[:10])
 

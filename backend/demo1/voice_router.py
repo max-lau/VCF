@@ -194,7 +194,8 @@ If matter-scoped, include case_id in params automatically."""
     raw = msg.content[0].text.strip().strip("```json").strip("```").strip()
     try:
         return json.loads(raw)
-    except Exception:
+    except (json.JSONDecodeError, ValueError, TypeError) as e:
+        log.warning(f"[VoiceRouter] Intent JSON parse failed: {e}")
         return {"action":"unknown","params":{},"confidence":0.0,"understood_as":raw}
 
 

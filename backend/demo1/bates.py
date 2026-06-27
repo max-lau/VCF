@@ -1,5 +1,6 @@
 import os
 import io
+import logging
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Optional, List
@@ -9,6 +10,7 @@ from pydantic import BaseModel
 from backend.demo1.pg import get_conn
 
 router = APIRouter(prefix="/bates", tags=["Bates Numbering"])
+logger = logging.getLogger(__name__)
 
 UPLOAD_DIR = Path(os.environ.get("DISCOVERY_UPLOAD_DIR",
     str(Path(__file__).parent.parent.parent / "uploads" / "discovery")))
@@ -145,7 +147,8 @@ def stamp(body: BatesStampIn, request: Request):
 
         try:
             stamp_pdf(src, out_path, labels)
-        except Exception:
+        except Exception as e:
+            logger.warning(f"[Bates] stamp failed for {row['original_name']}: {e}")
             errors.append({"id": row["id"], "name": row["original_name"], "error": "stamp failed"})
             continue
 

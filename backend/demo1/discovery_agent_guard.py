@@ -340,7 +340,8 @@ class GuardedDiscoveryRunner:
                         raw        = pdf_extract(str(file_path))
                         ocr_text   = " ".join(raw.split())[:10000]
                         page_count = max(1, len(ocr_text) // 2000)
-                    except Exception:
+                    except (OSError, ValueError, TypeError, ImportError) as e:
+                        logger.warning(f"[DiscoveryAgent] PDF text extraction failed for {orig_name}: {e}")
                         ocr_text   = _get_doc_text(orig_name) if _PRIV_OK else ""
                         page_count = 1
 
@@ -488,7 +489,8 @@ class GuardedDiscoveryRunner:
                         raw = _resp.content[0].text.strip()
                         try:
                             ai_enrichment = _json.loads(raw)
-                        except Exception:
+                        except (_json.JSONDecodeError, ValueError, TypeError) as e:
+                            logger.warning(f"[DiscoveryAgent] Enrichment JSON parse failed: {e}")
                             ai_enrichment = {"summary": raw[:200], "key_dates": [], "entities": []}
                         ai_enrichment["input_tokens"]  = _resp.usage.input_tokens
                         ai_enrichment["output_tokens"] = _resp.usage.output_tokens

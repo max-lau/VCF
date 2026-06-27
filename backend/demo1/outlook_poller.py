@@ -138,7 +138,8 @@ def _parse_graph_message(raw: dict, account: dict) -> Optional[EmailMessage]:
         received_str = raw.get("receivedDateTime", "")
         try:
             received_at = datetime.fromisoformat(received_str.replace("Z", "+00:00"))
-        except Exception:
+        except (ValueError, TypeError) as e:
+            logger.debug(f"[outlook_poller] receivedDateTime parse failed for '{received_str}': {e}")
             received_at = datetime.now(timezone.utc)
 
         return EmailMessage(
@@ -321,8 +322,8 @@ def _get_firm_settings(firm_id: str) -> dict:
             ).fetchone()
             if row:
                 return dict(row)
-    except Exception:
-        pass
+    except Exception as e:
+        logger.warning(f"[outlook_poller] _get_firm_settings failed for firm '{firm_id}': {e}")
     return {
         "quiet_hour_start":     int(os.getenv("EMAIL_QUIET_HOUR_START", 21)),
         "quiet_hour_end":       int(os.getenv("EMAIL_QUIET_HOUR_END", 7)),
@@ -339,7 +340,8 @@ def _is_quiet_hours(tz_name: str, quiet_start: int, quiet_end: int) -> bool:
         if quiet_start > quiet_end:
             return hour >= quiet_start or hour < quiet_end
         return quiet_start <= hour < quiet_end
-    except Exception:
+    except (pytz.exceptions.UnknownTimeZoneError, ValueError, TypeError) as e:
+        logger.warning(f"[outlook_poller] _is_quiet_hours failed for tz '{tz_name}': {e}")
         return False
 
 

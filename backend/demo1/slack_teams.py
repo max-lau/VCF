@@ -1,6 +1,7 @@
 import os
 import httpx
 import asyncio
+import logging
 from datetime import datetime, timezone
 from fastapi import APIRouter, HTTPException, Request, Depends
 from pydantic import BaseModel
@@ -8,6 +9,8 @@ from typing import Optional
 
 from backend.demo1.pg import get_conn
 from backend.demo1.auth import get_current_firm_id
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter()
 
@@ -135,7 +138,8 @@ async def send_to_platform(platform: str, payload: dict, event_type: str, mock: 
                 success = resp.status_code < 400
                 log_delivery(platform, event_type, resp.status_code, success, preview=str(payload)[:100], firm_id=firm_id)
                 results.append({"label": cfg["label"], "status": resp.status_code, "success": success})
-            except Exception:
+            except (httpx.HTTPError, OSError) as e:
+                logger.warning(f"[Notify] Webhook delivery to '{cfg['label']}' ({platform}) failed: {e}")
                 log_delivery(platform, event_type, None, False, error="Delivery failed", firm_id=firm_id)
                 results.append({"label": cfg["label"], "error": "Delivery failed", "success": False})
     return {"sent": len(results), "results": results}

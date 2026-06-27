@@ -32,7 +32,8 @@ def _is_quiet_hours(tz_name: str, quiet_start: int, quiet_end: int) -> bool:
         if quiet_start > quiet_end:
             return hour >= quiet_start or hour < quiet_end
         return quiet_start <= hour < quiet_end
-    except Exception:
+    except (pytz.exceptions.UnknownTimeZoneError, ValueError, TypeError) as e:
+        logger.warning(f"[email_poller] _is_quiet_hours failed for tz '{tz_name}': {e}")
         return False
 
 
@@ -93,7 +94,8 @@ def _parse_gmail_message(raw: dict, account: dict) -> Optional[EmailMessage]:
         try:
             from email.utils import parsedate_to_datetime
             received_at = parsedate_to_datetime(headers.get("date", "")).astimezone(timezone.utc)
-        except Exception:
+        except (ValueError, TypeError) as e:
+            logger.debug(f"[email_poller] date header parse failed: {e}")
             received_at = datetime.now(timezone.utc)
 
         msg = EmailMessage(
@@ -297,8 +299,8 @@ def _get_firm_settings(firm_id: str) -> dict:
             row = conn.execute("SELECT * FROM firm_email_settings WHERE firm_id=%s", (firm_id,)).fetchone()
             if row:
                 return dict(row)
-    except Exception:
-        pass
+    except Exception as e:
+        logger.warning(f"[email_poller] _get_firm_settings failed for firm '{firm_id}': {e}")
     return {
         "quiet_hour_start":   int(os.getenv("EMAIL_QUIET_HOUR_START", 21)),
         "quiet_hour_end":     int(os.getenv("EMAIL_QUIET_HOUR_END", 7)),

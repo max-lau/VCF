@@ -6,6 +6,7 @@ Chinese + others: Claude direct processing
 import os
 import re
 import json
+import logging
 import spacy
 from dotenv import load_dotenv
 from typing import Dict
@@ -14,6 +15,8 @@ from backend.demo1.ai_client import get_client
 
 load_dotenv()
 client = get_client()
+
+logger = logging.getLogger(__name__)
 
 # Lazy-load language models
 _MODELS = {}
@@ -28,7 +31,8 @@ def get_model(lang: str):
         if lang in model_map:
             try:
                 _MODELS[lang] = spacy.load(model_map[lang])
-            except Exception:
+            except (OSError, ImportError) as e:
+                logger.warning(f"[Multilingual] spacy.load failed for {model_map[lang]}: {e}")
                 _MODELS[lang] = None
         else:
             _MODELS[lang] = None
@@ -75,7 +79,8 @@ Return:
             messages=[{"role": "user", "content": prompt}]
         )
         return json.loads(clean_json(msg.content[0].text))
-    except Exception:
+    except (json.JSONDecodeError, KeyError, TypeError, ValueError) as e:
+        logger.warning(f"[Multilingual] detect_language failed: {e}")
         return {
             "language_code": "en",
             "language_name": "English",

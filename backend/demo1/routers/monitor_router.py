@@ -5,13 +5,14 @@ Sections: health, api-stats, events, cloudflare, risk-log
 """
 from fastapi import APIRouter, Query
 from typing import Optional
-import os, json, subprocess
+import os, json, subprocess, logging
 from datetime import datetime, timezone, timedelta
 import httpx
 
 from backend.demo1.pg import get_conn
 
 router = APIRouter(prefix="/monitor", tags=["Monitor"])
+logger = logging.getLogger(__name__)
 
 # System-level firm_id for admin monitoring queries (audit_log, risk_assessments).
 # These are system tables not subject to tenant RLS — "default" is intentional.
@@ -63,7 +64,8 @@ async def system_health():
             }
             for p in procs
         ]
-    except Exception:
+    except (subprocess.SubprocessError, json.JSONDecodeError, KeyError) as e:
+        logger.warning(f"[Monitor] pm2 status check failed: {e}")
         result["pm2_error"] = "pm2 status check failed"
 
     return result
@@ -202,7 +204,8 @@ async def cloudflare_status():
                 "indicator":   d["status"]["indicator"],
                 "description": d["status"]["description"],
             }
-        except Exception:
+        except (httpx.HTTPError, httpx.TimeoutException, KeyError, ValueError) as e:
+            logger.warning(f"[Monitor] cloudflare public status check failed: {e}")
             result["public_status_error"] = "cloudflare status check failed"
 
         if not (CF_TOKEN and CF_ZONE):
@@ -220,7 +223,8 @@ async def cloudflare_status():
                     "plan":   z.get("plan", {}).get("name"),
                     "paused": z.get("paused", False),
                 }
-        except Exception:
+        except (httpx.HTTPError, httpx.TimeoutException, KeyError, ValueError) as e:
+            logger.warning(f"[Monitor] zone query failed: {e}")
             result["zone_error"] = "zone query failed"
 
         try:
@@ -249,7 +253,8 @@ async def cloudflare_status():
                     result["analytics_error"] = "no data in last hour"
             else:
                 result["analytics_error"] = str(d.get("errors", "no zones returned"))
-        except Exception:
+        except (httpx.HTTPError, httpx.TimeoutException, KeyError, ValueError) as e:
+            logger.warning(f"[Monitor] analytics query failed: {e}")
             result["analytics_error"] = "analytics query failed"
 
     return result
@@ -267,5 +272,6 @@ async def risk_log(limit: int = Query(20, ge=1, le=100)):
                 LIMIT %s
             """, (limit,)).fetchall()
         return {"assessments": [dict(r) for r in rows]}
-    except Exception:
+    except (OSError, ValueError, KeyError) as e:
+        logger.warning(f"[Monitor] risk-log query failed: {e}")
         return {"assessments": [], "note": "Risk table not yet initialized"}

@@ -12,6 +12,7 @@ Compares two legal documents using:
 
 import re
 import math
+import logging
 from fastapi import APIRouter
 from pydantic import BaseModel
 from typing import Optional
@@ -20,6 +21,7 @@ from sklearn.metrics.pairwise import cosine_similarity
 from backend.demo1.entity_confidence import score_entities
 
 router = APIRouter()
+logger = logging.getLogger(__name__)
 
 # ── Pydantic models ────────────────────────────────────────────────────────────
 
@@ -43,7 +45,8 @@ def cosine_sim(a: str, b: str) -> float:
         matrix = vec.fit_transform([a, b])
         score = cosine_similarity(matrix[0], matrix[1])[0][0]
         return round(float(score), 4)
-    except Exception:
+    except (ValueError, TypeError) as e:
+        logger.warning(f"[DocCompare] cosine_sim failed: {e}")
         return 0.0
 
 

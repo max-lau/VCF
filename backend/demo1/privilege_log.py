@@ -1,6 +1,7 @@
 from pathlib import Path
 import os
 import csv, io, json
+import logging
 from datetime import datetime, timezone
 from typing import Optional, List
 from fastapi import APIRouter, HTTPException, Request
@@ -8,6 +9,8 @@ from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 
 from backend.demo1.pg import get_conn
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/privilege", tags=["Privilege Log"])
 
@@ -64,7 +67,8 @@ Return ONLY valid JSON, no markdown:
         raw = msg.content[0].text.strip()
         raw = clean_json(raw)
         return json.loads(raw)
-    except Exception:
+    except (json.JSONDecodeError, KeyError, TypeError, ValueError) as e:
+        logger.warning(f"[PrivilegeLog] LLM/JSON parse failed for {filename}: {e}")
         return {
             "author":         "Unknown",
             "recipients":     "Unknown",

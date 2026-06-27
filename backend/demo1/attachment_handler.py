@@ -55,7 +55,8 @@ def _ext(filename: str) -> str:
 def _safe_mime(path: Path) -> str:
     try:
         return magic.from_file(str(path), mime=True)
-    except Exception:
+    except (OSError, ValueError) as e:
+        logger.warning(f"[Vault] magic.from_file failed for {path}: {e}")
         return "application/octet-stream"
 
 
@@ -187,7 +188,7 @@ def process_attachments(
             # Remove the zip itself from quarantine after expansion
             try:
                 q_path.unlink()
-            except Exception:
+            except (OSError, PermissionError):
                 pass
         else:
             expanded.append((q_path, original_name))
@@ -211,7 +212,7 @@ def process_attachments(
             # Clean up rejected file from quarantine
             try:
                 q_path.unlink()
-            except Exception:
+            except (OSError, PermissionError):
                 pass
 
     # Write cleared files into case_documents

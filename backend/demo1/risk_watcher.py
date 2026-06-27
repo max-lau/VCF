@@ -8,7 +8,7 @@ Agentic 24/7 system monitor for ParaIQ Super Admin.
 - Fires Slack DM + email if risk >= warning
 - Logs every assessment to risk_assessments table
 """
-import os, json, asyncio, logging
+import os, json, asyncio, logging, subprocess
 from backend.demo1.pg import get_conn as _pg_get_conn
 from datetime import datetime, timezone, timedelta
 
@@ -65,7 +65,8 @@ def collect_system_signals():
         disk = psutil.disk_usage("/")
         signals["disk_percent"]   = round(disk.percent, 1)
         signals["disk_free_gb"]   = round(disk.free / 1024**3, 1)
-    except Exception:
+    except (OSError, ValueError, KeyError) as e:
+        log.warning(f"[RiskWatcher] system signal collection failed: {e}")
         signals["system_error"] = "system signal collection failed"
 
     # API error rate (last hour)
@@ -94,7 +95,8 @@ def collect_system_signals():
         signals["api_error_rate"]   = round(errors / total * 100, 2) if total else 0
         signals["api_avg_ms"]       = round(float(avg_ms), 1) if avg_ms else None
         signals["api_errors_10min"] = recent_errors
-    except Exception:
+    except (OSError, ValueError, KeyError) as e:
+        log.warning(f"[RiskWatcher] database query failed: {e}")
         signals["db_error"] = "database query failed"
 
     # PM2 process health
@@ -110,7 +112,8 @@ def collect_system_signals():
         ]
         signals["processes_down"]         = down
         signals["paraiq_high_restarts"]   = high_restarts
-    except Exception:
+    except (subprocess.SubprocessError, json.JSONDecodeError, KeyError, OSError) as e:
+        log.warning(f"[RiskWatcher] pm2 status check failed: {e}")
         signals["pm2_error"] = "pm2 status check failed"
 
     return signals
@@ -152,7 +155,8 @@ async def collect_cloudflare_signals():
             d3 = r3.json()
             signals["cf_platform_indicator"]   = d3["status"]["indicator"]
             signals["cf_platform_description"] = d3["status"]["description"]
-    except Exception:
+    except (httpx.HTTPError, httpx.TimeoutException, KeyError, ValueError) as e:
+        log.warning(f"[RiskWatcher] cloudflare status check failed: {e}")
         signals["cf_error"] = "cloudflare status check failed"
     return signals
 
