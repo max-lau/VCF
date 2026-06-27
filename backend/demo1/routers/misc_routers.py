@@ -333,9 +333,9 @@ def view_portal(token: str):
                         try:
                             items = ev_json if isinstance(ev_json, list) else __import__('json').loads(ev_json)
                             all_events.extend(items[:5])
-                        except: pass
+                        except (json.JSONDecodeError, KeyError, TypeError): pass
                 payload["timeline"] = all_events[:20]
-            except:
+            except (KeyError, TypeError, ValueError):
                 payload["timeline"] = []
 
     return payload

@@ -208,15 +208,15 @@ async def get_workload_today(token: str) -> dict:
         try:
             r = await http.get(f"{PARAIQ_BASE_URL}/dashboard/deadlines", headers=headers, timeout=10)
             results["deadlines"] = r.json() if r.status_code == 200 else {}
-        except: results["deadlines"] = {}
+        except (httpx.HTTPError, httpx.TimeoutException, KeyError, ValueError): results["deadlines"] = {}
         try:
             r = await http.get(f"{PARAIQ_BASE_URL}/calendar/upcoming", headers=headers, timeout=10)
             results["calendar"] = r.json() if r.status_code == 200 else []
-        except: results["calendar"] = []
+        except (httpx.HTTPError, httpx.TimeoutException, KeyError, ValueError): results["calendar"] = []
         try:
             r = await http.get(f"{PARAIQ_BASE_URL}/dashboard/stats", headers=headers, timeout=10)
             results["stats"] = r.json() if r.status_code == 200 else {}
-        except: results["stats"] = {}
+        except (httpx.HTTPError, httpx.TimeoutException, KeyError, ValueError): results["stats"] = {}
     return {"workload": results}
 
 

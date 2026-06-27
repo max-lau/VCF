@@ -57,7 +57,7 @@ def _build_case_context(case_id: int, firm_id: str) -> dict:
             try:
                 evs = d["events_json"] if isinstance(d["events_json"], list) else json.loads(d["events_json"])
                 all_events.extend(evs[:3])
-            except: pass
+            except (json.JSONDecodeError, KeyError, TypeError): pass
 
     return {
         "case":       case,
