@@ -4,7 +4,7 @@ from pathlib import Path
 import httpx
 from fastapi import APIRouter, UploadFile, File, Form, Depends, HTTPException
 from fastapi.responses import JSONResponse
-import anthropic
+import openai
 from backend.demo1.ai_client import get_client
 from backend.demo1.auth import get_current_user
 
