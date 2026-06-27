@@ -2,7 +2,7 @@
 discovery_intake.py — ParaIQ Discovery Intake & Processing
 All DB access now goes through pg.get_conn(firm_id) for RLS-based tenant isolation.
 """
-import os, io, zipfile, hashlib, mimetypes
+import os, io, zipfile, hashlib, mimetypes, logging
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Optional
@@ -11,6 +11,8 @@ from fastapi.responses import JSONResponse
 import httpx
 
 from backend.demo1.pg import get_conn
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/discovery", tags=["discovery"])
 
@@ -119,9 +121,8 @@ async def _screen_privilege(
             else:
                 confidence = 0.05
 
-    except Exception as exc:
-        import logging
-        logging.getLogger("paraiq.privilege").warning(
+    except (httpx.HTTPError, httpx.TimeoutException, KeyError, ValueError, ImportError) as exc:
+        logger.warning(
             f"Privilege screen failed file_id={file_id}: {exc}"
         )
 
@@ -135,8 +136,7 @@ async def _screen_privilege(
                 (int(privileged), priv_type, confidence, int(requires_review), file_id),
             )
     except Exception as exc:
-        import logging
-        logging.getLogger("paraiq.privilege").error(f"DB verdict write failed: {exc}")
+        logger.error(f"DB verdict write failed file_id={file_id}: {exc}")
 
 
 def _get_doc_text(original_name: str, firm_id: str = "default", fallback: str = "") -> str:
@@ -149,8 +149,8 @@ def _get_doc_text(original_name: str, firm_id: str = "default", fallback: str = 
             ).fetchone()
             if row and row["doc_text"]:
                 return row["doc_text"][:5000]
-    except Exception:
-        pass
+    except Exception as e:
+        logger.warning(f"[discovery] Could not retrieve doc text for '{original_name}': {e}")
     return fallback
 
 
@@ -190,7 +190,8 @@ async def intake_files(
                         for n in zf.namelist()
                         if not n.endswith("/")
                     ]
-            except Exception:
+            except (zipfile.BadZipFile, KeyError, ValueError) as e:
+                logger.warning(f"[discovery] ZIP contents listing failed for {upload.filename}: {e}")
                 route = "unknown"
 
         with get_conn(effective_firm) as conn:
@@ -272,8 +273,8 @@ def remove_from_queue(file_id: int, request: Request):
             raise HTTPException(404, "File not found")
         try:
             (UPLOAD_DIR / row["filename"]).unlink(missing_ok=True)
-        except Exception:
-            pass
+        except (OSError, PermissionError) as e:
+            logger.warning(f"[discovery] Could not delete file {row['filename']}: {e}")
         conn.execute("DELETE FROM discovery_files WHERE id=%s", (file_id,))
     return {"success": True}
 
@@ -393,7 +394,7 @@ async def process_zip(file_id: int, request: Request):
 
             def zip_date(e):
                 try:    return datetime(*e.date_time)
-                except: return datetime.min
+                except (ValueError, TypeError): return datetime.min
             entries.sort(key=zip_date)
 
             for entry in entries:
@@ -410,7 +411,7 @@ async def process_zip(file_id: int, request: Request):
                     route = detect_route(flat_name, mime)
 
                     try:    doc_date = datetime(*entry.date_time).strftime("%Y-%m-%d")
-                    except: doc_date = None
+                    except (ValueError, TypeError): doc_date = None
 
                     with get_conn(firm_id) as conn:
                         cur = conn.execute(
@@ -435,7 +436,7 @@ async def process_zip(file_id: int, request: Request):
                         "doc_date": doc_date,
                         "mime_type": mime,
                     })
-                except Exception as e:
+                except (zipfile.BadZipFile, KeyError, ValueError, OSError) as e:
                     errors.append({"file": entry.filename, "error": "Processing failed"})
 
     except zipfile.BadZipFile:
@@ -557,7 +558,7 @@ def extract_date_from_text(text: str):
             raw = m.group(0).replace(",", "").replace("/", "-")
             for candidate in [raw, " ".join(g for g in m.groups() if g)]:
                 try:    return _dt.strptime(candidate, fmt).strftime("%Y-%m-%d")
-                except: continue
+                except (ValueError, TypeError): continue
     return None
 
 
@@ -586,8 +587,8 @@ async def extract_dates(request: Request, body: dict = None):
                 if fp.exists():
                     text     = fp.read_text(errors="ignore")[:3000]
                     doc_date = extract_date_from_text(text)
-            except Exception:
-                pass
+            except (OSError, UnicodeDecodeError, PermissionError) as e:
+                logger.debug(f"[discovery] Could not read text file {row['filename']}: {e}")
 
         if doc_date:
             with get_conn(firm_id) as conn:
@@ -679,8 +680,8 @@ async def extract_text_to_case(file_id: int, request: Request, background_tasks:
             from pdfminer.high_level import extract_text as pdf_extract
             extracted_text = pdf_extract(str(file_path))
             extracted_text = " ".join(extracted_text.split())[:10000]
-        except Exception as e:
-            import logging; logging.getLogger(__name__).error(f"[discovery_intake] PDF extraction error: {e}")
+        except (ImportError, OSError, ValueError) as e:
+            logger.error(f"[discovery_intake] PDF extraction error: {e}")
         raise HTTPException(500, "PDF extraction failed. Please try again.")
 
     elif route == "audio":

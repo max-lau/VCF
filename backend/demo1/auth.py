@@ -19,6 +19,7 @@ Token expiry: 24 hours (configurable via .env JWT_EXPIRE_HOURS).
 import bcrypt
 import os
 import uuid
+import logging
 from datetime import datetime, timezone, timedelta
 from fastapi import APIRouter, HTTPException, Depends, Request
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
@@ -26,6 +27,8 @@ from pydantic import BaseModel
 from typing import Optional
 import jwt
 from backend.demo1.pg import get_conn
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter()
 bearer = HTTPBearer(auto_error=False)
@@ -100,7 +103,7 @@ def init_auth_table():
             """)
         print("[Auth] Users + token_blocklist tables initialized ✓")
     except Exception as e:
-        print(f"[Auth] Table init skipped (non-fatal): {e}")
+        logger.warning(f"[Auth] Table init skipped (non-fatal): {e}")
 
 
 # ── Password helpers ───────────────────────────────────────────────────────────
@@ -171,7 +174,8 @@ def build_permissions_for_user(user_id: int, firm_id: str = "default") -> dict:
             "modules":   modules,
         }
 
-    except Exception:
+    except Exception as e:
+        logger.warning(f"[Auth] Permissions lookup failed for user_id={user_id}, failing open to associate: {e}")
         return {
             "role":      "associate",
             "tier":      3,
@@ -231,8 +235,7 @@ def decode_token(token: str) -> dict:
     except jwt.InvalidTokenError as e:
         raise HTTPException(401, f"Invalid token: {e}")
     except Exception as e:
-        import logging as _log
-        _log.warning(f"[Auth] Blocklist check failed, failing open: {e}")
+        logger.warning(f"[Auth] Blocklist check failed, failing open: {e}")
         return payload
 
 
@@ -437,8 +440,6 @@ def logout(credentials: HTTPAuthorizationCredentials = Depends(bearer),
 
 def purge_expired_blocklist() -> int:
     """Delete expired rows from token_blocklist. Called by scheduler daily at 03:00 UTC."""
-    import logging
-    log = logging.getLogger(__name__)
     try:
         from backend.demo1.pg import get_conn
         from datetime import datetime, timezone
@@ -448,10 +449,10 @@ def purge_expired_blocklist() -> int:
                 (datetime.now(timezone.utc),)
             )
             deleted = cur.rowcount if cur else 0
-        log.info(f"[Auth] Blocklist cleanup: {deleted} expired token(s) purged")
+        logger.info(f"[Auth] Blocklist cleanup: {deleted} expired token(s) purged")
         return deleted
     except Exception as e:
-        log.error(f"[Auth] Blocklist cleanup failed: {e}")
+        logger.error(f"[Auth] Blocklist cleanup failed: {e}")
         return 0
 
 
@@ -553,6 +554,6 @@ def update_user_role(user_id: int, body: UpdateRoleBody,
                         "INSERT INTO role_assignments (user_id, role_id, firm_id, assigned_at) VALUES (%s, %s, %s, %s)",
                         (user_id, role_row["id"], firm_id, datetime.now(timezone.utc).isoformat())
                     )
-        except Exception:
-            pass
+        except Exception as e:
+            logger.warning(f"[Auth] Role assignment sync failed for user_id={user_id} role={body.role}: {e}")
     return {"success": True, "role": body.role, "tier": ROLE_TIER_MAP.get(body.role, 3)}

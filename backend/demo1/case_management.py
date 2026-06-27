@@ -23,6 +23,9 @@ Endpoints:
 
 import json
 import re
+import logging
+import psycopg2
+import psycopg2.errors
 from datetime import datetime, timezone
 from typing import List, Optional
 from fastapi import Depends, APIRouter, HTTPException, Query
@@ -34,6 +37,7 @@ from backend.demo1.intelligence import (
 )
 from pydantic import BaseModel
 
+logger = logging.getLogger(__name__)
 router = APIRouter()
 
 
@@ -163,11 +167,16 @@ async def create_case(
 
         return {"success": True, "case_id": case_id,
                 "case_number": body.case_number}
-    except Exception as e:
-        if "unique" in str(e).lower():
-            raise HTTPException(409, "Case number already exists")
-        import logging; logging.getLogger(__name__).error(f"[case_management] DB error: {e}")
+    except psycopg2.errors.UniqueViolation:
+        raise HTTPException(409, "Case number already exists")
+    except psycopg2.Error as e:
+        logger.error(f"[case_management] DB error creating case: {e}")
         raise HTTPException(500, "A database error occurred. Please try again.")
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"[case_management] Unexpected error creating case: {e}")
+        raise HTTPException(500, "An unexpected error occurred. Please try again.")
 
 
 @router.get("/stats")
@@ -278,8 +287,9 @@ async def search_cases(
             )
             params += [q.strip(), limit]
             rows = conn.execute(sql, params).fetchall()
-        except Exception:
+        except psycopg2.Error as e:
             # Fallback to ILIKE search
+            logger.warning(f"[case_management] FTS search failed, falling back to ILIKE: {e}")
             rows = conn.execute("""
                 SELECT id, case_number, client_name, matter_number, court,
                        filing_date, status, risk_level, created_at
@@ -323,7 +333,8 @@ async def get_case(
         for f in ["events_json", "entities_json"]:
             if isinstance(d.get(f), str):
                 try: d[f] = json.loads(d[f])
-                except: pass
+                except (json.JSONDecodeError, TypeError) as e:
+                    logger.debug(f"[case_management] Could not parse {f} in case {case_id}: {e}")
 
     case.update({"documents": docs, "notes": notes,
                  "tags": tags, "doc_count": len(docs)})
@@ -429,7 +440,8 @@ async def list_documents(
         for f in ["events_json", "entities_json"]:
             if isinstance(d.get(f), str):
                 try: d[f] = json.loads(d[f])
-                except: pass
+                except (json.JSONDecodeError, TypeError) as e:
+                    logger.debug(f"[case_management] Could not parse {f} in list_documents: {e}")
     return {"case_id": case_id, "documents": docs, "count": len(docs)}
 
 
@@ -451,7 +463,8 @@ async def case_timeline(
             try:
                 if isinstance(ev_json, str):
                     items = json.loads(ev_json)
-            except: pass
+            except (json.JSONDecodeError, TypeError) as e:
+                logger.debug(f"[case_management] Could not parse events_json in timeline: {e}")
             for ev in items:
                 ev["source_doc"] = doc["document_name"]
                 ev["source"]     = "nlp_extractor"
@@ -464,7 +477,8 @@ async def case_timeline(
     def sort_key(ev):
         for fmt in ("%Y-%m-%d", "%m/%d/%Y", "%m/%d/%y", "%B %d, %Y", "%B %d %Y"):
             try: return datetime.strptime((ev.get("date","")).strip(), fmt)
-            except: pass
+            except (ValueError, TypeError):
+                continue
         return datetime.min
 
     all_events.sort(key=sort_key)
@@ -563,7 +577,9 @@ async def extract_timeline_ai(
                         prev = existing["events_json"] or []
                         if isinstance(prev, str):
                             try: prev = _json.loads(prev)
-                            except: prev = []
+                            except (json.JSONDecodeError, TypeError) as e:
+                                logger.debug(f"[case_management] Could not parse events_json in timeline extraction: {e}")
+                                prev = []
                         prev.append(ev)
                         conn.execute(
                             "UPDATE case_documents SET events_json = %s WHERE id = %s",
@@ -579,15 +595,18 @@ async def extract_timeline_ai(
                 conn.execute(
                     "UPDATE cases SET risk_level = %s WHERE id = %s",
                     (_level, case_id))
-        except Exception:
+        except (ImportError, KeyError, TypeError, psycopg2.Error) as e:
+            logger.warning(f"[case_management] Risk scoring failed for case {case_id}: {e}")
             _level = "unknown"
             _score = 0
 
         return {"case_id": case_id, "event_count": len(events),
                 "timeline": events, "docs_scanned": len(texts),
                 "risk_level": _level, "risk_score": round(_score, 1)}
-    except Exception as e:
-        import logging; logging.getLogger(__name__).error(f"[case_management] AI extraction error: {e}")
+    except HTTPException:
+        raise
+    except (json.JSONDecodeError, KeyError, TypeError, psycopg2.Error) as e:
+        logger.error(f"[case_management] AI extraction error: {e}")
         raise HTTPException(500, "AI extraction failed. Please try again.")
 
 
@@ -619,9 +638,12 @@ async def case_brief(case_id: int):
     try:
         brief = generate_case_brief(case_id)
         return {"success": True, "case_id": case_id, "brief": brief}
+    except HTTPException:
+        raise
     except Exception as exc:
+        logger.error(f"[case_management] Brief generation failed for case {case_id}: {exc}")
         raise HTTPException(status_code=500,
-                            detail=f"Brief generation failed: {str(exc)}")
+                            detail="Brief generation failed. Please try again.")
 
 # ── Case Binder ───────────────────────────────────────────────────────────────
 @router.get("/{case_id}/binder")

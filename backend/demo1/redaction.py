@@ -12,11 +12,13 @@ from fastapi import APIRouter, HTTPException, Request, UploadFile, File, Query
 from fastapi.responses import FileResponse
 from pydantic import BaseModel
 from typing import List, Optional
-import os, uuid, json, re
+import os, uuid, json, re, logging
 from pathlib import Path
 from datetime import datetime, timezone
 
 from backend.demo1.pg import get_conn
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter()
 
@@ -134,8 +136,8 @@ def _claude_enhance(text: str, existing_findings: list, style: str, firm_id: str
                     "end":      pos + len(cf["text"]),
                     "source":   "claude",
                 })
-    except Exception:
-        pass
+    except (json.JSONDecodeError, KeyError, IndexError, TypeError, ValueError) as e:
+        logger.warning(f"[redaction] Claude enhance parse error: {e}")
     return existing_findings
 
 
@@ -173,8 +175,8 @@ async def redact_text_endpoint(request: Request, req: RedactTextRequest):
         try:
             findings = _claude_enhance(req.text, findings, req.style, firm_id=getattr(request.state, "firm_id", "default"))
             redacted = _apply_claude_extras(redacted, findings, req.style)
-        except Exception:
-            pass
+        except (json.JSONDecodeError, KeyError, IndexError, TypeError, ValueError) as e:
+            logger.warning(f"[redaction] Claude enhance failed (text endpoint): {e}")
     categories_found      = list({f["category"] for f in findings})
     claude_findings_count = sum(1 for f in findings if f.get("source") == "claude")
     return {
@@ -234,8 +236,8 @@ async def redact_pdf(
         try:
             findings = _claude_enhance(text, findings, style, firm_id=firm_id)
             redacted = _apply_claude_extras(redacted, findings, style)
-        except Exception:
-            pass
+        except (json.JSONDecodeError, KeyError, IndexError, TypeError, ValueError) as e:
+            logger.warning(f"[redaction] Claude enhance failed (PDF endpoint): {e}")
 
     rec_id   = str(uuid.uuid4())[:8]
     base     = os.path.splitext(fname)[0]
@@ -309,8 +311,8 @@ async def delete_redacted_file(request: Request, redaction_id: str):
             raise HTTPException(404, "Redaction not found")
         try:
             Path(row["file_path"]).unlink(missing_ok=True)
-        except Exception:
-            pass
+        except (OSError, PermissionError) as e:
+            logger.warning(f"[redaction] Failed to delete file {row.get('file_path')}: {e}")
         conn.execute(
             "DELETE FROM redactions WHERE id = %s AND firm_id = %s",
             (redaction_id, firm_id)

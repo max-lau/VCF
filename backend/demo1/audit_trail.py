@@ -8,6 +8,8 @@ Logs every API request to the audit_log table in Supabase Postgres.
 import time
 import csv as _csv
 import io as _io
+import logging
+import jwt
 from datetime import datetime, timezone
 from fastapi import APIRouter, Request
 from fastapi.responses import JSONResponse, StreamingResponse as SR
@@ -15,6 +17,8 @@ from starlette.middleware.base import BaseHTTPMiddleware
 from typing import Optional
 
 from backend.demo1.pg import get_conn
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter()
 
@@ -53,7 +57,7 @@ def log_request(method, endpoint, status_code, response_time_ms,
                 firm_id,
             ))
     except Exception as e:
-        print(f"[AuditTrail] Log error: {e}")
+        logger.error(f"[AuditTrail] Log error: {e}")
 
 
 # ── Middleware ─────────────────────────────────────────────────────────────────
@@ -89,8 +93,12 @@ class AuditMiddleware(BaseHTTPMiddleware):
                 )
                 user_id = int(_payload["sub"]) if _payload.get("sub") else None
                 firm_id = _payload.get("firm_id", "default")
-            except Exception:
-                pass
+            except jwt.ExpiredSignatureError:
+                logger.debug("[AuditTrail] Expired JWT in audit middleware")
+            except jwt.InvalidTokenError as e:
+                logger.debug(f"[AuditTrail] Invalid JWT in audit middleware: {e}")
+            except Exception as e:
+                logger.warning(f"[AuditTrail] JWT decode failed in middleware: {e}")
 
         body      = await request.body()
         body_size = len(body)
@@ -104,7 +112,8 @@ class AuditMiddleware(BaseHTTPMiddleware):
         try:
             response    = await call_next(request)
             status_code = response.status_code
-        except Exception:
+        except Exception as e:
+            logger.error(f"[AuditTrail] Unhandled error in {request.method} {path}: {e}")
             error    = "internal server error"
             response = JSONResponse({"detail": "Internal server error"}, status_code=500)
 

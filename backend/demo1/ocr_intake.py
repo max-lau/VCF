@@ -17,6 +17,8 @@ import io
 import re
 import base64
 import json
+import logging
+import httpx
 from datetime import datetime, timezone
 from fastapi import APIRouter, UploadFile, File, HTTPException, Form, Request
 from typing import Optional
@@ -24,6 +26,8 @@ from PIL import Image
 import pytesseract
 
 from backend.demo1.pg import get_conn
+
+logger = logging.getLogger(__name__)
 
 pytesseract.pytesseract.tesseract_cmd = 'tesseract'
 
@@ -100,8 +104,9 @@ def ocr_with_tesseract(image_bytes: bytes, lang: str = "eng") -> dict:
             "confidence": avg_conf,
             "engine":     "tesseract",
         }
-    except Exception as e:
-        raise HTTPException(400, "OCR failed")
+    except (IOError, OSError, ValueError, pytesseract.TesseractError) as e:
+        logger.error(f"[Intake] Tesseract OCR failed: {e}")
+        raise HTTPException(400, "OCR failed — could not process the image")
 
 
 # ── Smart dispatcher ───────────────────────────────────────────────────────────
@@ -113,8 +118,8 @@ def extract_text(image_bytes: bytes, lang: str = "eng",
         return ocr_with_tesseract(image_bytes, lang)
     try:
         return ocr_with_claude(image_bytes, mime_type, firm_id=firm_id)
-    except Exception as e:
-        print(f"[Intake] Claude Vision failed, falling back to Tesseract: {e}")
+    except (httpx.HTTPError, httpx.TimeoutException, KeyError, IndexError, ValueError) as e:
+        logger.warning(f"[Intake] Claude Vision failed, falling back to Tesseract: {e}")
         return ocr_with_tesseract(image_bytes, lang)
 
 
@@ -332,7 +337,8 @@ def intake_history(request: Request, limit: int = 20):
         for f in ("entities_json", "form_fields"):
             if d.get(f):
                 try: d[f] = json.loads(d[f])
-                except: pass
+                except (json.JSONDecodeError, TypeError) as e:
+                    logger.debug(f"[Intake] Could not parse {f} in history: {e}")
         results.append(d)
     return {"success": True, "count": len(results), "scans": results}
 
@@ -443,7 +449,8 @@ async def transcribe_audio(
                 rd["original_transcript"] = transcript
                 rd["applied"] = True
                 response["redaction"] = rd
-            except Exception:
+            except (json.JSONDecodeError, KeyError, TypeError, ValueError) as e:
+                logger.warning(f"[Intake] Audio redaction failed: {e}")
                 response["redaction"] = {"applied": False, "error": "Redaction failed"}
 
         return response
@@ -452,10 +459,13 @@ async def transcribe_audio(
         raise HTTPException(status_code=500, detail="Invalid or missing OpenAI API key")
     except openai.BadRequestError as e:
         raise HTTPException(status_code=400, detail="Audio file could not be processed")
-    except Exception:
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"[Intake] Audio transcription failed: {e}")
         raise HTTPException(status_code=500, detail="Transcription failed")
     finally:
         try:
             os.unlink(tmp_path)
-        except Exception:
-            pass
+        except (OSError, PermissionError) as e:
+            logger.debug(f"[Intake] Could not delete temp file {tmp_path}: {e}")
