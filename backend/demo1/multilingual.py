@@ -183,7 +183,7 @@ Rules:
         result["word_count"] = len(text.split())
         return result
 
-    except Exception as e:
+    except (json.JSONDecodeError, KeyError, IndexError, TypeError, ValueError) as e:
         return {
             "error":    "Internal error occurred",
             "language": {"code": lang_code, "name": lang_name}

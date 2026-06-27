@@ -84,7 +84,7 @@ def trace_claude_call(
             )
             lf.flush()
             return response, trace_id
-        except Exception as e:
+        except (KeyError, ValueError, TypeError, OSError) as e:
             obs.update(output="error", level="ERROR")
             lf.flush()
             raise

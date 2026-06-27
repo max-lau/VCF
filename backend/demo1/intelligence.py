@@ -94,7 +94,7 @@ def run_case_contradiction_scan(case_id: int, new_doc_id: int):
             if result.get("has_contradictions"):
                 _save_contradictions(case_id, doc_a, doc_b,
                                      result.get("contradictions", []))
-    except Exception as exc:
+    except (KeyError, ValueError, TypeError, OSError) as exc:
         print(f"[intelligence] Contradiction scan error: {exc}")
 
 
@@ -448,7 +448,7 @@ def get_deadline_radar() -> dict:
         unique.sort(key=lambda x: x["date"])
         return {"deadlines": unique, "count": len(unique)}
 
-    except Exception as e:
+    except (KeyError, ValueError, TypeError, OSError) as e:
         return {"deadlines": [], "count": 0, "error": "Internal error occurred"}
 
     """

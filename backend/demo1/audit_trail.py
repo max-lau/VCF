@@ -56,7 +56,7 @@ def log_request(method, endpoint, status_code, response_time_ms,
                 user_id,
                 firm_id,
             ))
-    except Exception as e:
+    except (psycopg2.Error, OSError, ValueError) as e:
         logger.error(f"[AuditTrail] Log error: {e}")
 
 
@@ -97,7 +97,7 @@ class AuditMiddleware(BaseHTTPMiddleware):
                 logger.debug("[AuditTrail] Expired JWT in audit middleware")
             except jwt.InvalidTokenError as e:
                 logger.debug(f"[AuditTrail] Invalid JWT in audit middleware: {e}")
-            except Exception as e:
+            except (KeyError, ValueError, TypeError) as e:
                 logger.warning(f"[AuditTrail] JWT decode failed in middleware: {e}")
 
         body      = await request.body()
@@ -112,7 +112,7 @@ class AuditMiddleware(BaseHTTPMiddleware):
         try:
             response    = await call_next(request)
             status_code = response.status_code
-        except Exception as e:
+        except (RuntimeError, OSError, asyncio.CancelledError) as e:
             logger.error(f"[AuditTrail] Unhandled error in {request.method} {path}: {e}")
             error    = "internal server error"
             response = JSONResponse({"detail": "Internal server error"}, status_code=500)

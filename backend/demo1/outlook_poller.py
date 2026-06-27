@@ -159,7 +159,7 @@ def _parse_graph_message(raw: dict, account: dict) -> Optional[EmailMessage]:
             source_url=raw.get("webLink", ""),
             attachment_names=[],
         )
-    except Exception as e:
+    except (ValueError, KeyError, TypeError, AttributeError) as e:
         logger.error(f"Failed to parse Outlook message {raw.get('id')}: {e}")
         return None
 
@@ -179,7 +179,7 @@ def _get_processed_ids(attorney_id, firm_id: str) -> set:
             if hasattr(rows[0], 'keys'):
                 return {r["provider_message_id"] for r in rows}
             return {r[0] for r in rows}
-    except Exception as e:
+    except (psycopg2.Error, KeyError, ValueError) as e:
         logger.warning(f"[Outlook Dedup] Could not fetch processed IDs: {e}")
         return set()
 
@@ -270,7 +270,7 @@ def _save_to_db(msg: EmailMessage, result, firm_id: str):
                                 att_list.append({"filename": att.get("name", "attachment"), "data": data})
                 if att_list:
                     process_attachments(att_list, msg.firm_id, result.case_id_matched, intake_id, conn)
-            except Exception as ve:
+            except (OSError, ValueError, KeyError) as ve:
                 logger.error(f"[Vault] Outlook attachment processing error: {ve}")
         # -- Attachment vault (Outlook) --
         if (intake_id and result.routing_decision == "intake"
@@ -292,7 +292,7 @@ def _save_to_db(msg: EmailMessage, result, firm_id: str):
                                 att_list.append({"filename": att.get("name", "attachment"), "data": data})
                 if att_list:
                     process_attachments(att_list, msg.firm_id, result.case_id_matched, intake_id, conn)
-            except Exception as ve:
+            except (OSError, ValueError, KeyError) as ve:
                 logger.error(f"[Vault] Outlook attachment processing error: {ve}")
     return intake_id
 
@@ -322,7 +322,7 @@ def _get_firm_settings(firm_id: str) -> dict:
             ).fetchone()
             if row:
                 return dict(row)
-    except Exception as e:
+    except (psycopg2.Error, KeyError, ValueError) as e:
         logger.warning(f"[outlook_poller] _get_firm_settings failed for firm '{firm_id}': {e}")
     return {
         "quiet_hour_start":     int(os.getenv("EMAIL_QUIET_HOUR_START", 21)),
@@ -356,7 +356,7 @@ def poll_outlook_account(account: dict):
         token_result = refresh_access_token(account["refresh_token"])
         access_token = token_result["access_token"]
         new_refresh   = token_result.get("refresh_token", account["refresh_token"])
-    except Exception as e:
+    except (httpx.HTTPError, KeyError, ValueError, RuntimeError) as e:
         logger.error(f"[Outlook] Token refresh failed for {account['email_address']}: {e}")
         if "invalid_grant" in str(e).lower():
             from .pg import get_conn
@@ -367,7 +367,7 @@ def poll_outlook_account(account: dict):
                         (account["id"],)
                     )
                 logger.warning(f"[Outlook] Auto-deactivated {account['email_address']} — invalid_grant. Re-authenticate via Settings.")
-            except Exception as db_err:
+            except (psycopg2.Error, OSError) as db_err:
                 logger.error(f"[Outlook] Failed to deactivate account: {db_err}")
         return
 
@@ -395,7 +395,7 @@ def poll_outlook_account(account: dict):
             filter_result = engine.process(msg)
             _save_to_db(msg, filter_result, firm_id)
 
-    except Exception as e:
+    except (httpx.HTTPError, ValueError, KeyError, RuntimeError) as e:
         logger.error(f"[Outlook] API error for {account['email_address']}: {e}")
 
 
@@ -436,7 +436,7 @@ class OutlookPollerService:
                 logger.info(f"[Outlook Poller] Cycle complete. Sleeping {sleep_interval}s.")
                 await asyncio.sleep(sleep_interval)
 
-            except Exception as e:
+            except (RuntimeError, OSError, asyncio.CancelledError, ValueError) as e:
                 logger.error(f"[Outlook Poller] Unexpected error: {e}")
                 await asyncio.sleep(60)
 

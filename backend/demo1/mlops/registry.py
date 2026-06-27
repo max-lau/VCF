@@ -119,7 +119,7 @@ def get_latest_model_version(model_name: str = "paraiq-legal-classifier") -> dic
             "source":      latest.source,
             "created_at":  latest.creation_timestamp,
         }
-    except Exception as e:
+    except (KeyError, ValueError, TypeError, OSError) as e:
         return {"error": "Internal error occurred"}
 
 
@@ -141,5 +141,5 @@ def list_model_versions(model_name: str = "paraiq-legal-classifier") -> list:
                 "trained_at": run.data.tags.get("trained_at", "unknown"),
             })
         return results
-    except Exception as e:
+    except (KeyError, ValueError, TypeError, OSError) as e:
         return [{"error": "Internal error occurred"}]

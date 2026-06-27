@@ -20,6 +20,7 @@ import bcrypt
 import os
 import uuid
 import logging
+import psycopg2
 from datetime import datetime, timezone, timedelta
 from fastapi import APIRouter, HTTPException, Depends, Request
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
@@ -102,7 +103,7 @@ def init_auth_table():
                 )
             """)
         print("[Auth] Users + token_blocklist tables initialized ✓")
-    except Exception as e:
+    except (psycopg2.Error, OSError) as e:
         logger.warning(f"[Auth] Table init skipped (non-fatal): {e}")
 
 
@@ -174,7 +175,7 @@ def build_permissions_for_user(user_id: int, firm_id: str = "default") -> dict:
             "modules":   modules,
         }
 
-    except Exception as e:
+    except (psycopg2.Error, KeyError, ValueError) as e:
         logger.warning(f"[Auth] Permissions lookup failed for user_id={user_id}, failing open to associate: {e}")
         return {
             "role":      "associate",
@@ -234,7 +235,7 @@ def decode_token(token: str) -> dict:
         raise HTTPException(401, "Token has expired")
     except jwt.InvalidTokenError as e:
         raise HTTPException(401, f"Invalid token: {e}")
-    except Exception as e:
+    except (psycopg2.Error, KeyError, ValueError) as e:
         logger.warning(f"[Auth] Blocklist check failed, failing open: {e}")
         return payload
 
@@ -451,7 +452,7 @@ def purge_expired_blocklist() -> int:
             deleted = cur.rowcount if cur else 0
         logger.info(f"[Auth] Blocklist cleanup: {deleted} expired token(s) purged")
         return deleted
-    except Exception as e:
+    except (psycopg2.Error, OSError, ValueError) as e:
         logger.error(f"[Auth] Blocklist cleanup failed: {e}")
         return 0
 
@@ -554,6 +555,6 @@ def update_user_role(user_id: int, body: UpdateRoleBody,
                         "INSERT INTO role_assignments (user_id, role_id, firm_id, assigned_at) VALUES (%s, %s, %s, %s)",
                         (user_id, role_row["id"], firm_id, datetime.now(timezone.utc).isoformat())
                     )
-        except Exception as e:
+        except (psycopg2.Error, KeyError, ValueError) as e:
             logger.warning(f"[Auth] Role assignment sync failed for user_id={user_id} role={body.role}: {e}")
     return {"success": True, "role": body.role, "tier": ROLE_TIER_MAP.get(body.role, 3)}

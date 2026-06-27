@@ -59,6 +59,8 @@ import io
 import asyncio
 from concurrent.futures import ThreadPoolExecutor
 from typing import List, Optional
+import jwt
+import psycopg2
 from backend.demo1.enclave_router import router as enclave_privilege_router
 
 logger = logging.getLogger(__name__)
@@ -114,7 +116,7 @@ def save_work_product(endpoint: str, result: dict, firm_id: str, case_id=None, u
                 (firm_id, case_id, user_id, endpoint, input_preview[:500], _json.dumps(result))
             )
             conn.commit()
-    except Exception as _e:
+    except (psycopg2.Error, KeyError, ValueError) as _e:
         import logging
         logging.warning(f"save_work_product failed for {endpoint}: {_e}")
 
@@ -143,7 +145,7 @@ class APIKeyMiddleware(BaseHTTPMiddleware):
                 import jwt as _jwt
                 _jwt.decode(auth[7:], os.getenv("JWT_SECRET_KEY", ""), algorithms=["HS256"])
                 has_bearer = True
-            except Exception as e:
+            except (jwt.InvalidTokenError, jwt.ExpiredSignatureError, KeyError, ValueError) as e:
                 logger.debug(f"[main] JWT decode failed: {e}")
                 has_bearer = False
         if not PARAIQ_API_KEY or (key != PARAIQ_API_KEY and not has_bearer):
@@ -190,7 +192,7 @@ async def startup_event():
             while True:
                 try:
                     await cls().run()
-                except Exception as exc:
+                except (RuntimeError, OSError, asyncio.CancelledError, ValueError) as exc:
                     logging.warning(f"[Poller] {cls.__name__} crashed: {exc}. Restarting in 60s.")
                     await asyncio.sleep(60)
         return _run
@@ -461,7 +463,7 @@ def claude_with_retry(func, *args, max_retries=3, firm_id: str = "default", **kw
                         firm_id=firm_id,
                         **kwargs,
                     )
-                except Exception as _trace_err:
+                except (KeyError, ValueError, TypeError, OSError) as _trace_err:
                     import logging as _log
                     _log.warning(f"[Tracer] Langfuse trace failed, falling back to direct call: {_trace_err}")
                     response = func(*args, **kwargs)
@@ -478,7 +480,7 @@ def claude_with_retry(func, *args, max_retries=3, firm_id: str = "default", **kw
                         firm_id=firm_id,
                         status="success",
                     )
-                except Exception as _mf_err:
+                except (KeyError, ValueError, TypeError, OSError) as _mf_err:
                     import logging as _log
                     _log.debug(f"[MLflow] Log failed (non-fatal): {_mf_err}")
                 return response
@@ -572,7 +574,7 @@ Max 8 entities, max 10 keywords, max 3 tone items."""
             parsed["flagged"] = False
 
         return parsed
-    except Exception as e:
+    except (json.JSONDecodeError, KeyError, TypeError, ValueError) as e:
         import logging
         logging.error(f"run_analysis error for label={label}: {e}")
         return {
@@ -1150,7 +1152,7 @@ def dashboard_stats(request: Request):
             ).fetchone()
             out["languages"] = r["n"] if r else 0
 
-    except Exception as e:
+    except (psycopg2.Error, KeyError, ValueError) as e:
         import logging
         logging.warning(f"dashboard_stats DB error: {e}")
 
@@ -1352,7 +1354,7 @@ def case_intelligence(case_id: int, request: Request):
                         "title": f"{contr_count} contradiction{'s' if contr_count!=1 else ''} detected across documents",
                         "description": "The AI found conflicting statements between linked documents. Open the Contradictions tab to review each conflict and assess impact on case strategy."
                     })
-            except Exception as e:
+            except (psycopg2.Error, KeyError, ValueError) as e:
                 logger.debug(f"[main] contradiction count query failed: {e}")
 
             # ── 5. Document coverage ───────────────────────────────────
@@ -1435,7 +1437,7 @@ def case_intelligence(case_id: int, request: Request):
                     ai_signals = _json.loads(clean_json(ai_resp.content[0].text))
                     if isinstance(ai_signals, list):
                         signals.extend(ai_signals)
-                except Exception as _e:
+                except (json.JSONDecodeError, KeyError, IndexError, TypeError, ValueError) as _e:
                     import logging
                     logging.warning(f"case_intelligence AI signal failed: {_e}")
 

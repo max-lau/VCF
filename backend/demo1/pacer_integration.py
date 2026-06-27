@@ -30,6 +30,7 @@ import re
 import json
 import time
 import logging
+import psycopg2
 from backend.demo1.pg import get_conn
 import io
 from datetime import datetime, timezone
@@ -134,7 +135,7 @@ def pacer_login_request(username: str, password: str, client_code: str = "") -> 
         return {"success": True, "token": token,
                 "expires_at": time.time() + TOKEN_TTL_SECS,
                 "username": username}
-    except Exception as e:
+    except (requests.RequestException, requests.Timeout, KeyError, ValueError) as e:
         return {"success": False, "error": "Internal error occurred"}
 
 
@@ -172,7 +173,7 @@ def pdf_to_text(pdf_bytes: bytes) -> str:
             if len(pdf.pages) > PACER_MAX_PAGES:
                 logger.info(f"[PACER] PDF truncated to {PACER_MAX_PAGES}/{len(pdf.pages)} pages")
             return "\n".join(p.extract_text() or "" for p in pages).strip()
-    except Exception as e:
+    except (OSError, ValueError, KeyError) as e:
         logger.error(f"PDF extraction failed: {e}")
         return ""
 
@@ -210,7 +211,7 @@ def run_nlp_pipeline(text: str) -> dict:
                     results["summary"] = d.get("summary", "")
                 else:
                     results[key] = d.get(key, [])
-        except Exception as e:
+        except (requests.RequestException, requests.Timeout, KeyError, ValueError) as e:
             logger.warning(f"NLP endpoint {endpoint} failed: {e}")
 
     return results
@@ -234,7 +235,7 @@ def add_to_case(case_id: int, document_name: str, doc_text: str,
                   nlp.get("summary",""), nlp.get("language","en"),
                   pacer_doc_id, pacer_seq_no))
         return True
-    except Exception as e:
+    except (psycopg2.Error, KeyError, ValueError) as e:
         logger.error(f"add_to_case failed: {e}")
         return False
     finally:

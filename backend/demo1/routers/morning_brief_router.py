@@ -11,6 +11,7 @@ Mount in main.py:
 """
 
 import json, logging
+import psycopg2
 from datetime import datetime, timezone, timedelta, date
 from fastapi import APIRouter, Depends, HTTPException
 from backend.demo1.auth import get_current_user, get_current_firm_id
@@ -27,7 +28,7 @@ def get_active_firms() -> list:
                 "SELECT DISTINCT firm_id FROM users WHERE active=TRUE AND firm_id IS NOT NULL"
             ).fetchall()
             return [r["firm_id"] for r in rows] if rows else ["default"]
-    except Exception as e:
+    except (psycopg2.Error, KeyError, ValueError) as e:
         log.warning(f"[MorningBrief] Could not fetch firms: {e}")
         return ["default"]  # safe fallback — only serve super-admin firm on DB error
 
@@ -79,7 +80,7 @@ def generate_morning_brief(firm_id: str) -> dict:
                 d["urgency"]    = "today" if days_away == 0 else ("tomorrow" if days_away == 1 else f"in {days_away} days")
                 d["due_date"]   = d["due_date"].isoformat() if d.get("due_date") else None
                 brief["deadlines"].append(d)
-        except Exception as e:
+        except (psycopg2.Error, KeyError, ValueError) as e:
             log.warning(f"[MorningBrief] Deadlines error: {e}")
 
         # 2. Pending approval queue items
@@ -98,7 +99,7 @@ def generate_morning_brief(firm_id: str) -> dict:
                     if q.get(f) and hasattr(q[f], "isoformat"):
                         q[f] = q[f].isoformat()
                 brief["approval_queue"].append(q)
-        except Exception as e:
+        except (psycopg2.Error, KeyError, ValueError) as e:
             log.warning(f"[MorningBrief] Approval queue error: {e}")
 
         # 3. Matters that changed status in last 24h
@@ -118,7 +119,7 @@ def generate_morning_brief(firm_id: str) -> dict:
                 if c.get("updated_at") and hasattr(c["updated_at"], "isoformat"):
                     c["updated_at"] = c["updated_at"].isoformat()
                 brief["matter_changes"].append(c)
-        except Exception as e:
+        except (psycopg2.Error, KeyError, ValueError) as e:
             log.warning(f"[MorningBrief] Matter changes error: {e}")
 
         # 4. Last risk watcher assessment
@@ -133,7 +134,7 @@ def generate_morning_brief(firm_id: str) -> dict:
                 if r.get("assessed_at") and hasattr(r["assessed_at"], "isoformat"):
                     r["assessed_at"] = r["assessed_at"].isoformat()
                 brief["risk_snapshot"] = r
-        except Exception as e:
+        except (psycopg2.Error, KeyError, ValueError) as e:
             log.warning(f"[MorningBrief] Risk snapshot error: {e}")
 
         # 5. Unread high-priority notifications (priority <= 2)
@@ -151,7 +152,7 @@ def generate_morning_brief(firm_id: str) -> dict:
                 if n.get("created_at") and hasattr(n["created_at"], "isoformat"):
                     n["created_at"] = n["created_at"].isoformat()
                 brief["urgent_notifications"].append(n)
-        except Exception as e:
+        except (psycopg2.Error, KeyError, ValueError) as e:
             log.warning(f"[MorningBrief] Notifications error: {e}")
 
         # 6. Unconfirmed docketing events
@@ -172,7 +173,7 @@ def generate_morning_brief(firm_id: str) -> dict:
                 if d.get("calculated_date") and hasattr(d["calculated_date"], "isoformat"):
                     d["calculated_date"] = d["calculated_date"].isoformat()
                 brief["unconfirmed_docketing"].append(d)
-        except Exception as e:
+        except (KeyError, TypeError, ValueError, AttributeError) as e:
             log.warning(f"[MorningBrief] Docketing events error: {e}")
 
     # Build plain-text summary for voice/email
@@ -223,7 +224,7 @@ def generate_morning_brief(firm_id: str) -> dict:
                 json.dumps(brief), summary_text,
                 json.dumps(brief), summary_text,
             ))
-    except Exception as e:
+    except (psycopg2.Error, KeyError, ValueError, TypeError) as e:
         log.error(f"[MorningBrief] Save failed: {e}")
 
     log.info(f"[MorningBrief] Generated for {firm_id}: {len(brief['deadlines'])} deadlines, {len(brief['approval_queue'])} approvals, {len(brief['unconfirmed_docketing'])} unconfirmed docketing")
@@ -235,7 +236,7 @@ def run_all_firms_brief():
     for firm_id in get_active_firms():
         try:
             generate_morning_brief(firm_id)
-        except Exception as e:
+        except (RuntimeError, psycopg2.Error, KeyError, ValueError, TypeError) as e:
             log.error(f"[MorningBrief] Failed for {firm_id}: {e}")
 
 

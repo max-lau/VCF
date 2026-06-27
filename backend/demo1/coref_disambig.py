@@ -84,7 +84,7 @@ Rules: max 10 entities, max 5 graph pairs, confidence 0.0-1.0."""
         result = json.loads(clean_json(message.content[0].text))
         result["raw_entities"] = entities
         return result
-    except Exception as e:
+    except (json.JSONDecodeError, KeyError, IndexError, TypeError, ValueError) as e:
         return {
             "disambiguated": [],
             "entity_graph":  [],
@@ -146,7 +146,7 @@ Rules: max 8 chains, max 3 ambiguous pronouns."""
         result = json.loads(clean_json(message.content[0].text))
         result["raw_entities"] = entities
         return result
-    except Exception as e:
+    except (json.JSONDecodeError, KeyError, IndexError, TypeError, ValueError) as e:
         return {
             "chains":             [],
             "resolved_text":      text,

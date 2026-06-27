@@ -78,7 +78,7 @@ def check_case_for_advances(case_id: int, firm_id: str, jwt_token: str):
                                   "confidence": confidence},
                             headers={"Authorization": f"Bearer {jwt_token}"},
                             timeout=5.0)
-                except Exception as e:
+                except (httpx.HTTPError, httpx.TimeoutException, OSError) as e:
                     log.warning("Hermes signal failed for card %d: %s", card_row["id"], e)
 
 async def run_hermes_kanban(jwt_token: str):

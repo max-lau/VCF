@@ -202,7 +202,7 @@ def compare_documents(body: CompareInput):
             ents_a = spacy_ents(body.doc_a)
             ents_b = spacy_ents(body.doc_b)
             result["entities"] = entity_overlap(ents_a, ents_b)
-        except Exception as e:
+        except (KeyError, ValueError, TypeError, ImportError, OSError) as e:
             result["entities"] = {"error": "Internal error occurred"}
 
     return result

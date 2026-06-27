@@ -305,7 +305,7 @@ def run_training(epochs: int = 3):
                         "train_size": len(train_texts), "val_size": len(val_texts)},
         })
 
-    except Exception as e:
+    except (OSError, ValueError, TypeError, RuntimeError) as e:
         training_state.update({
             "status":  "error",
             "message": "Training failed — see server logs",

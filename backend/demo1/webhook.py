@@ -2,6 +2,7 @@ import os
 import httpx
 import asyncio
 import logging
+import psycopg2
 from datetime import datetime, timezone
 from fastapi import APIRouter, HTTPException, BackgroundTasks, Depends
 from pydantic import BaseModel
@@ -75,7 +76,7 @@ async def deliver_webhook(subscription_id: int, event: str, url: str, payload: d
                 SET last_fired=%s, fire_count=fire_count+1, last_status=%s
                 WHERE id=%s
             """, (fired_at, status_code, subscription_id))
-    except Exception as e:
+    except (psycopg2.Error, KeyError, ValueError) as e:
         print(f"[Webhooks] Log error: {e}")
 
 

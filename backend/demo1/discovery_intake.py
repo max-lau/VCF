@@ -3,6 +3,7 @@ discovery_intake.py — ParaIQ Discovery Intake & Processing
 All DB access now goes through pg.get_conn(firm_id) for RLS-based tenant isolation.
 """
 import os, io, zipfile, hashlib, mimetypes, logging
+import psycopg2
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Optional
@@ -135,7 +136,7 @@ async def _screen_privilege(
                    WHERE id=%s""",
                 (int(privileged), priv_type, confidence, int(requires_review), file_id),
             )
-    except Exception as exc:
+    except (psycopg2.Error, KeyError, ValueError) as exc:
         logger.error(f"DB verdict write failed file_id={file_id}: {exc}")
 
 
@@ -149,7 +150,7 @@ def _get_doc_text(original_name: str, firm_id: str = "default", fallback: str = 
             ).fetchone()
             if row and row["doc_text"]:
                 return row["doc_text"][:5000]
-    except Exception as e:
+    except (psycopg2.Error, KeyError, ValueError) as e:
         logger.warning(f"[discovery] Could not retrieve doc text for '{original_name}': {e}")
     return fallback
 

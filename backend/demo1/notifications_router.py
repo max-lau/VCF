@@ -7,6 +7,7 @@ Mount in main.py:
 """
 
 import os, logging
+import psycopg2
 from datetime import datetime, timedelta
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
@@ -168,7 +169,7 @@ def generate_notifications(firm_id: str):
                          f"{d['title']} is due {urgency}.",
                          f"/calendar")
                     )
-        except Exception as e:
+        except (psycopg2.Error, KeyError, ValueError, TypeError) as e:
             log.warning(f"Deadline notification error: {e}")
 
         # 2. Hermes auto-moves (last 24h)
@@ -206,7 +207,7 @@ def generate_notifications(firm_id: str):
                          f"Card moved to {to_col}. Reason: {m['hermes_reason'] or 'status change detected'}. card {m['card_id']}",
                          f"/matters/{m['case_id']}")
                     )
-        except Exception as e:
+        except (psycopg2.Error, KeyError, ValueError, TypeError) as e:
             log.warning(f"Hermes notification error: {e}")
 
         # 3. High-priority emails (last 24h)
@@ -242,7 +243,7 @@ def generate_notifications(firm_id: str):
                          f"From {e['from_address']}. ID: {e['id']}",
                          "/email-inbox")
                     )
-        except Exception as e:
+        except (psycopg2.Error, KeyError, ValueError, TypeError) as e:
             log.warning(f"Email notification error: {e}")
 
     log.info(f"[Notifications] Generated for firm {firm_id}")

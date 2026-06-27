@@ -96,7 +96,7 @@ Scoring rules:
         )
         result["method"] = "semantic-similarity (BERTScore-equivalent)"
         return result
-    except Exception as e:
+    except (json.JSONDecodeError, KeyError, IndexError, TypeError, ValueError) as e:
         return {
             "precision":        0.0,
             "recall":           0.0,

@@ -20,6 +20,7 @@ import time
 import logging
 import os
 import httpx
+import psycopg2
 from dataclasses import dataclass, field
 from typing import Optional
 from enum import Enum
@@ -356,7 +357,7 @@ class GuardedDiscoveryRunner:
                 guard.record_ocr(page_count)
                 guard.record_success()
 
-            except Exception as e:
+            except (httpx.HTTPError, httpx.TimeoutException, OSError, ValueError, KeyError, ImportError) as e:
                 logger.error(f"[{state.case_id}] OCR failed file_id={file_id}: {e}")
                 guard.record_error()
                 return
@@ -381,7 +382,7 @@ class GuardedDiscoveryRunner:
                 })
                 guard.record_success()
 
-            except Exception as e:
+            except (OSError, ValueError, KeyError, TypeError) as e:
                 logger.error(f"[{state.case_id}] Bates failed file_id={file_id}: {e}")
                 # Non-fatal
                 self.bates_counter += 1
@@ -437,7 +438,7 @@ class GuardedDiscoveryRunner:
                         "requires_review":privilege_result["requires_review"],
                     })
 
-            except Exception as e:
+            except (psycopg2.Error, KeyError, ValueError, TypeError) as e:
                 logger.error(f"[{state.case_id}] Privilege failed file_id={file_id}: {e}")
                 guard.record_error()
                 return
@@ -452,7 +453,7 @@ class GuardedDiscoveryRunner:
                     risk_result = {"score": 0, "level": "UNSCORED"}
                 guard.record_success()
 
-            except Exception as e:
+            except (KeyError, ValueError, TypeError) as e:
                 logger.error(f"[{state.case_id}] Risk score failed file_id={file_id}: {e}")
                 guard.record_error()
 
@@ -502,7 +503,7 @@ class GuardedDiscoveryRunner:
                     else:
                         ai_enrichment = {"summary": "", "key_dates": [], "entities": []}
 
-                except Exception as e:
+                except (httpx.HTTPError, json.JSONDecodeError, KeyError, ValueError, TypeError, AttributeError) as e:
                     logger.error(f"[{state.case_id}] Enrichment failed file_id={file_id}: {e}")
                     guard.record_error()
 
@@ -567,7 +568,7 @@ class GuardedDiscoveryRunner:
                 guard.record_doc()
                 guard.record_success()
 
-            except Exception as e:
+            except (psycopg2.Error, KeyError, ValueError, TypeError) as e:
                 logger.error(f"[{state.case_id}] Log/CoC failed file_id={file_id}: {e}")
                 guard.record_error()
 
@@ -594,7 +595,7 @@ class GuardedDiscoveryRunner:
                         zf.write(sp, arcname=f"{entry['bates']}_{entry['original']}")
             state.zip_path = str(zip_path)
             logger.info(f"[{state.case_id}] ZIP  → {zip_path}")
-        except Exception as e:
+        except (OSError, KeyError, ValueError, TypeError) as e:
             logger.error(f"[{state.case_id}] ZIP failed: {e}")
             self.guard.record_error()
 
@@ -634,7 +635,7 @@ class GuardedDiscoveryRunner:
                     s["elapsed_seconds"], s["zip_path"],
                     int(s["aborted"]), s["abort_reason"],
                 ))
-        except Exception as e:
+        except (psycopg2.Error, KeyError, ValueError, TypeError) as e:
             logger.warning(f"[{self.state.case_id}] Persist summary failed: {e}")
 
     def _result(self, status: str) -> dict:

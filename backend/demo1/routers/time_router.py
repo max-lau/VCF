@@ -175,7 +175,7 @@ def heartbeat(
             """, (firm_id, user["id"], body.matter_id)).fetchone()["n"]
         if count % 10 == 0:
             _aggregate_sessions(firm_id, user["id"], body.matter_id)
-    except Exception as e:
+    except (KeyError, ValueError, TypeError, OSError) as e:
         log.warning(f"[Time] Aggregation error: {e}")
 
     return {"ok": True}
@@ -190,7 +190,7 @@ def flush_sessions(
     """Force aggregate sessions — called when attorney leaves a matter page."""
     try:
         _aggregate_sessions(firm_id, user["id"], matter_id)
-    except Exception as e:
+    except (KeyError, ValueError, TypeError, OSError) as e:
         log.warning(f"[Time] Flush error: {e}")
     return {"ok": True}
 

@@ -11,6 +11,8 @@ from datetime import datetime, timezone
 from typing import Optional
 
 import pytz
+import requests
+import psycopg2
 from google.auth.transport.requests import Request
 from google.oauth2.credentials import Credentials
 from googleapiclient.discovery import build
@@ -118,7 +120,7 @@ def _parse_gmail_message(raw: dict, account: dict) -> Optional[EmailMessage]:
         msg._gmail_msg_id     = raw["id"]
         msg.source_url        = f"https://mail.google.com/mail/u/0/#all/{raw['id']}"
         return msg
-    except Exception as e:
+    except (KeyError, ValueError, TypeError, OSError) as e:
         logger.error(f"Failed to parse Gmail message {raw.get('id')}: {e}")
         return None
 
@@ -207,11 +209,11 @@ def _save_to_db(msg: EmailMessage, result, firm_id: str):
                         if resp.status_code == 200:
                             data = base64.urlsafe_b64decode(resp.json().get("data", "") + "==")
                             att_list.append({"filename": fname, "data": data})
-                    except Exception as ae:
+                    except (requests.RequestException, requests.Timeout, ValueError, KeyError) as ae:
                         logger.warning(f"[Vault] Failed to fetch attachment {fname}: {ae}")
                 if att_list:
                     process_attachments(att_list, msg.firm_id, result.case_id_matched, intake_id, conn)
-            except Exception as ve:
+            except (OSError, ValueError, KeyError, TypeError) as ve:
                 logger.error(f"[Vault] Attachment processing error: {ve}")
     return intake_id
 
@@ -231,7 +233,7 @@ def _get_processed_ids(attorney_id, firm_id: str) -> set:
             if hasattr(rows[0], 'keys'):
                 return {r["provider_message_id"] for r in rows}
             return {r[0] for r in rows}
-    except Exception as e:
+    except (psycopg2.Error, KeyError, ValueError) as e:
         logger.warning(f"[Dedup] Could not fetch processed IDs: {e}")
         return set()
 def poll_gmail_account(account: dict):
@@ -241,7 +243,7 @@ def poll_gmail_account(account: dict):
 
     try:
         creds = _refresh_credentials(account)
-    except Exception as e:
+    except (HttpError, OSError, ValueError, KeyError) as e:
         logger.error(f"Token refresh failed for {account['email_address']}: {e}")
         if "invalid_grant" in str(e).lower():
             from .pg import get_conn
@@ -252,7 +254,7 @@ def poll_gmail_account(account: dict):
                         (account["id"],)
                     )
                 logger.warning(f"[Gmail] Auto-deactivated {account['email_address']} — invalid_grant. Re-authenticate via Settings.")
-            except Exception as db_err:
+            except (psycopg2.Error, KeyError, ValueError) as db_err:
                 logger.error(f"[Gmail] Failed to deactivate account: {db_err}")
         return
 
@@ -299,7 +301,7 @@ def _get_firm_settings(firm_id: str) -> dict:
             row = conn.execute("SELECT * FROM firm_email_settings WHERE firm_id=%s", (firm_id,)).fetchone()
             if row:
                 return dict(row)
-    except Exception as e:
+    except (psycopg2.Error, KeyError, ValueError) as e:
         logger.warning(f"[email_poller] _get_firm_settings failed for firm '{firm_id}': {e}")
     return {
         "quiet_hour_start":   int(os.getenv("EMAIL_QUIET_HOUR_START", 21)),
@@ -367,7 +369,7 @@ class GmailPollerService:
                 logger.info(f"[Poller] Cycle complete. Sleeping {sleep_interval}s.")
                 await asyncio.sleep(sleep_interval)
 
-            except Exception as e:
+            except (OSError, ValueError, KeyError, RuntimeError) as e:
                 logger.error(f"[Poller] Unexpected error: {e}")
                 await asyncio.sleep(60)
 

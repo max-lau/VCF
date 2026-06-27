@@ -10,6 +10,7 @@ Mount in main.py:
 """
 
 import logging
+import psycopg2
 from datetime import datetime, timezone
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
@@ -64,7 +65,7 @@ def enqueue(firm_id: str, item_type: str, title: str,
                 recommended, priority, related_matter, created_by, due_by
             ))
         log.info(f"[ApprovalQueue] Enqueued: {item_type} for {firm_id}")
-    except Exception as e:
+    except (psycopg2.Error, KeyError, ValueError) as e:
         log.error(f"[ApprovalQueue] Enqueue failed: {e}")
 
 

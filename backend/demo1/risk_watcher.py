@@ -195,7 +195,7 @@ Be specific. Reference actual signal values in your summary and prediction."""
         raw = resp.content[0].text.strip()
         raw = raw.replace("```json", "").replace("```", "").strip()
         return json.loads(raw)
-    except Exception as e:
+    except (json.JSONDecodeError, KeyError, ValueError, TypeError, AttributeError) as e:
         log.error(f"[RiskWatcher] Claude assessment failed: {e}")
         return {
             "risk_level": "watch",
@@ -260,7 +260,7 @@ async def send_slack_alert(assessment: dict, signals: dict):
         async with httpx.AsyncClient(timeout=8) as client:
             r = await client.post(SLACK_URL, json=payload)
             log.info(f"[RiskWatcher] Slack alert sent: {r.status_code}")
-    except Exception as e:
+    except (httpx.HTTPError, httpx.TimeoutException, ValueError) as e:
         log.error(f"[RiskWatcher] Slack failed: {e}")
 
 async def send_email_alert(assessment: dict, signals: dict):
@@ -321,7 +321,7 @@ async def send_email_alert(assessment: dict, signals: dict):
             start_tls=True,
         )
         log.info(f"[RiskWatcher] Email alert sent to {ALERT_TO}")
-    except Exception as e:
+    except (OSError, ValueError, TypeError, RuntimeError) as e:
         log.error(f"[RiskWatcher] Email failed: {e}")
 
 # ── Main assessment cycle ─────────────────────────────────────────────────────
@@ -353,7 +353,7 @@ async def run_assessment():
             actions     = assessment.get("actions"),
             alerted     = alerted,
         )
-    except Exception as e:
+    except (OSError, ValueError, KeyError, TypeError, RuntimeError) as e:
         log.error(f"[RiskWatcher] Assessment cycle failed: {e}")
 
 def start_scheduler(app):

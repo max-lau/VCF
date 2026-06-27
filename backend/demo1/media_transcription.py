@@ -113,7 +113,7 @@ async def transcribe_audio(
 
     try:
         result = whisper_transcribe(save_path)
-    except Exception as e:
+    except (openai.OpenAIError, OSError, ValueError, RuntimeError) as e:
         logger.warning(f"[Media] audio transcription failed for {file.filename}: {e}")
         raise HTTPException(500, "Transcription failed")
 
@@ -154,13 +154,13 @@ async def transcribe_video(
 
     try:
         audio_path = extract_audio_from_video(video_path)
-    except Exception as e:
+    except (subprocess.SubprocessError, OSError, RuntimeError) as e:
         logger.warning(f"[Media] audio extraction failed for {file.filename}: {e}")
         raise HTTPException(500, "Audio extraction failed")
 
     try:
         result = whisper_transcribe(audio_path)
-    except Exception as e:
+    except (openai.OpenAIError, OSError, ValueError, RuntimeError) as e:
         logger.warning(f"[Media] video transcription failed for {file.filename}: {e}")
         raise HTTPException(500, "Transcription failed")
     finally:
@@ -273,7 +273,7 @@ async def transcribe_from_discovery(
 
     try:
         result = whisper_transcribe(file_path)
-    except Exception as e:
+    except (openai.OpenAIError, OSError, ValueError, RuntimeError) as e:
         logger.warning(f"[Media] discovery transcription failed for {row['original_name']}: {e}")
         raise HTTPException(500, "Transcription failed")
 

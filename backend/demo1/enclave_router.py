@@ -240,5 +240,5 @@ def _log_verdict_to_cloud(client_id: str, doc_id: str, verdict: dict):
             requires_review=verdict.get("requires_review", False),
             log_entry_id=verdict.get("log_entry_id", ""),
         )
-    except Exception as e:
+    except (KeyError, ValueError, TypeError, ImportError) as e:
         logger.warning(f"Could not log verdict to cloud DB: {e}")

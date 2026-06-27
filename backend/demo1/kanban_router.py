@@ -96,7 +96,7 @@ def create_card(case_id: int, body: CardCreate,
                  body.due_date, body.assignee_id, body.notes, body.position))
             row = cur.fetchone()
         return {"id": row["id"], "created_at": str(row["created_at"])}
-    except Exception as e:
+    except (psycopg2.Error, KeyError, ValueError, TypeError) as e:
         import traceback; traceback.print_exc()
         import logging; logging.getLogger(__name__).error(f"[kanban_router] Error: {e}")
         raise HTTPException(500, detail="An internal error occurred. Please try again.")

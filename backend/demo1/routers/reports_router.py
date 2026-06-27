@@ -3,6 +3,7 @@ from pydantic import BaseModel
 from typing import Optional
 from datetime import datetime
 import json
+import psycopg2
 from backend.demo1.pg import get_conn
 from backend.demo1.auth import get_current_firm_id
 
@@ -102,7 +103,7 @@ def _build_report_content(matter_id: int, report_type: str, conn) -> str:
             ).fetchall()
             return json.dumps([dict(r) for r in rows], indent=2, default=str)
 
-    except Exception as e:
+    except (psycopg2.Error, KeyError, ValueError, TypeError) as e:
         return json.dumps({"error": "Internal error occurred"})
     return ""
 

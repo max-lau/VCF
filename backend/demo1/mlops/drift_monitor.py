@@ -51,7 +51,7 @@ def _get_recent_runs(hours: int = 1, experiment: str = "paraiq_claude_calls") ->
         if runs.empty:
             return []
         return runs.to_dict("records")
-    except Exception as e:
+    except (KeyError, ValueError, TypeError, OSError) as e:
         logger.warning(f"[DriftMonitor] Could not fetch runs: {e}")
         return []
 
@@ -146,5 +146,5 @@ def log_drift_check(report: dict):
             metrics = report.get("metrics", {})
             if metrics:
                 mlflow.log_metrics({k: v for k, v in metrics.items() if isinstance(v, (int, float))})
-    except Exception as e:
+    except (KeyError, ValueError, TypeError, OSError) as e:
         logger.debug(f"[DriftMonitor] MLflow log failed (non-fatal): {e}")

@@ -4,6 +4,7 @@ ParaIQ Email Router - uses synchronous psycopg2 via db_dep
 import os, uuid, logging
 from datetime import datetime
 from typing import Optional
+from google.auth.exceptions import GoogleAuthError
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel
@@ -81,14 +82,14 @@ def gmail_callback(code:str, state:str, db:PgConn=Depends(db_dep)):
     flow = _build_flow()
     try:
         flow.fetch_token(code=code, code_verifier=session.get("code_verifier"))
-    except Exception as e:
+    except (ValueError, GoogleAuthError, RuntimeError) as e:
         raise HTTPException(status_code=400, detail=f"Token exchange failed: {e}")
     creds = flow.credentials
     try:
         from google.oauth2 import id_token as git
         from google.auth.transport import requests as gr
         email_address = git.verify_oauth2_token(creds.id_token, gr.Request(), GMAIL_CLIENT_ID).get("email","unknown")
-    except Exception as e:
+    except (ValueError, KeyError, GoogleAuthError) as e:
         logger.warning(f"[email_router] id_token verification failed: {e}")
         email_address = "unknown"
     db.execute(

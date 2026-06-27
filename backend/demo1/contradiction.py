@@ -134,7 +134,7 @@ If no contradictions, return has_contradictions: false and empty array."""
         result["doc_b_preview"] = doc_b["text"][:100]
         result["similarity"]    = 0
         return result
-    except Exception as e:
+    except (json.JSONDecodeError, KeyError, IndexError, TypeError, ValueError) as e:
         return {
             "has_contradictions": False,
             "contradictions":     [],

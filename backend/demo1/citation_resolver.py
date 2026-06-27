@@ -145,7 +145,7 @@ def resolve_citation(raw: str, court: str = None) -> dict:
 
     except requests.exceptions.Timeout:
         return {"status": "timeout", "matches": []}
-    except Exception as e:
+    except (requests.RequestException, KeyError, ValueError, TypeError) as e:
         return {"status": "error", "error": "Internal error occurred", "matches": []}
 
 

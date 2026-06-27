@@ -75,7 +75,7 @@ def _virus_scan(path: Path) -> tuple[bool, str]:
             return False, f"scan error: {result.stderr.strip()}"
     except subprocess.TimeoutExpired:
         return False, "scan timeout"
-    except Exception as e:
+    except (subprocess.SubprocessError, OSError, ValueError) as e:
         return False, f"scan exception: {e}"
 
 
@@ -232,7 +232,7 @@ def process_attachments(
                     intake_id,
                 ))
                 logger.info(f"[Vault] Linked to case {case_id}: {f['original_name']}")
-            except Exception as e:
+            except (psycopg2.Error, KeyError, ValueError) as e:
                 logger.error(f"[Vault] DB insert failed for {f['original_name']}: {e}")
 
     logger.info(
@@ -269,7 +269,7 @@ def _expand_zip(zip_path: Path, original_name: str) -> list[tuple[Path, str]]:
 
     except zipfile.BadZipFile:
         logger.warning(f"[Vault] {original_name} is not a valid zip file")
-    except Exception as e:
+    except (OSError, zipfile.BadZipFile, KeyError, ValueError) as e:
         logger.error(f"[Vault] Zip expansion error for {original_name}: {e}")
 
     return results

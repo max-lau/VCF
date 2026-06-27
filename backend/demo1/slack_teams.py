@@ -2,6 +2,7 @@ import os
 import httpx
 import asyncio
 import logging
+import psycopg2
 from datetime import datetime, timezone
 from fastapi import APIRouter, HTTPException, Request, Depends
 from pydantic import BaseModel
@@ -33,7 +34,7 @@ def log_delivery(platform, event_type, status_code, success, error=None, preview
                 UPDATE notify_config SET last_used=%s, send_count=send_count+1
                 WHERE platform=%s AND active=TRUE
             """, (datetime.now(timezone.utc).isoformat(), platform))
-    except Exception as e:
+    except (psycopg2.Error, KeyError, ValueError) as e:
         print(f"[Notify] Log error: {e}")
 
 

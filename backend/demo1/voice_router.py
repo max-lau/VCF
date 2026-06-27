@@ -1,4 +1,5 @@
 import os, json, logging, tempfile, time
+import psycopg2
 from backend.demo1.pg import get_conn
 from pathlib import Path
 import httpx
@@ -257,7 +258,7 @@ def _log_voice_audit(firm_id, user_id, username, transcript, action,
                 (firm_id, user_id, username, transcript, action,
                  understood_as, confidence, success, error_message, duration_ms)
             )
-    except Exception as e:
+    except (psycopg2.Error, KeyError, ValueError) as e:
         log.warning(f"Voice audit log failed: {e}")
 
 
@@ -304,7 +305,7 @@ async def voice_run(
 
         try:
             transcript = await transcribe_audio(audio_bytes, ext)
-        except Exception as e:
+        except (openai.OpenAIError, OSError, ValueError) as e:
             log.error(f"Transcription error: {e}\n{traceback.format_exc()}")
             raise HTTPException(status_code=500, detail=f"Transcription failed: {e}")
 
@@ -325,7 +326,7 @@ async def voice_run(
                     (_firm_id, _user_id)
                 ).fetchall()
                 user_shortcuts = [dict(r) for r in _rows]
-        except Exception as _e:
+        except (psycopg2.Error, KeyError, ValueError) as _e:
             log.warning(f"Could not load voice shortcuts: {_e}")
         parsed = await parse_intent(transcript, case_id=case_id, case_name=case_name, user_shortcuts=user_shortcuts)
         action     = parsed.get("action","unknown")

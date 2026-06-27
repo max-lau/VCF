@@ -135,7 +135,7 @@ def stamp(body: BatesStampIn, request: Request):
         try:
             from pypdf import PdfReader
             pages = len(PdfReader(str(src)).pages)
-        except Exception as e:
+        except (OSError, ValueError, ImportError) as e:
             errors.append({"id": row["id"], "name": row["original_name"], "error": "read failed"})
             continue
 
@@ -147,7 +147,7 @@ def stamp(body: BatesStampIn, request: Request):
 
         try:
             stamp_pdf(src, out_path, labels)
-        except Exception as e:
+        except (OSError, ValueError, TypeError) as e:
             logger.warning(f"[Bates] stamp failed for {row['original_name']}: {e}")
             errors.append({"id": row["id"], "name": row["original_name"], "error": "stamp failed"})
             continue
