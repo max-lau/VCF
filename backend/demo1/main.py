@@ -39,6 +39,7 @@ from backend.demo1.coref_disambig import disambiguate_entities, resolve_corefere
 from backend.demo1.contradiction import run_contradiction_scan
 from backend.demo1.semantic_search import router as semantic_search_router
 from backend.demo1.calendar_sync import router as calendar_sync_router
+from backend.demo1.document_annotations import router as document_annotations_router
 from fastapi import FastAPI, HTTPException, Query, Request, BackgroundTasks
 from fastapi.responses import JSONResponse
 from starlette.middleware.base import BaseHTTPMiddleware
@@ -328,6 +329,7 @@ app.include_router(docketing_router, prefix="/docketing", tags=["docketing"])
 app.include_router(time_router, prefix="/time", tags=["time"])
 app.include_router(billing_router, prefix="/billing", tags=["billing"])
 app.include_router(semantic_search_router, prefix="/search", tags=["semantic-search"])
+app.include_router(document_annotations_router, prefix="/documents", tags=["document-annotations"])
 # ── Middleware (added in reverse; Starlette executes outermost-first) ─────────
 # Execution order: CORS → APIKey → Tenant → Audit
 app.add_middleware(AuditMiddleware)

@@ -2,10 +2,16 @@
 import { ref, computed, onMounted } from 'vue'
 import axios from 'axios'
 import DiscoveryUpload from '@/components/DiscoveryUpload.vue'
+import DocumentViewer from '@/components/DocumentViewer.vue'
 
 const token   = () => localStorage.getItem('paraiq_token')
 const firmId  = () => localStorage.getItem('paraiq_firm_id') || 'default'
 const authHdr = () => ({ Authorization: 'Bearer ' + token() })
+
+// ── Document viewer state ───────────────────────────────────────────────────
+const viewingDoc   = ref(null)
+const docMatters   = ref([])
+const docMatterMap = ref({})
 
 // ── Document list state ────────────────────────────────────────────────────
 const files       = ref([])
@@ -118,6 +124,18 @@ function fmtDate(d) {
 }
 
 onMounted(fetchFiles)
+
+// ── Document viewer ─────────────────────────────────────────────────────────
+function openDoc(file) {
+  // The /documents/{doc_id}/annotated endpoint uses case_documents.id
+  // Discovery files use a different ID space, so we need to find the matching case_document
+  // For now, we open by the discovery file ID and the backend will look it up by name
+  viewingDoc.value = file.id
+}
+
+function closeDoc() {
+  viewingDoc.value = null
+}
 </script>
 
 <template>
@@ -182,7 +200,7 @@ onMounted(fetchFiles)
           </tr>
         </thead>
         <tbody>
-          <tr v-for="f in filtered" :key="f.id">
+          <tr v-for="f in filtered" :key="f.id" class="doc-row" @click="openDoc(f)">
             <td class="dim mono">{{ f.id }}</td>
             <td>
               <div class="filename">{{ f.original_name }}</div>
@@ -262,6 +280,15 @@ onMounted(fetchFiles)
       @close="onUploadClose"
       @uploaded="onUploaded"
     />
+
+    <!-- ── Document Viewer Panel (inline annotations) ─────────────────── -->
+    <Teleport to="body">
+      <div v-if="viewingDoc" class="dv-overlay" @click.self="closeDoc">
+        <div class="dv-panel">
+          <DocumentViewer :doc-id="viewingDoc" @close="closeDoc" />
+        </div>
+      </div>
+    </Teleport>
 
   </div>
 </template>
@@ -422,4 +449,9 @@ onMounted(fetchFiles)
 .nowrap { white-space: nowrap; }
 .error-text { color: #fc8181; }
 .state-msg  { color: var(--text-muted); padding: 3rem; text-align: center; }
+.doc-row { cursor: pointer; transition: background .12s; }
+.doc-row:hover { background: rgba(201,168,76,.06); }
+
+.dv-overlay { position: fixed; inset: 0; background: rgba(0,0,0,.7); backdrop-filter: blur(4px); z-index: 200; display: flex; align-items: center; justify-content: center; padding: 2rem; }
+.dv-panel { width: 100%; max-width: 900px; max-height: 88vh; }
 </style>
