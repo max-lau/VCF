@@ -188,6 +188,10 @@ async def startup_event():
     init_transcription_table()
     init_messages_table()
     init_enclave_tables()
+    from backend.demo1.esignature import init_esign_tables
+    init_esign_tables()
+    from backend.demo1.client_portal import init_tables as init_portal_tables
+    init_portal_tables()
     # 3. Poller tasks — keep references so GC cannot collect them
     #    Skip in TESTING mode to avoid asyncio interference with live-server tests
     if not os.getenv("TESTING"):

@@ -89,7 +89,6 @@ def init_tables() -> None:
         logger.warning(f"[client_portal] init client_messages failed: {e}")
 
 
-init_tables()
 
 
 # ─────────────────────────────────────────────────────────────────────────────

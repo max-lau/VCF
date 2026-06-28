@@ -128,7 +128,6 @@ def init_esign_tables():
         logger.warning(f"[Esign] Table init skipped: {e}")
 
 
-init_esign_tables()
 
 
 # ── DocuSign Helpers ──────────────────────────────────────────────────────────
