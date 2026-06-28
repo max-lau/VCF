@@ -52,6 +52,7 @@ const MediaView        = () => import('@/views/media/MediaView.vue')
 const ModelView        = () => import('@/views/model/ModelView.vue')
 const MultilingualView = () => import('@/views/multilingual/MultilingualView.vue')
 const InsightsView     = () => import('@/views/insights/InsightsView.vue')
+const SemanticSearchView = () => import('@/views/search/SemanticSearchView.vue')
 const AuditLogView       = () => import('@/views/audit/AuditLogView.vue')
 const EnclaveView        = () => import('@/views/enclave/EnclaveManagementView.vue')
 const UsersView       = () => import('@/views/admin/UsersView.vue')
@@ -85,6 +86,11 @@ const routes = [
         path: 'dashboard',
         name: 'dashboard',
         component: DashboardView,
+      },
+      {
+        path: 'search',
+        name: 'semantic_search',
+        component: SemanticSearchView,
       },
 
       // ── Case Work ─────────────────────────────────────────────────

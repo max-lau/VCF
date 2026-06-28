@@ -11,6 +11,7 @@
 
     <div class="sidebar__scroll">
       <NavItem to="/dashboard" icon="layout-dashboard" label="Dashboard" />
+      <NavItem to="/search" icon="search" label="Semantic Search" />
 
       <NavGroup label="Case Work">
         <NavItem v-if="g.matters"        to="/matters"        icon="briefcase"        label="Matters" />
