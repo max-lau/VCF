@@ -37,7 +37,6 @@ from backend.demo1.entity_confidence import score_entities, get_entity_summary
 from backend.demo1.entity_linker import find_linked_entities, link_documents_by_entity
 from backend.demo1.coref_disambig import disambiguate_entities, resolve_coreferences
 from backend.demo1.contradiction import run_contradiction_scan
-from backend.demo1.billing_router import router as billing_router
 from backend.demo1.semantic_search import router as semantic_search_router
 from backend.demo1.calendar_sync import router as calendar_sync_router
 from fastapi import FastAPI, HTTPException, Query, Request, BackgroundTasks
