@@ -40,6 +40,7 @@ from backend.demo1.contradiction import run_contradiction_scan
 from backend.demo1.semantic_search import router as semantic_search_router
 from backend.demo1.calendar_sync import router as calendar_sync_router
 from backend.demo1.document_annotations import router as document_annotations_router
+from backend.demo1.esignature import router as esign_router
 from fastapi import FastAPI, HTTPException, Query, Request, BackgroundTasks
 from fastapi.responses import JSONResponse
 from starlette.middleware.base import BaseHTTPMiddleware
@@ -126,7 +127,7 @@ def save_work_product(endpoint: str, result: dict, firm_id: str, case_id=None, u
 
 
 EXEMPT_PATHS = {"/health", "/openapi.json", "/docs", "/redoc", "/favicon.ico", "/metrics"}
-EXEMPT_PREFIXES = ("/auth/", "/api/auth/", "/docs/", "/redoc/", "/client-portal/view/")
+EXEMPT_PREFIXES = ("/auth/", "/api/auth/", "/docs/", "/redoc/", "/client-portal/view/", "/esign/sign/")
 STATIC_EXTS = (".html", ".js", ".css", ".ico", ".png", ".svg", ".woff", ".woff2", ".json")
 
 class APIKeyMiddleware(BaseHTTPMiddleware):
@@ -330,6 +331,7 @@ app.include_router(time_router, prefix="/time", tags=["time"])
 app.include_router(billing_router, prefix="/billing", tags=["billing"])
 app.include_router(semantic_search_router, prefix="/search", tags=["semantic-search"])
 app.include_router(document_annotations_router, prefix="/documents", tags=["document-annotations"])
+app.include_router(esign_router, prefix="/esign", tags=["e-signature"])
 # ── Middleware (added in reverse; Starlette executes outermost-first) ─────────
 # Execution order: CORS → APIKey → Tenant → Audit
 app.add_middleware(AuditMiddleware)

@@ -12,6 +12,7 @@
     <div class="sidebar__scroll">
       <NavItem to="/dashboard" icon="layout-dashboard" label="Dashboard" />
       <NavItem to="/search" icon="search" label="Semantic Search" />
+      <NavItem to="/esign" icon="pen-tool" label="E-Signatures" />
 
       <NavGroup label="Case Work">
         <NavItem v-if="g.matters"        to="/matters"        icon="briefcase"        label="Matters" />
