@@ -18,15 +18,34 @@ from fastapi.testclient import TestClient
 # ── Constants ─────────────────────────────────────────────────────────────────
 DB_PATH       = 'backend/demo1/analyses.db'
 TEST_USERNAME = '_pytest_user_'
-TEST_PASSWORD = 'TestPass123!'
+TEST_PASSWORD='***'
 TEST_EMAIL    = '_pytest@test.internal'
 API_KEY       = os.getenv('PARAIQ_API_KEY', '')
+
+# ── ASGI lifespan blocker ────────────────────────────────────────────────────
+# On a 2GB VPS, the full startup_event (torch, pollers, DB pool, etc.) exhausts
+# RAM and the OOM killer terminates uvicorn — breaking live-server tests.
+# This wrapper swallows the ASGI lifespan so TestClient skips startup entirely.
+# The test_user fixture calls init_pool() itself; tables already exist in Postgres.
+
+class _NoLifespanASGI:
+    """Wraps an ASGI app and drops lifespan events (startup/shutdown)."""
+    def __init__(self, app):
+        self._app = app
+    async def __call__(self, scope, receive, send):
+        if scope["type"] == "lifespan":
+            await receive()
+            await send({"type": "lifespan.startup.complete"})
+            await receive()
+            await send({"type": "lifespan.shutdown.complete"})
+            return
+        await self._app(scope, receive, send)
 
 # ── Fixtures ──────────────────────────────────────────────────────────────────
 @pytest.fixture(scope='session')
 def client():
     from backend.demo1.main import app
-    with TestClient(app) as c:
+    with TestClient(_NoLifespanASGI(app)) as c:
         yield c
 
 @pytest.fixture(scope='session')
