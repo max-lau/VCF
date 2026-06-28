@@ -54,6 +54,7 @@ const MultilingualView = () => import('@/views/multilingual/MultilingualView.vue
 const InsightsView     = () => import('@/views/insights/InsightsView.vue')
 const SemanticSearchView = () => import('@/views/search/SemanticSearchView.vue')
 const EsignView          = () => import('@/views/esign/EsignView.vue')
+const ClientPortalManage  = () => import('@/views/portal/ClientPortalManageView.vue')
 const AuditLogView       = () => import('@/views/audit/AuditLogView.vue')
 const EnclaveView        = () => import('@/views/enclave/EnclaveManagementView.vue')
 const UsersView       = () => import('@/views/admin/UsersView.vue')
@@ -97,6 +98,11 @@ const routes = [
         path: 'esign',
         name: 'esign',
         component: EsignView,
+      },
+      {
+        path: 'portal',
+        name: 'client_portal_manage',
+        component: ClientPortalManage,
       },
 
       // ── Case Work ─────────────────────────────────────────────────

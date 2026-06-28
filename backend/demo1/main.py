@@ -41,6 +41,8 @@ from backend.demo1.semantic_search import router as semantic_search_router
 from backend.demo1.calendar_sync import router as calendar_sync_router
 from backend.demo1.document_annotations import router as document_annotations_router
 from backend.demo1.esignature import router as esign_router
+from backend.demo1.client_portal import router as client_portal_router
+from backend.demo1.time_tracker import router as time_tracker_router
 from fastapi import FastAPI, HTTPException, Query, Request, BackgroundTasks
 from fastapi.responses import JSONResponse
 from starlette.middleware.base import BaseHTTPMiddleware
@@ -332,6 +334,7 @@ app.include_router(billing_router, prefix="/billing", tags=["billing"])
 app.include_router(semantic_search_router, prefix="/search", tags=["semantic-search"])
 app.include_router(document_annotations_router, prefix="/documents", tags=["document-annotations"])
 app.include_router(esign_router, prefix="/esign", tags=["e-signature"])
+app.include_router(time_tracker_router, prefix="/time-tracker", tags=["time-tracking"])
 # ── Middleware (added in reverse; Starlette executes outermost-first) ─────────
 # Execution order: CORS → APIKey → Tenant → Audit
 app.add_middleware(AuditMiddleware)
