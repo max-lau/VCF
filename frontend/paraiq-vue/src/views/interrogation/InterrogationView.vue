@@ -1,54 +1,177 @@
 <script setup>
-import { ref } from 'vue'
+import { ref, computed } from 'vue'
 import client from '@/api/client'
-const text = ref(''); const result = ref(null); const loading = ref(false); const error = ref(null)
+import NlpResultCard from '@/components/ui/NlpResultCard.vue'
+
+const text = ref('')
+const result = ref(null)
+const loading = ref(false)
+const error = ref(null)
+
+const SAMPLE = `Q: Please state your name and occupation for the record.
+A: My name is Robert Hayes. I am a project manager at Northbridge Construction.
+
+Q: Where were you on the night of October 12th?
+A: I was at the office working late. I left around 8 PM.
+
+Q: Did you see Mr. Larson that evening?
+A: No, I did not see Mr. Larson at all that night.
+
+Q: Earlier in your deposition you mentioned speaking with Mr. Larson. Can you clarify?
+A: I may have spoken to him briefly on the phone, but not in person.
+
+Q: So you did have contact with him?
+A: I don't recall. It was a long time ago. I'd rather not say without my notes.
+
+Q: The security log shows you badged into the Larson building at 9:30 PM. How do you explain that?
+A: That must be a mistake. Or maybe I went there to drop off documents. I don't really remember.
+
+Q: You said you left the office at 8 PM and didn't see Mr. Larson. Now you may have visited his building?
+A: I can't be certain of the timeline. These details are fuzzy.`
+
 async function analyze() {
-  loading.value = true; error.value = null; result.value = null
-  try { const { data } = await client.post('/interrogate', { text: text.value }); result.value = data }
-  catch(e) { error.value = e.response?.data?.detail || 'Analysis failed' }
-  finally { loading.value = false }
-}
-async function exportPdf() {
+  if (!text.value.trim()) return
+  loading.value = true
+  error.value = null
+  result.value = null
   try {
-    const resp = await client.post('/interrogate/export-pdf', { text: text.value }, { responseType: 'blob' })
-    const url = URL.createObjectURL(resp.data)
-    const a = document.createElement('a'); a.href = url; a.download = 'interrogation-report.pdf'; a.click()
-    URL.revokeObjectURL(url)
-  } catch(e) { error.value = 'Export failed' }
+    const { data } = await client.post('/interrogate', { text: text.value })
+    result.value = data
+  } catch (e) {
+    error.value = e.response?.data?.detail || 'Analysis failed — please try again.'
+  } finally {
+    loading.value = false
+  }
+}
+
+function loadExample() {
+  text.value = SAMPLE
+  result.value = null
+  error.value = null
+}
+
+function clearAll() {
+  text.value = ''
+  result.value = null
+  error.value = null
+}
+
+const contradictionsCount = computed(() => result.value?.contradictions?.length || 0)
+const evasionsCount = computed(() => result.value?.evasions?.length || 0)
+const consistencyScore = computed(() => {
+  if (!result.value) return null
+  const v = result.value.consistency_score ?? result.value.consistency
+  if (v == null) return null
+  return Math.round((typeof v === 'number' && v <= 1 ? v : v / 100) * 100)
+})
+function scoreColor(p) {
+  if (p == null) return 'var(--text-muted)'
+  if (p > 70) return '#48bb78'
+  if (p >= 40) return '#ecc94b'
+  return '#fc8181'
 }
 </script>
+
 <template>
-  <div class="mod">
-    <div class="mod__header">
-      <div><h1 class="mod__title">Interrogation Analyzer</h1><p class="mod__sub">Contradiction detection and evasion analysis in transcripts</p></div>
-      <button v-if="result" class="btn-export" @click="exportPdf">↓ Export PDF</button>
+  <div class="nlp-mod">
+    <div class="nlp-mod__header">
+      <h1 class="nlp-mod__title">Interrogation Analyzer</h1>
+      <p class="nlp-mod__sub">Contradiction detection &amp; evasion analysis for deposition transcripts</p>
     </div>
-    <div class="input-card">
-      <label class="field-label">Deposition or interrogation transcript</label>
-      <textarea v-model="text" class="piq-textarea" rows="12" placeholder="Paste transcript text…"/>
-      <div class="input-actions"><button class="piq-btn-gold" :disabled="loading||!text.trim()" @click="analyze">{{ loading?'Analysing…':'Analyze Transcript' }}</button></div>
+
+    <div class="nlp-input-card">
+      <label class="nlp-field-label">Deposition or interrogation transcript</label>
+      <textarea
+        v-model="text"
+        class="nlp-textarea nlp-textarea--lg"
+        rows="14"
+        placeholder="Paste transcript text…  Use Q: and A: to mark questions and answers."
+      />
+      <div class="nlp-input-actions">
+        <button class="nlp-btn nlp-btn--ghost" :disabled="!text && !result" @click="clearAll">
+          Clear
+        </button>
+        <button class="nlp-btn nlp-btn--ghost" @click="loadExample">Load example</button>
+        <button
+          class="nlp-btn"
+          :disabled="loading || !text.trim()"
+          @click="analyze"
+        >
+          {{ loading ? 'Analysing…' : 'Analyze Transcript' }}
+        </button>
+      </div>
     </div>
-    <div v-if="error" class="err-msg">{{ error }}</div>
-    <div v-if="result" class="results">
-      <div v-if="result.contradictions?.length" class="section-card section-card--red">
-        <div class="section-title">Contradictions ({{ result.contradictions.length }})</div>
-        <div v-for="(c,i) in result.contradictions" :key="i" class="finding-row">
-          <div class="finding-row__head">{{ c.statement_a || c.claim }}</div>
-          <div class="finding-row__sub">{{ c.statement_b || c.explanation }}</div>
+
+    <div v-if="loading" class="nlp-progress">
+      <span class="nlp-progress__bar" />
+      <span class="nlp-progress__label">Analyzing transcript…</span>
+    </div>
+
+    <div v-if="error" class="nlp-err">{{ error }}</div>
+
+    <div v-if="result" class="nlp-results">
+      <!-- Key findings summary -->
+      <div class="nlp-summary">
+        <div class="nlp-summary__title">Key Findings</div>
+        <div class="nlp-summary__grid">
+          <div class="nlp-stat" :class="{ 'nlp-stat--alert': contradictionsCount > 0 }">
+            <div class="nlp-stat__val">{{ contradictionsCount }}</div>
+            <div class="nlp-stat__label">Contradictions</div>
+          </div>
+          <div class="nlp-stat" :class="{ 'nlp-stat--warn': evasionsCount > 0 }">
+            <div class="nlp-stat__val">{{ evasionsCount }}</div>
+            <div class="nlp-stat__label">Evasions Detected</div>
+          </div>
+          <div class="nlp-stat" v-if="consistencyScore != null">
+            <div class="nlp-stat__val" :style="{ color: scoreColor(consistencyScore) }">
+              {{ consistencyScore }}<span class="nlp-stat__pct">%</span>
+            </div>
+            <div class="nlp-stat__label">Consistency Score</div>
+          </div>
         </div>
+        <div v-if="result.summary" class="nlp-summary__text">{{ result.summary }}</div>
       </div>
-      <div v-if="result.evasions?.length" class="section-card section-card--amber">
-        <div class="section-title">Evasions ({{ result.evasions.length }})</div>
-        <div v-for="(e,i) in result.evasions" :key="i" class="finding-row">
-          <div class="finding-row__head">{{ e.question || e.evasion }}</div>
-          <div class="finding-row__sub">{{ e.explanation || e.context }}</div>
-        </div>
-      </div>
-      <div v-if="!result.contradictions?.length && !result.evasions?.length" class="clean-msg">✓ No contradictions or evasions detected</div>
-      <div v-if="result.summary" class="summary-card"><div class="summary-card__title">Summary</div><p class="summary-text">{{ result.summary }}</p></div>
+
+      <NlpResultCard :result="result" title="Contradictions &amp; Evasions" />
     </div>
   </div>
 </template>
+
 <style scoped>
-.mod{padding:2rem;max-width:950px}.mod__header{display:flex;align-items:flex-start;justify-content:space-between;margin-bottom:1.5rem;gap:1rem}.mod__title{font-family:var(--font-display);font-size:1.6rem;color:var(--gold);margin:0}.mod__sub{color:var(--text-muted);font-size:.85rem;margin:.25rem 0 0}.btn-export{background:transparent;border:1px solid var(--gold,#c9a84c);color:var(--gold,#c9a84c);border-radius:6px;cursor:pointer;font-size:.875rem;font-weight:600;padding:.5rem 1rem;transition:background .15s;white-space:nowrap;flex-shrink:0}.btn-export:hover{background:rgba(201,168,76,.1)}.input-card{background:var(--bg-card);border:1px solid var(--border);border-radius:8px;padding:1.25rem;margin-bottom:1.25rem}.field-label{font-size:.72rem;color:var(--text-muted);text-transform:uppercase;letter-spacing:.05em;display:block;margin-bottom:.5rem}.piq-textarea{background:var(--bg-raised,#0d0d1a);border:1px solid var(--border);border-radius:6px;color:var(--text-primary);font-family:inherit;font-size:.875rem;line-height:1.6;padding:.75rem;resize:vertical;width:100%;box-sizing:border-box}.piq-textarea:focus{border-color:var(--gold);outline:none}.input-actions{display:flex;justify-content:flex-end;margin-top:.75rem}.piq-btn-gold{background:var(--gold);border:none;border-radius:6px;color:#000;cursor:pointer;font-size:.875rem;font-weight:600;padding:.55rem 1.4rem;transition:opacity .2s}.piq-btn-gold:hover:not(:disabled){opacity:.85}.piq-btn-gold:disabled{cursor:not-allowed;opacity:.4}.err-msg{color:#fc8181;font-size:.875rem;margin-bottom:1rem}.results{display:flex;flex-direction:column;gap:1rem}.section-card{background:var(--bg-card);border:1px solid var(--border);border-radius:8px;padding:1.1rem 1.25rem}.section-card--red{border-left:3px solid #fc8181;border-radius:0 8px 8px 0}.section-card--amber{border-left:3px solid #ecc94b;border-radius:0 8px 8px 0}.section-title{font-size:.72rem;color:var(--text-muted);font-weight:600;letter-spacing:.05em;text-transform:uppercase;margin-bottom:.85rem}.finding-row{border-bottom:1px solid var(--border);padding:.65rem 0}.finding-row:last-child{border-bottom:none}.finding-row__head{color:var(--text-primary);font-size:.875rem;font-weight:500;margin-bottom:.25rem}.finding-row__sub{color:var(--text-muted);font-size:.8rem;line-height:1.5}.clean-msg{color:#48bb78;font-size:.875rem;padding:1.5rem;text-align:center;background:var(--bg-card);border:1px solid var(--border);border-radius:8px}.summary-card{background:var(--bg-card);border:1px solid var(--border);border-radius:8px;padding:1.1rem 1.25rem}.summary-card__title{font-size:.72rem;color:var(--text-muted);font-weight:600;letter-spacing:.05em;text-transform:uppercase;margin-bottom:.6rem}.summary-text{color:var(--text-primary);font-size:.875rem;line-height:1.7;margin:0}
+.nlp-mod { padding: 2rem; max-width: 960px; }
+.nlp-mod__header { margin-bottom: 1.5rem; }
+.nlp-mod__title { font-family: var(--font-display); font-size: 1.6rem; color: var(--gold); margin: 0; }
+.nlp-mod__sub { color: var(--text-muted); font-size: .85rem; margin: .25rem 0 0; }
+
+.nlp-input-card { background: var(--bg-card); border: 1px solid var(--border); border-radius: 8px; padding: 1.25rem; margin-bottom: 1.25rem; }
+.nlp-field-label { font-size: .72rem; color: var(--text-muted); text-transform: uppercase; letter-spacing: .05em; font-weight: 600; display: block; margin-bottom: .5rem; }
+.nlp-textarea { background: var(--bg-raised, #0d0d1a); border: 1px solid var(--border); border-radius: 6px; box-sizing: border-box; color: var(--text-primary); font-family: var(--font-mono); font-size: .85rem; line-height: 1.6; padding: .75rem; resize: vertical; width: 100%; }
+.nlp-textarea--lg { min-height: 220px; }
+.nlp-textarea:focus { border-color: var(--gold); outline: none; }
+
+.nlp-input-actions { display: flex; justify-content: flex-end; gap: .5rem; margin-top: .75rem; flex-wrap: wrap; }
+.nlp-btn { background: var(--gold); border: none; border-radius: 6px; color: #000; cursor: pointer; font-size: .875rem; font-weight: 600; padding: .55rem 1.4rem; transition: opacity .2s; }
+.nlp-btn:hover:not(:disabled) { opacity: .85; }
+.nlp-btn:disabled { cursor: not-allowed; opacity: .4; }
+.nlp-btn--ghost { background: transparent; border: 1px solid var(--border); color: var(--text-muted); }
+.nlp-btn--ghost:hover:not(:disabled) { border-color: var(--gold); color: var(--gold); opacity: 1; }
+
+.nlp-progress { display: flex; align-items: center; gap: .75rem; margin-bottom: 1.25rem; color: var(--text-muted); font-size: .8rem; }
+.nlp-progress__bar { width: 14px; height: 14px; border: 2px solid var(--gold); border-top-color: transparent; border-radius: 50%; animation: nlp-spin .7s linear infinite; }
+@keyframes nlp-spin { to { transform: rotate(360deg); } }
+
+.nlp-err { color: #fc8181; font-size: .875rem; margin-bottom: 1rem; background: rgba(252,129,129,.07); border: 1px solid rgba(252,129,129,.25); border-radius: 6px; padding: .6rem .8rem; }
+
+.nlp-results { display: flex; flex-direction: column; gap: 1rem; }
+
+.nlp-summary { background: var(--bg-card); border: 1px solid var(--border); border-radius: 8px; padding: 1.25rem; }
+.nlp-summary__title { font-size: .72rem; color: var(--text-muted); font-weight: 600; letter-spacing: .06em; text-transform: uppercase; margin-bottom: 1rem; }
+.nlp-summary__grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(140px, 1fr)); gap: 1rem; }
+.nlp-stat { background: var(--bg-raised, #0d0d1a); border: 1px solid var(--border); border-radius: 6px; padding: 1rem; text-align: center; }
+.nlp-stat--alert { border-left: 3px solid #fc8181; border-radius: 0 6px 6px 0; }
+.nlp-stat--warn { border-left: 3px solid #ecc94b; border-radius: 0 6px 6px 0; }
+.nlp-stat__val { font-size: 2.2rem; font-weight: 700; line-height: 1; color: var(--text-primary); }
+.nlp-stat__pct { font-size: 1.1rem; }
+.nlp-stat__label { font-size: .72rem; color: var(--text-muted); text-transform: uppercase; letter-spacing: .05em; margin-top: .4rem; }
+.nlp-summary__text { color: var(--text-primary); font-size: .875rem; line-height: 1.65; margin-top: 1rem; padding-top: 1rem; border-top: 1px solid var(--border); }
 </style>
