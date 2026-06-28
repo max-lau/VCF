@@ -11,6 +11,12 @@ const showCreate = ref(false)
 const saving     = ref(false)
 const filterStatus = ref('upcoming')
 const daysAhead    = ref(30)
+const showSync    = ref(false)
+const syncStatus  = ref(null)
+const syncLoading = ref(false)
+const icalUrl     = ref('')
+const icalCopied  = ref(false)
+const pushResult  = ref(null)
 
 const form = ref(emptyForm())
 function emptyForm() {
@@ -36,7 +42,77 @@ async function fetchEvents() {
   finally { loading.value = false }
 }
 
-onMounted(() => { fetchMatters(); fetchEvents() })
+onMounted(() => { fetchMatters(); fetchEvents(); fetchSyncStatus() })
+
+async function fetchSyncStatus() {
+  try {
+    const { data } = await client.get('/calendar/sync/status')
+    syncStatus.value = data
+    if (data.ical?.has_url) await fetchIcalUrl()
+  } catch { syncStatus.value = null }
+}
+
+async function fetchIcalUrl() {
+  try {
+    const { data } = await client.get('/calendar/sync/ical-url')
+    icalUrl.value = data.url
+  } catch { icalUrl.value = '' }
+}
+
+function copyIcalUrl() {
+  navigator.clipboard.writeText(icalUrl.value)
+  icalCopied.value = true
+  setTimeout(() => icalCopied.value = false, 2000)
+}
+
+async function startGoogleSync() {
+  try {
+    const { data } = await client.post('/calendar/sync/google/start')
+    window.location.href = data.auth_url
+  } catch (e) {
+    pushResult.value = { error: e.response?.data?.detail || 'Failed to start Google sync' }
+  }
+}
+
+async function startOutlookSync() {
+  try {
+    const { data } = await client.post('/calendar/sync/outlook/start')
+    window.location.href = data.auth_url
+  } catch (e) {
+    pushResult.value = { error: e.response?.data?.detail || 'Failed to start Outlook sync' }
+  }
+}
+
+async function pushToGoogle() {
+  syncLoading.value = true
+  pushResult.value = null
+  try {
+    const { data } = await client.post('/calendar/sync/google/push')
+    pushResult.value = data
+  } catch (e) {
+    pushResult.value = { error: e.response?.data?.detail || 'Push failed' }
+  } finally { syncLoading.value = false }
+}
+
+async function pushToOutlook() {
+  syncLoading.value = true
+  pushResult.value = null
+  try {
+    const { data } = await client.post('/calendar/sync/outlook/push')
+    pushResult.value = data
+  } catch (e) {
+    pushResult.value = { error: e.response?.data?.detail || 'Push failed' }
+  } finally { syncLoading.value = false }
+}
+
+async function disconnectProvider(provider) {
+  if (!confirm(`Disconnect ${provider} calendar sync?`)) return
+  try {
+    await client.post('/calendar/sync/disconnect', { provider })
+    await fetchSyncStatus()
+    pushResult.value = null
+  } catch {}
+}
 
 async function saveEvent() {
   if (!form.value.title.trim() || !form.value.due_date) return
@@ -108,7 +184,10 @@ const counts = computed(() => ({
         <h1 class="cal__title">Calendar</h1>
         <p class="cal__sub">Deadlines · hearings · filings · meetings</p>
       </div>
-      <button class="btn-gold" @click="showCreate = true; form = emptyForm()">+ New Event</button>
+      <div class="cal__header-actions">
+        <button class="btn-secondary" @click="showSync = true">📅 Sync</button>
+        <button class="btn-gold" @click="showCreate = true; form = emptyForm()">+ New Event</button>
+      </div>
     </div>
 
     <!-- Filters -->
@@ -219,6 +298,67 @@ const counts = computed(() => ({
         </div>
       </div>
     </div>
+
+    <!-- Sync modal -->
+    <div v-if="showSync" class="modal-overlay" @click.self="showSync = false">
+      <div class="modal">
+        <div class="modal__header">
+          <h2>Calendar Sync</h2>
+          <button class="close-btn" @click="showSync = false">✕</button>
+        </div>
+        <div class="modal__body">
+
+          <!-- iCal Feed -->
+          <div class="sync-section">
+            <div class="sync-section__title">📋 iCal Feed (Universal)</div>
+            <div class="sync-section__sub">Works with Apple Calendar, Google Calendar, Outlook, and any app that supports .ics subscriptions.</div>
+            <div v-if="icalUrl" class="ical-url-box">
+              <input :value="icalUrl" readonly class="ical-input" @click="$event.target.select()" />
+              <button class="btn-gold sm" @click="copyIcalUrl">{{ icalCopied ? '✓ Copied' : 'Copy' }}</button>
+            </div>
+            <button v-else class="btn-gold sm" @click="fetchIcalUrl">Generate iCal URL</button>
+            <div class="sync-section__hint">Add this URL as a calendar subscription in your calendar app.</div>
+          </div>
+
+          <!-- Google Calendar -->
+          <div class="sync-section">
+            <div class="sync-section__title">📅 Google Calendar</div>
+            <div class="sync-section__sub">Two-way push of deadlines and court dates to your Google Calendar.</div>
+            <div v-if="syncStatus?.google?.connected" class="sync-connected">
+              <span class="sync-badge sync-badge--on">● Connected</span>
+              <button class="btn-gold sm" @click="pushToGoogle" :disabled="syncLoading">{{ syncLoading ? 'Pushing…' : 'Push Events Now' }}</button>
+              <button class="btn-secondary sm" @click="disconnectProvider('google')">Disconnect</button>
+            </div>
+            <button v-else class="btn-secondary sm" @click="startGoogleSync">Connect Google Calendar</button>
+          </div>
+
+          <!-- Outlook Calendar -->
+          <div class="sync-section">
+            <div class="sync-section__title">📧 Outlook Calendar</div>
+            <div class="sync-section__sub">Two-way push of deadlines and court dates to your Outlook Calendar.</div>
+            <div v-if="syncStatus?.outlook?.connected" class="sync-connected">
+              <span class="sync-badge sync-badge--on">● Connected</span>
+              <button class="btn-gold sm" @click="pushToOutlook" :disabled="syncLoading">{{ syncLoading ? 'Pushing…' : 'Push Events Now' }}</button>
+              <button class="btn-secondary sm" @click="disconnectProvider('outlook')">Disconnect</button>
+            </div>
+            <button v-else class="btn-secondary sm" @click="startOutlookSync">Connect Outlook Calendar</button>
+          </div>
+
+          <!-- Push result -->
+          <div v-if="pushResult" class="push-result" :class="{ 'push-result--error': pushResult.error }">
+            <template v-if="pushResult.error">{{ pushResult.error }}</template>
+            <template v-else>
+              ✓ Pushed {{ pushResult.pushed }} of {{ pushResult.total }} events to {{ pushResult.provider }}
+              <span v-if="pushResult.errors > 0" class="push-errors">({{ pushResult.errors }} errors)</span>
+            </template>
+          </div>
+
+        </div>
+        <div class="modal__footer">
+          <button class="btn-secondary" @click="showSync = false">Done</button>
+        </div>
+      </div>
+    </div>
   </div>
 </template>
 
@@ -297,4 +437,26 @@ const counts = computed(() => ({
 
 .state-msg { color: var(--text-muted); padding: 3rem; text-align: center; }
 .dim { color: var(--text-muted); }
+
+.cal__header-actions { display: flex; gap: 0.5rem; align-items: center; }
+
+.sync-section { padding: 1rem 0; border-bottom: 1px solid var(--border); }
+.sync-section:last-child { border-bottom: none; }
+.sync-section__title { font-size: 0.95rem; font-weight: 600; color: var(--text-primary); margin-bottom: 0.25rem; }
+.sync-section__sub { font-size: 0.78rem; color: var(--text-muted); margin-bottom: 0.6rem; }
+.sync-section__hint { font-size: 0.72rem; color: var(--text-muted); margin-top: 0.4rem; font-style: italic; }
+
+.ical-url-box { display: flex; gap: 0.5rem; align-items: center; }
+.ical-input { flex: 1; background: var(--bg-raised); border: 1px solid var(--border); border-radius: 6px; color: var(--text-muted); font-size: 0.75rem; font-family: var(--font-mono); padding: 0.4rem 0.5rem; }
+
+.sync-connected { display: flex; align-items: center; gap: 0.75rem; }
+.sync-badge { font-size: 0.75rem; font-weight: 600; padding: 0.15rem 0.5rem; border-radius: 4px; }
+.sync-badge--on { background: rgba(72,187,120,.15); color: #48bb78; }
+
+.btn-gold.sm { padding: 0.35rem 0.75rem; font-size: 0.75rem; }
+.btn-secondary.sm { padding: 0.35rem 0.75rem; font-size: 0.75rem; }
+
+.push-result { background: rgba(72,187,120,.1); border: 1px solid rgba(72,187,120,.3); border-radius: 6px; color: #48bb78; font-size: 0.82rem; padding: 0.6rem 0.75rem; margin-top: 0.5rem; }
+.push-result--error { background: rgba(252,129,129,.1); border-color: rgba(252,129,129,.3); color: #fc8181; }
+.push-errors { color: var(--text-muted); font-size: 0.75rem; }
 </style>

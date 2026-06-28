@@ -39,6 +39,7 @@ from backend.demo1.coref_disambig import disambiguate_entities, resolve_corefere
 from backend.demo1.contradiction import run_contradiction_scan
 from backend.demo1.billing_router import router as billing_router
 from backend.demo1.semantic_search import router as semantic_search_router
+from backend.demo1.calendar_sync import router as calendar_sync_router
 from fastapi import FastAPI, HTTPException, Query, Request, BackgroundTasks
 from fastapi.responses import JSONResponse
 from starlette.middleware.base import BaseHTTPMiddleware
@@ -309,6 +310,7 @@ async def shutdown_event():
     if _scheduler:
         _scheduler.shutdown(wait=False)
 app.include_router(calendar_router)
+app.include_router(calendar_sync_router)
 app.include_router(contacts_router)
 app.include_router(reports_router)
 app.include_router(exports_router)
