@@ -1,52 +1,65 @@
 """
-conftest.py — shared fixtures for all backend tests
+conftest.py — shared fixtures for all backend tests.
+
+All tests run against the LIVE server (http://127.0.0.1:5003).
+We do NOT import backend.demo1.main or use TestClient — on a 2GB VPS,
+importing main.py loads torch/sentence-transformers/chromadb (~700MB)
+which triggers the OOM killer and crashes uvicorn.
 """
 import os
-import sys
 import pytest
+import requests
+from dotenv import load_dotenv
 
-# ── Environment setup (must happen before app import) ─────────────────────────
+# ── Environment setup ─────────────────────────────────────────────────────────
 _ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 os.chdir(_ROOT)
-os.environ['TESTING'] = '1'          # disables APScheduler in risk_watcher
+os.environ['TESTING'] = '1'
 
-from dotenv import load_dotenv
 load_dotenv(os.path.join(_ROOT, '.env'))
 
-from fastapi.testclient import TestClient
-
 # ── Constants ─────────────────────────────────────────────────────────────────
+BASE          = "http://127.0.0.1:5003"
 DB_PATH       = 'backend/demo1/analyses.db'
 TEST_USERNAME = '_pytest_user_'
-TEST_PASSWORD='***'
+TEST_PASSWORD = 'TestPass123!'
 TEST_EMAIL    = '_pytest@test.internal'
 API_KEY       = os.getenv('PARAIQ_API_KEY', '')
 
-# ── ASGI lifespan blocker ────────────────────────────────────────────────────
-# On a 2GB VPS, the full startup_event (torch, pollers, DB pool, etc.) exhausts
-# RAM and the OOM killer terminates uvicorn — breaking live-server tests.
-# This wrapper swallows the ASGI lifespan so TestClient skips startup entirely.
-# The test_user fixture calls init_pool() itself; tables already exist in Postgres.
 
-class _NoLifespanASGI:
-    """Wraps an ASGI app and drops lifespan events (startup/shutdown)."""
-    def __init__(self, app):
-        self._app = app
-    async def __call__(self, scope, receive, send):
-        if scope["type"] == "lifespan":
-            await receive()
-            await send({"type": "lifespan.startup.complete"})
-            await receive()
-            await send({"type": "lifespan.shutdown.complete"})
-            return
-        await self._app(scope, receive, send)
+# ── Live-server HTTP client (drop-in replacement for TestClient) ──────────────
+class LiveClient:
+    """Wraps requests.Session with a base URL. Same API as fastapi.TestClient."""
+    def __init__(self, base_url=BASE):
+        self._base = base_url.rstrip('/')
+        self._s = requests.Session()
+
+    def _url(self, path):
+        if path.startswith('http'):
+            return path
+        return f"{self._base}{path}"
+
+    def get(self, path, **kw):
+        return self._s.get(self._url(path), **kw)
+
+    def post(self, path, **kw):
+        return self._s.post(self._url(path), **kw)
+
+    def put(self, path, **kw):
+        return self._s.put(self._url(path), **kw)
+
+    def delete(self, path, **kw):
+        return self._s.delete(self._url(path), **kw)
+
+    def patch(self, path, **kw):
+        return self._s.patch(self._url(path), **kw)
+
 
 # ── Fixtures ──────────────────────────────────────────────────────────────────
 @pytest.fixture(scope='session')
 def client():
-    from backend.demo1.main import app
-    with TestClient(_NoLifespanASGI(app)) as c:
-        yield c
+    return LiveClient()
+
 
 @pytest.fixture(scope='session')
 def test_user(client):
@@ -76,7 +89,7 @@ def test_user(client):
 
     yield data
 
-    # Teardown — use Supabase pg connection
+    # Teardown
     uid = data.get('user_id')
     try:
         import backend.demo1.pg as _pg
@@ -89,6 +102,7 @@ def test_user(client):
     except Exception as e:
         print(f'[conftest] teardown warning: {e}')
 
+
 @pytest.fixture(scope='session')
 def auth_token(client, test_user):
     """Return a valid JWT for the test user."""
@@ -99,6 +113,7 @@ def auth_token(client, test_user):
     assert r.status_code == 200, f'Login failed: {r.text}'
     return r.json()['token']
 
+
 @pytest.fixture(scope='session')
 def auth_headers(auth_token):
     """Full headers: Bearer JWT + API key."""
@@ -106,6 +121,7 @@ def auth_headers(auth_token):
         'Authorization': f'Bearer {auth_token}',
         'X-API-Key':     API_KEY,
     }
+
 
 @pytest.fixture(scope='session')
 def key_only_headers():
