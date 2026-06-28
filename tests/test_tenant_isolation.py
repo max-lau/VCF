@@ -11,7 +11,7 @@ from dotenv import load_dotenv
 _HERE = os.path.dirname(os.path.abspath(__file__))
 load_dotenv(os.path.join(_HERE, "..", ".env"))
 
-BASE    = "http://localhost:5003"
+BASE    = "http://127.0.0.1:5003"
 API_KEY = os.environ.get("PARAIQ_API_KEY", "")
 
 

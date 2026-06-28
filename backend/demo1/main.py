@@ -189,26 +189,28 @@ async def startup_event():
     init_messages_table()
     init_enclave_tables()
     # 3. Poller tasks — keep references so GC cannot collect them
-    from backend.demo1.email_poller import GmailPollerService
-    from backend.demo1.outlook_poller import OutlookPollerService
-    _poller_tasks: set = set()
+    #    Skip in TESTING mode to avoid asyncio interference with live-server tests
+    if not os.getenv("TESTING"):
+        from backend.demo1.email_poller import GmailPollerService
+        from backend.demo1.outlook_poller import OutlookPollerService
+        _poller_tasks: set = set()
 
-    def _make_poller(cls):
-        async def _run():
-            while True:
-                try:
-                    await cls().run()
-                except (RuntimeError, OSError, asyncio.CancelledError, ValueError) as exc:
-                    logging.warning(f"[Poller] {cls.__name__} crashed: {exc}. Restarting in 60s.")
-                    await asyncio.sleep(60)
-        return _run
+        def _make_poller(cls):
+            async def _run():
+                while True:
+                    try:
+                        await cls().run()
+                    except (RuntimeError, OSError, asyncio.CancelledError, ValueError) as exc:
+                        logging.warning(f"[Poller] {cls.__name__} crashed: {exc}. Restarting in 60s.")
+                        await asyncio.sleep(60)
+            return _run
 
-    for cls in (GmailPollerService, OutlookPollerService):
-        task = asyncio.create_task(_make_poller(cls)())
-        _poller_tasks.add(task)
-        task.add_done_callback(_poller_tasks.discard)
+        for cls in (GmailPollerService, OutlookPollerService):
+            task = asyncio.create_task(_make_poller(cls)())
+            _poller_tasks.add(task)
+            task.add_done_callback(_poller_tasks.discard)
 
-    app.state.poller_tasks = _poller_tasks
+        app.state.poller_tasks = _poller_tasks
     # 3. Scheduler
     global _scheduler
     _scheduler = start_scheduler(app)

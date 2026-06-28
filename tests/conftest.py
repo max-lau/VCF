@@ -14,7 +14,6 @@ from dotenv import load_dotenv
 load_dotenv(os.path.join(_ROOT, '.env'))
 
 from fastapi.testclient import TestClient
-from backend.demo1.main import app
 
 # ── Constants ─────────────────────────────────────────────────────────────────
 DB_PATH       = 'backend/demo1/analyses.db'
@@ -26,6 +25,7 @@ API_KEY       = os.getenv('PARAIQ_API_KEY', '')
 # ── Fixtures ──────────────────────────────────────────────────────────────────
 @pytest.fixture(scope='session')
 def client():
+    from backend.demo1.main import app
     with TestClient(app) as c:
         yield c
 
