@@ -62,3 +62,4 @@ chromadb==1.5.9
 
 # MLOps tracking (torch/transformers/peft imported lazily at training time)
 mlflow==3.14.0
+email-validator
