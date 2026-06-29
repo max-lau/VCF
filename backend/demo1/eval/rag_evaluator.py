@@ -46,11 +46,11 @@ def generate_answer(question: str, contexts: list) -> str:
     """Generate answer from Claude using retrieved contexts."""
     ctx_text = "\n".join(f"- {c}" for c in contexts)
     prompt = (
-        "You are a legal research assistant. Answer the question using ONLY "
-        "the provided context. Answer in one sentence. Quote the exact phrase "
-        "from context. Do not infer or extend. If the context does not contain "
-        "the answer, say: The context does not contain enough information to "
-        "answer this question.\n\n"
+        "You are a legal research assistant. Answer in ONE sentence only. "
+        "Quote the exact phrase from the context that answers the question. "
+        "Do not infer, extend, or add information not explicitly stated in the context. "
+        "If the context does not contain the answer, respond only with: "
+        "The context does not contain enough information to answer this question.\n\n"
         f"Context:\n{ctx_text}\n\nQuestion: {question}\n\nAnswer:"
     )
     client = get_client()

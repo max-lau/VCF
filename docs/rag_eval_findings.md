@@ -182,3 +182,41 @@ than admit insufficient context.
 - Pipeline: `backend/demo1/eval/rag_evaluator.py`
 - Report script: `scripts/eval_report.py`
 - Dated output: `logs/eval_YYYYMMDD_HHMM.json`
+
+## Run 4 Results (2026-06-29)
+
+### Changes
+- Tightened system prompt: "Answer in ONE sentence only. Quote the exact phrase from the context. Do not infer, extend, or add information not explicitly stated."
+- Reduced max_tokens 300 → 150
+
+### Results
+
+| Metric            | Run 1 | Run 2 | Run 3 | Run 4 | Δ Run3→4 |
+|-------------------|-------|-------|-------|-------|----------|
+| Faithfulness      | 0.883 | 0.931 | 0.879 | 0.893 | +0.014   |
+| Answer Relevancy  | 0.814 | 0.761 | 0.762 | 0.852 | +0.090   |
+| Context Precision | 0.961 | 0.958 | 0.973 | 0.973 | +0.000   |
+| Context Recall    | 1.000 | 0.933 | 0.933 | 0.933 | +0.000   |
+
+### Analysis
+
+Answer Relevancy is best across all runs (+0.090) — forcing one-sentence answers
+with exact quoting stopped Claude from padding with unnecessary elaboration.
+
+Faithfulness recovered to 0.893, back above Run 1 baseline, partially reversing
+the Run 3 regression caused by full-text context giving Claude more surface to stray.
+
+Two persistent low-faithfulness items remain (both precision=1.00, retrieval correct):
+- "What was the outcome for the defendant convicted of wire fraud?" faith=0.00
+- "What did the court do with all charges in the dismissal case?" faith=0.50
+
+The faith=0.00 item likely triggered the "No statements generated" RAGAS warning —
+Claude may have returned a one-word answer RAGAS couldn't score, not true hallucination.
+
+Context Precision held at 0.973 (best across all runs, tied Run 3).
+
+### What to Try Next (Run 5)
+
+1. Inspect the faith=0.00 generated answer — likely a RAGAS scoring artifact
+2. Few-shot examples in system prompt for short factual questions
+3. BM25 hybrid retrieval for exact court names and statute numbers
