@@ -121,16 +121,61 @@ several paragraphs) gives Claude more surface area to stray from. With short
 preview text, Claude was constrained to a small window. With full text it has
 more content to misinterpret or extend beyond.
 
-### What to Try Next (Run 4)
+## Run 4 — Tightened System Prompt + Reduced max_tokens (2026-06-29)
 
-The generation prompt needs tightening, not the retrieval:
+### Changes Applied
 
-1. **Stricter system prompt** — add "Answer in one sentence. Quote the exact phrase
-   from context. Do not infer or extend." to the RAG generation prompt
-2. **Reduce max_tokens** — currently 300; try 150 to force concise answers
-3. **Hybrid retrieval** — combine full_text semantic search with BM25 keyword
+1. **Stricter system prompt** — added "Answer in one sentence. Quote the exact
+   phrase from context. Do not infer or extend." before the fallback instruction
+2. **Reduced max_tokens** from 300 → 150 to force concise answers
+
+Both changes in `backend/demo1/eval/rag_evaluator.py` (`generate_answer` function).
+
+### Run 4 Actual Results
+
+| Metric            | Run 1 | Run 2 | Run 3 | Run 4 | Δ Run3→4 |
+|-------------------|-------|-------|-------|-------|----------|
+| Faithfulness      | 0.883 | 0.931 | 0.879 | 0.893 | +0.014   |
+| Answer Relevancy  | 0.814 | 0.761 | 0.762 | 0.852 | +0.090   |
+| Context Precision | 0.961 | 0.958 | 0.973 | 0.973 | +0.000   |
+| Context Recall    | 1.000 | 0.933 | 0.933 | 0.933 | +0.000   |
+
+### Run 4 Analysis
+
+**Faithfulness improved +0.014** (0.879 → 0.893). The tighter prompt and
+reduced max_tokens constrained Claude from elaborating beyond retrieved context.
+This reverses the Run 3 regression (-0.052) and recovers ~27% of the lost ground.
+
+**Answer relevancy surged +0.090** (0.762 → 0.852) — the largest single-metric
+improvement across all 4 runs. Forcing one-sentence answers with exact quotes
+eliminated rambling responses that scored poorly on relevancy.
+
+**Context precision and recall held steady** (0.973 / 0.933) — expected, since
+retrieval was unchanged.
+
+### Weakest Faithfulness Items
+
+| Question (truncated)                              | Faithfulness | Precision |
+|---------------------------------------------------|:------------:|:---------:|
+| What was the outcome for the defendant convicted of wire fraud? | 0.00 | 1.00 |
+| What did the court do with all charges?           | 0.50         | 1.00     |
+| What was Alexander Vance charged with stealing?    | 1.00         | 1.00     |
+
+The wire fraud question scored **0.00 faithfulness** despite 1.00 precision —
+Claude retrieved the right document but still hallucinated the answer. This is
+a stubborn generation problem on very short factual documents where the
+one-sentence constraint may cause Claude to fabricate a confident answer rather
+than admit insufficient context.
+
+### What to Try Next (Run 5)
+
+1. **Hybrid retrieval** — combine full_text semantic search with BM25 keyword
    search; short factual questions (court names, statute numbers) are better
    served by exact keyword match than embedding similarity
+2. **Add "If unsure, say you don't know"** to the prompt — may reduce the 0.00
+   faithfulness scores by encouraging abstention over fabrication
+3. **Per-question analysis** — the wire fraud item has scored 0.50, 0.50, 0.00
+   across Runs 2-4; inspect the exact generated answer vs ground truth
 
 ## Infrastructure
 - Eval dataset: `backend/demo1/eval/dataset.py` (15 Q&A pairs)

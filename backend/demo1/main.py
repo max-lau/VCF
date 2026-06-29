@@ -96,6 +96,20 @@ from backend.demo1.routers.time_router import router as time_router
 from backend.demo1.routers.billing_router import router as billing_router
 from backend.demo1.notifications_router import router as notifications_router
 
+# ── Phase 1: AI Infrastructure Modules ─────────────────────────────────────────
+from backend.demo1.security_headers import SecurityHeadersMiddleware, init_security_headers
+from backend.demo1.prompt_guard import init_guard_table, guard_prompt, build_safe_messages, log_guard_event
+from backend.demo1.ai_isolation import (
+    init_isolation_tables, get_tenant_config, get_tenant_client,
+    resolve_system_prompt, check_token_budget, get_token_usage,
+    update_tenant_config, invalidate_config_cache,
+)
+from backend.demo1.model_router import (
+    init_model_router as init_ai_model_router,
+    call_llm, call_llm_async, get_routing_status, get_cost_report,
+    get_recent_requests as get_recent_ai_requests, TaskType,
+)
+
 load_dotenv()
 from backend.demo1.pg import init_pool, make_tenant_middleware
 
@@ -192,6 +206,11 @@ async def startup_event():
     init_esign_tables()
     from backend.demo1.client_portal import init_tables as init_portal_tables
     init_portal_tables()
+    # Phase 1: AI Infrastructure
+    init_security_headers()
+    init_guard_table()
+    init_isolation_tables()
+    init_ai_model_router()
     # 3. Poller tasks — keep references so GC cannot collect them
     #    Skip in TESTING mode to avoid asyncio interference with live-server tests
     if not os.getenv("TESTING"):
@@ -341,11 +360,126 @@ app.include_router(semantic_search_router, prefix="/search", tags=["semantic-sea
 app.include_router(document_annotations_router, prefix="/documents", tags=["document-annotations"])
 app.include_router(esign_router, prefix="/esign", tags=["e-signature"])
 app.include_router(time_tracker_router, prefix="/time-tracker", tags=["time-tracking"])
+
+# ── Phase 1: AI Infrastructure Endpoints ─────────────────────────────────────
+
+@app.get("/ai/status", tags=["ai-infrastructure"])
+async def ai_infra_status(request: Request):
+    """Get AI infrastructure status: routing, circuit breakers, costs."""
+    user_id = getattr(request.state, "user_id", None)
+    if not user_id:
+        raise HTTPException(401, "Authentication required")
+    firm_id = getattr(request.state, "firm_id", "default")
+    role = getattr(request.state, "role", "")
+    report = {"firm_id": firm_id}
+    report["routing"] = get_routing_status()
+    report["token_usage"] = get_token_usage(firm_id)
+    if role == "paraiq_super":
+        report["cost_report"] = get_cost_report()
+        report["recent_requests"] = get_recent_ai_requests(limit=20)
+    return report
+
+@app.get("/ai/config", tags=["ai-infrastructure"])
+async def get_ai_config(request: Request):
+    """Get this tenant's AI configuration."""
+    user_id = getattr(request.state, "user_id", None)
+    if not user_id:
+        raise HTTPException(401, "Authentication required")
+    firm_id = getattr(request.state, "firm_id", "default")
+    config = get_tenant_config(firm_id)
+    return {"success": True, "config": config.to_dict()}
+
+@app.put("/ai/config", tags=["ai-infrastructure"])
+async def set_ai_config(request: Request):
+    """Update AI configuration (super admin only)."""
+    user_id = getattr(request.state, "user_id", None)
+    if not user_id:
+        raise HTTPException(401, "Authentication required")
+    role = getattr(request.state, "role", "")
+    if role != "paraiq_super":
+        raise HTTPException(403, "Only super admins may modify AI configuration")
+    firm_id = getattr(request.state, "firm_id", "default")
+    import json as _json
+    body = await request.body()
+    updates = _json.loads(body)
+    result = update_tenant_config(firm_id, **updates)
+    return result
+
+@app.get("/ai/guard/log", tags=["ai-infrastructure"])
+async def get_guard_log(request: Request, limit: int = 50):
+    """Get prompt guard event log for this tenant."""
+    user_id = getattr(request.state, "user_id", None)
+    if not user_id:
+        raise HTTPException(401, "Authentication required")
+    firm_id = getattr(request.state, "firm_id", "default")
+    limit = min(limit, 200)
+    try:
+        from backend.demo1.pg import get_conn
+        with get_conn(firm_id) as conn:
+            rows = conn.execute(
+                """SELECT * FROM prompt_guard_log
+                   WHERE firm_id = %s
+                   ORDER BY created_at DESC LIMIT %s""",
+                (firm_id, limit),
+            ).fetchall()
+        return {
+            "success": True,
+            "count": len(rows),
+            "events": [dict(r) for r in rows],
+        }
+    except Exception as e:
+        return {"success": False, "error": str(e), "events": []}
+
+@app.post("/ai/test", tags=["ai-infrastructure"])
+async def test_ai_routing(request: Request):
+    """Test endpoint for AI routing — runs a simple summarization task."""
+    user_id = getattr(request.state, "user_id", None)
+    if not user_id:
+        raise HTTPException(401, "Authentication required")
+    firm_id = getattr(request.state, "firm_id", "default")
+    import json as _json
+    body = await request.body()
+    data = _json.loads(body) if body else {}
+    text = data.get("text", "The statute of limitations for personal injury in New York is three years from the date of the accident.")
+    task_type = data.get("task_type", "summarization")
+
+    messages, guard_result = build_safe_messages(
+        system_prompt=resolve_system_prompt(firm_id, LEGAL_SYSTEM_PROMPT),
+        user_content=f"Summarize this in one sentence: {text}",
+        firm_id=firm_id,
+    )
+
+    if guard_result.threats:
+        log_guard_event(guard_result, firm_id, "/ai/test")
+
+    try:
+        response, metadata = await call_llm_async(
+            messages=messages,
+            system=resolve_system_prompt(firm_id, LEGAL_SYSTEM_PROMPT),
+            firm_id=firm_id,
+            task_type=task_type,
+            max_tokens=256,
+        )
+        output_text = response.content[0].text if response.content else ""
+        return {
+            "success": True,
+            "output": output_text,
+            "metadata": metadata,
+            "guard": {
+                "threats_detected": len(guard_result.threats),
+                "blocked": guard_result.blocked,
+                "risk_score": guard_result.risk_score,
+            },
+        }
+    except Exception as e:
+        return {"success": False, "error": str(e)}
+
 # ── Middleware (added in reverse; Starlette executes outermost-first) ─────────
-# Execution order: CORS → APIKey → Tenant → Audit
+# Execution order: SecurityHeaders → CORS → APIKey → Tenant → Audit
 app.add_middleware(AuditMiddleware)
 app.add_middleware(make_tenant_middleware())
 app.add_middleware(APIKeyMiddleware)
+app.add_middleware(SecurityHeadersMiddleware)
 app.add_middleware(
     CORSMiddleware,
     allow_origins=[os.getenv("ALLOWED_ORIGINS", "https://app.para-iq.com")],

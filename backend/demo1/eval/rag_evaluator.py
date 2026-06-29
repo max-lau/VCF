@@ -47,14 +47,16 @@ def generate_answer(question: str, contexts: list) -> str:
     ctx_text = "\n".join(f"- {c}" for c in contexts)
     prompt = (
         "You are a legal research assistant. Answer the question using ONLY "
-        "the provided context. If the context does not contain the answer, "
-        "say: The context does not contain enough information to answer this question.\n\n"
+        "the provided context. Answer in one sentence. Quote the exact phrase "
+        "from context. Do not infer or extend. If the context does not contain "
+        "the answer, say: The context does not contain enough information to "
+        "answer this question.\n\n"
         f"Context:\n{ctx_text}\n\nQuestion: {question}\n\nAnswer:"
     )
     client = get_client()
     msg = client.messages.create(
         model="claude-haiku-4-5-20251001",
-        max_tokens=300,
+        max_tokens=150,
         messages=[{"role": "user", "content": prompt}]
     )
     return msg.content[0].text.strip()
