@@ -214,6 +214,8 @@ async def startup_event():
     init_isolation_tables()
     init_ai_model_router()
     init_validation_tables()
+    init_crm_tables()
+    init_communications_tables()
     # 3. Poller tasks — keep references so GC cannot collect them
     #    Skip in TESTING mode to avoid asyncio interference with live-server tests
     if not os.getenv("TESTING"):
@@ -1807,3 +1809,83 @@ async def ai_execute_agent(request: Request):
         
     except Exception as e:
         raise HTTPException(500, f"Error processing agent task: {str(e)}")
+
+
+@app.get("/reports/dashboard", tags=["reporting"])
+async def firm_dashboard(request: Request):
+    """Get firm-wide analytics: matters, billing, time, and intake."""
+    user_id = getattr(request.state, "user_id", None)
+    if not user_id:
+        raise HTTPException(401, "Authentication required")
+        
+    firm_id = getattr(request.state, "firm_id", "default")
+    role = getattr(request.state, "role", "")
+    
+    # Only admins/partners can view firm-wide reports
+    if role not in ["paraiq_super", "partner", "admin"]:
+        raise HTTPException(403, "Insufficient permissions to view firm dashboard")
+        
+    result = get_firm_dashboard(firm_id)
+    return result
+
+
+@app.post("/leads", tags=["crm"])
+async def api_create_lead(request: Request):
+    user_id = getattr(request.state, "user_id", None)
+    if not user_id: raise HTTPException(401, "Authentication required")
+    firm_id = getattr(request.state, "firm_id", "default")
+    body = await request.json()
+    result = create_lead(
+        firm_id=firm_id, 
+        first_name=body.get("first_name", ""), 
+        last_name=body.get("last_name", ""), 
+        email=body.get("email", ""), 
+        phone=body.get("phone", ""), 
+        case_description=body.get("case_description", "")
+    )
+    return result
+
+@app.get("/leads", tags=["crm"])
+async def api_get_leads(request: Request, status: str = None):
+    user_id = getattr(request.state, "user_id", None)
+    if not user_id: raise HTTPException(401, "Authentication required")
+    firm_id = getattr(request.state, "firm_id", "default")
+    leads = get_leads(firm_id=firm_id, status=status)
+    return {"success": True, "count": len(leads), "leads": leads}
+
+@app.put("/leads/{lead_id}", tags=["crm"])
+async def api_update_lead(request: Request, lead_id: int):
+    user_id = getattr(request.state, "user_id", None)
+    if not user_id: raise HTTPException(401, "Authentication required")
+    firm_id = getattr(request.state, "firm_id", "default")
+    body = await request.json()
+    new_status = body.get("status")
+    if not new_status: raise HTTPException(400, "Missing 'status' field")
+    result = update_lead_status(firm_id=firm_id, lead_id=lead_id, new_status=new_status)
+    return result
+
+
+@app.post("/communications", tags=["communications"])
+async def api_log_comm(request: Request):
+    user_id = getattr(request.state, "user_id", None)
+    if not user_id: raise HTTPException(401, "Authentication required")
+    firm_id = getattr(request.state, "firm_id", "default")
+    body = await request.json()
+    result = log_communication(
+        firm_id=firm_id,
+        comm_type=body.get("comm_type"),
+        direction=body.get("direction"),
+        sender=body.get("sender", ""),
+        recipient=body.get("recipient", ""),
+        body=body.get("body", ""),
+        matter_id=body.get("matter_id")
+    )
+    return result
+
+@app.get("/communications/{matter_id}", tags=["communications"])
+async def api_get_comms(request: Request, matter_id: int):
+    user_id = getattr(request.state, "user_id", None)
+    if not user_id: raise HTTPException(401, "Authentication required")
+    firm_id = getattr(request.state, "firm_id", "default")
+    comms = get_matter_communications(firm_id=firm_id, matter_id=matter_id)
+    return {"success": True, "count": len(comms), "communications": comms}
