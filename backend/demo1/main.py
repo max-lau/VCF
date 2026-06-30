@@ -97,6 +97,8 @@ from backend.demo1.routers.billing_router import router as billing_router
 from backend.demo1.notifications_router import router as notifications_router
 
 # ── Phase 1: AI Infrastructure Modules ─────────────────────────────────────────
+from backend.demo1.ai_time_capture import suggest_time_entries
+from backend.demo1.ai_summarization import summarize_text
 from backend.demo1.security_headers import SecurityHeadersMiddleware, init_security_headers
 from backend.demo1.prompt_guard import init_guard_table, guard_prompt, build_safe_messages, log_guard_event
 from backend.demo1.ai_isolation import (
@@ -448,6 +450,8 @@ async def test_ai_routing(request: Request):
         user_content=f"Summarize this in one sentence: {text}",
         firm_id=firm_id,
     )
+    # Strip system message — passed separately as top-level 'system' param to Anthropic API
+    messages = [m for m in messages if m.get("role") != "system"]
 
     if guard_result.threats:
         log_guard_event(guard_result, firm_id, "/ai/test")
@@ -738,10 +742,11 @@ def health():
     return {"status": "ok", "model": LLM_FAST}
 
 @app.post("/analyze")
-def analyze(body: TextInput, request: Request):
+async def analyze(body: TextInput, request: Request):
     if not body.text or len(body.text.strip()) < 20:
         raise HTTPException(status_code=400, detail="Text too short")
-    return run_analysis(body.text, firm_id=getattr(request.state, 'firm_id', 'default'))
+    loop = asyncio.get_running_loop()
+    return await loop.run_in_executor(executor, run_analysis, body.text, "", getattr(request.state, 'firm_id', 'default'))
 
 @app.post("/analyze/batch")
 async def analyze_batch(body: BatchInput, request: Request):
@@ -1606,3 +1611,86 @@ async def dashboard_deadlines():
 
 app.mount("/", StaticFiles(directory="frontend/demo1", html=True), name="frontend")
 
+
+
+# ── Phase 2: AI Feature Endpoints ─────────────────────────────────────────────
+@app.post("/ai/summarize", tags=["ai-features"])
+async def ai_summarize_text(request: Request):
+    """Summarize legal text using the routed LLM."""
+    user_id = getattr(request.state, "user_id", None)
+    if not user_id:
+        raise HTTPException(401, "Authentication required")
+        
+    firm_id = getattr(request.state, "firm_id", "default")
+    
+    try:
+        body = await request.json()
+        text = body.get("text", "")
+        context = body.get("context", "")
+        
+        if not text:
+            raise HTTPException(400, "Missing 'text' field in request body")
+            
+        result = summarize_text(
+            text=text,
+            firm_id=firm_id,
+            context=context
+        )
+        
+        return {"success": True, "summary": result}
+        
+    except Exception as e:
+        raise HTTPException(500, f"Error processing summarization: {str(e)}")
+
+
+@app.post("/ai/time-capture", tags=["ai-features"])
+async def ai_suggest_time(request: Request):
+    """Suggest billable time entries based on recent activity."""
+    user_id = getattr(request.state, "user_id", None)
+    if not user_id:
+        raise HTTPException(401, "Authentication required")
+        
+    firm_id = getattr(request.state, "firm_id", "default")
+    
+    try:
+        # In a real app, we'd fetch this from the audit_trail table. 
+        # For this demo, we accept a list of activities in the payload.
+        body = await request.json()
+        activities = body.get("activities", [])
+        
+        result = suggest_time_entries(
+            activity_logs=activities,
+            firm_id=firm_id
+        )
+        
+        return {"success": True, "suggestions": result}
+        
+    except Exception as e:
+        raise HTTPException(500, f"Error processing time capture: {str(e)}")
+
+
+@app.post("/ai/doc-review", tags=["ai-features"])
+async def ai_review_document(request: Request):
+    """Analyze a legal document for risks and missing clauses."""
+    user_id = getattr(request.state, "user_id", None)
+    if not user_id:
+        raise HTTPException(401, "Authentication required")
+        
+    firm_id = getattr(request.state, "firm_id", "default")
+    
+    try:
+        body = await request.json()
+        text = body.get("text", "")
+        
+        if not text:
+            raise HTTPException(400, "Missing 'text' field in request body")
+            
+        result = review_document(
+            text=text,
+            firm_id=firm_id
+        )
+        
+        return {"success": True, "review": result}
+        
+    except Exception as e:
+        raise HTTPException(500, f"Error processing document review: {str(e)}")
