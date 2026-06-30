@@ -213,6 +213,7 @@ async def startup_event():
     init_guard_table()
     init_isolation_tables()
     init_ai_model_router()
+    init_validation_tables()
     # 3. Poller tasks — keep references so GC cannot collect them
     #    Skip in TESTING mode to avoid asyncio interference with live-server tests
     if not os.getenv("TESTING"):
@@ -1694,3 +1695,115 @@ async def ai_review_document(request: Request):
         
     except Exception as e:
         raise HTTPException(500, f"Error processing document review: {str(e)}")
+
+
+@app.get("/ai/safety-dashboard", tags=["ai-infrastructure"])
+async def ai_safety_dashboard(request: Request):
+    """Aggregate AI safety metrics: blocked injections, output validation failures, etc."""
+    user_id = getattr(request.state, "user_id", None)
+    if not user_id:
+        raise HTTPException(401, "Authentication required")
+        
+    firm_id = getattr(request.state, "firm_id", "default")
+    role = getattr(request.state, "role", "")
+    
+    if role != "paraiq_super":
+        raise HTTPException(403, "Only super admins may view the safety dashboard")
+        
+    try:
+        from backend.demo1.pg import get_conn
+        with get_conn(firm_id) as conn:
+            # Get prompt guard stats
+            guard_stats = conn.execute("""
+                SELECT 
+                    COUNT(*) as total_events,
+                    COUNT(*) FILTER (WHERE blocked = TRUE) as blocked_events
+                FROM prompt_guard_log 
+                WHERE firm_id = %s
+            """, (firm_id,)).fetchone()
+            
+            # Get output validation stats
+            output_stats = conn.execute("""
+                SELECT 
+                    COUNT(*) as total_validations,
+                    COUNT(*) FILTER (WHERE passed = FALSE) as failed_validations
+                FROM ai_output_validation_log 
+                WHERE firm_id = %s
+            """, (firm_id,)).fetchone()
+
+        return {
+            "success": True,
+            "prompt_guard": {
+                "total_events": guard_stats[0] if guard_stats else 0,
+                "blocked_events": guard_stats[1] if guard_stats else 0
+            },
+            "output_validation": {
+                "total_validations": output_stats[0] if output_stats else 0,
+                "failed_validations": output_stats[1] if output_stats else 0
+            }
+        }
+    except Exception as e:
+        return {"success": False, "error": str(e)}
+
+
+@app.post("/ai/research", tags=["ai-features"])
+async def ai_legal_research(request: Request):
+    """Conduct AI-assisted legal research."""
+    user_id = getattr(request.state, "user_id", None)
+    if not user_id:
+        raise HTTPException(401, "Authentication required")
+        
+    firm_id = getattr(request.state, "firm_id", "default")
+    
+    try:
+        body = await request.json()
+        query = body.get("query", "")
+        jurisdiction = body.get("jurisdiction", "")
+        
+        if not query:
+            raise HTTPException(400, "Missing 'query' field in request body")
+            
+        result = conduct_research(
+            query=query,
+            firm_id=firm_id,
+            jurisdiction=jurisdiction
+        )
+        
+        return {"success": True, "research": result}
+        
+    except Exception as e:
+        raise HTTPException(500, f"Error processing legal research: {str(e)}")
+
+
+@app.post("/ai/agent/execute", tags=["ai-features"])
+async def ai_execute_agent(request: Request):
+    """Execute a firm-wide AI agent task."""
+    user_id = getattr(request.state, "user_id", None)
+    if not user_id:
+        raise HTTPException(401, "Authentication required")
+        
+    firm_id = getattr(request.state, "firm_id", "default")
+    role = getattr(request.state, "role", "")
+    
+    # Only partners/admins can trigger agents
+    if role not in ["paraiq_super", "partner", "admin"]:
+        raise HTTPException(403, "Only admins or partners may execute AI agent tasks")
+        
+    try:
+        body = await request.json()
+        objective = body.get("objective", "")
+        context = body.get("context", "")
+        
+        if not objective:
+            raise HTTPException(400, "Missing 'objective' field in request body")
+            
+        result = execute_agent_task(
+            objective=objective,
+            context=context,
+            firm_id=firm_id
+        )
+        
+        return {"success": True, "agent_result": result}
+        
+    except Exception as e:
+        raise HTTPException(500, f"Error processing agent task: {str(e)}")
