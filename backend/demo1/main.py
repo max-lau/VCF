@@ -73,6 +73,7 @@ logger = logging.getLogger(__name__)
 
 from backend.demo1.db_enclaves import init_enclave_tables
 from backend.demo1.routers.correspondence_router import router as correspondence_router
+from backend.demo1.routers.webauthn_router import router as webauthn_router
 from backend.demo1.routers.feedback_router        import router as feedback_router
 from backend.demo1.routers.summary_router         import router as summary_router
 from backend.demo1.routers.nlp_router             import router as nlp_router
@@ -106,6 +107,7 @@ from backend.demo1.ai_isolation import (
     resolve_system_prompt, check_token_budget, get_token_usage,
     update_tenant_config, invalidate_config_cache,
 )
+from backend.demo1.ai_output_validation import init_validation_tables
 from backend.demo1.model_router import (
     init_model_router as init_ai_model_router,
     call_llm, call_llm_async, get_routing_status, get_cost_report,
@@ -178,6 +180,8 @@ class APIKeyMiddleware(BaseHTTPMiddleware):
         request.state.client_id = request.headers.get("X-Client-ID", "")
         return await call_next(request)
 
+from backend.demo1.routers.workflows_router import router as workflows_router
+
 app = FastAPI(title="NLP Text Analyzer API")
 
 # ── Prometheus metrics ────────────────────────────────────────────────────────
@@ -214,7 +218,9 @@ async def startup_event():
     init_isolation_tables()
     init_ai_model_router()
     init_validation_tables()
+    from backend.demo1.lead_crm import init_crm_tables
     init_crm_tables()
+    from backend.demo1.communications import init_communications_tables
     init_communications_tables()
     # 3. Poller tasks — keep references so GC cannot collect them
     #    Skip in TESTING mode to avoid asyncio interference with live-server tests
@@ -243,6 +249,7 @@ async def startup_event():
     global _scheduler
     _scheduler = start_scheduler(app)
 
+app.include_router(webauthn_router)
 app.include_router(intake_router, prefix="/intake", tags=["OCR Intake"])
 app.include_router(model_router, prefix="/model", tags=["Fine-Tuned Model"])
 
@@ -365,6 +372,7 @@ app.include_router(semantic_search_router, prefix="/search", tags=["semantic-sea
 app.include_router(document_annotations_router, prefix="/documents", tags=["document-annotations"])
 app.include_router(esign_router, prefix="/esign", tags=["e-signature"])
 app.include_router(time_tracker_router, prefix="/time-tracker", tags=["time-tracking"])
+app.include_router(workflows_router, tags=["workflows"])
 
 # ── Phase 1: AI Infrastructure Endpoints ─────────────────────────────────────
 
