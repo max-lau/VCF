@@ -19,6 +19,7 @@ import anthropic
 from backend.demo1.observability.tracer import trace_claude_call
 from backend.demo1.ab_testing.variants import assign_variant, build_brief_prompt, EXPERIMENT_ID
 from backend.demo1.ab_testing.logger import log_experiment_result
+from backend.demo1.ai_citation_monitor import verify_citations
 from dotenv import load_dotenv
 
 load_dotenv()
@@ -295,6 +296,14 @@ def generate_case_brief(case_id: int) -> dict:
     raw = re.sub(r'^```\s*',     '', raw)
     raw = re.sub(r'\s*```$',     '', raw)
     brief = json.loads(raw)
+    try:
+        _brief_text = " ".join(
+            s.get("content", "") for s in brief.get("sections", {}).values()
+        )
+        brief["citation_verification"] = verify_citations(_brief_text)
+    except Exception as _e:
+        logger.warning(f"[intelligence] citation verification failed: {_e}")
+        brief["citation_verification"] = {"overall_status": "check_failed", "error": str(_e)}
 
     conn = _get_db()
     conn.execute("INSERT INTO case_briefs (case_id, brief_json) VALUES (%s,%s)",
