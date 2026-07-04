@@ -46,7 +46,12 @@
           <span v-if="loading" class="spinner" aria-hidden="true"></span>
           {{ loading ? 'Signing in…' : 'Sign in' }}
         </button>
-      </form>
+      
+          <button type="button" @click="loginWithYubiKey" class="w-full flex justify-center items-center px-4 py-2 mb-4 border border-gray-300 rounded-md shadow-sm text-sm font-medium text-gray-700 bg-white hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-indigo-500">
+            🔑 Login with Security Key (YubiKey)
+          </button>
+
+        </form>
     </div>
 
     <!-- Background decoration -->
@@ -89,6 +94,45 @@ async function handleLogin() {
     error.value = result.error
   }
 }
+
+// --- WebAuthn / YubiKey Login ---
+const loginWithYubiKey = async () => {
+  // Safely try to get the username from your existing login form
+  let user = (typeof username !== 'undefined') ? username.value : '';
+  if (!user) {
+    alert("Please enter your username first, then click the Security Key button.");
+    return;
+  }
+
+  try {
+    const beginRes = await fetch(`/api/webauthn/login/begin/${user}`);
+    if (!beginRes.ok) throw new Error('No security key registered for this user');
+    const options = await beginRes.json();
+
+    // This prompts the browser to talk to the physical USB key
+    const credential = await navigator.credentials.get({ publicKey: options });
+
+    const verifyRes = await fetch(`/api/webauthn/login/complete/${user}`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        credential_id: credential.id,
+        authenticator_data: btoa(String.fromCharCode(...new Uint8Array(credential.response.authenticatorData))),
+        client_data_json: btoa(String.fromCharCode(...new Uint8Array(credential.response.clientDataJSON))),
+        signature: btoa(String.fromCharCode(...new Uint8Array(credential.response.signature)))
+      })
+    });
+
+    if (verifyRes.ok) {
+      alert('YubiKey verified! Logging in...');
+      window.location.reload(); // Reload to apply the new session
+    }
+  } catch (error) {
+    console.error('YubiKey error:', error);
+    alert('YubiKey login failed: ' + error.message);
+  }
+};
+
 </script>
 
 <style scoped>

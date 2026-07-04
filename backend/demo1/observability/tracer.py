@@ -82,9 +82,9 @@ def trace_claude_call(
                 },
                 level="DEFAULT"
             )
-            lf.flush()
+            # lf.flush() removed — blocks event loop for seconds; Langfuse auto-batches
             return response, trace_id
         except (KeyError, ValueError, TypeError, OSError) as e:
             obs.update(output="error", level="ERROR")
-            lf.flush()
+            # lf.flush() removed — non-blocking background flush only
             raise

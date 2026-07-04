@@ -1,263 +1,263 @@
 <template>
-  <div class="cpa-root">
-    <!-- Loading -->
-    <div v-if="loading" class="cpa-loading">
-      <div class="cpa-loading__spinner">⟳</div>
-      <div>Loading your matter portal…</div>
-    </div>
-
-    <!-- Error -->
-    <div v-else-if="error" class="cpa-error">
-      <div class="cpa-error__icon">🔒</div>
-      <div class="cpa-error__title">Access Unavailable</div>
-      <div class="cpa-error__msg">{{ error }}</div>
-    </div>
-
-    <!-- Portal content -->
-    <template v-else-if="data">
-      <!-- Header -->
-      <div class="cpa-header">
-        <div class="cpa-brand">
-          <span class="cpa-brand__logo">ParaIQ</span>
-          <span class="cpa-brand__tag">Client Portal</span>
-        </div>
-        <div class="cpa-header__meta">
-          <span class="cpa-access-badge">🔐 Secure Access</span>
-          <span class="cpa-expires" v-if="data.access?.expires_at">
-            Expires {{ fmtDate(data.access.expires_at) }}
-          </span>
+  <div class="min-h-screen bg-gray-50">
+    <!-- Portal Header -->
+    <header class="bg-blue-900 text-white shadow-md">
+      <div class="container mx-auto px-6 py-4 flex justify-between items-center">
+        <h1 class="text-xl font-bold">ParaIQ Client Portal</h1>
+        <div v-if="portalData.access" class="text-sm text-blue-200">
+          Welcome, {{ portalData.access.client_name }}
         </div>
       </div>
+    </header>
 
-      <!-- Matter card -->
-      <div class="cpa-matter">
-        <div class="cpa-matter__label">Your Matter</div>
-        <h1 class="cpa-matter__title">{{ data.matter?.client_name || 'Matter' }}</h1>
-        <div class="cpa-matter__meta">
-          <span class="cpa-chip">{{ data.matter?.case_number }}</span>
-          <span class="cpa-chip" :class="`cpa-chip--${data.matter?.status}`">{{ data.matter?.status }}</span>
-          <span class="cpa-chip dim">Opened {{ fmtDate(data.matter?.created_at) }}</span>
-        </div>
-        <div class="cpa-matter__greeting">
-          Hello, <strong>{{ data.access?.client_name }}</strong>. Here is a read-only view of your matter.
-        </div>
+    <main class="container mx-auto px-6 py-8">
+      <!-- Loading State -->
+      <div v-if="loading" class="text-center py-12">
+        <p class="text-gray-500">Verifying your secure access link...</p>
       </div>
 
-      <!-- Tabs -->
-      <div class="cpa-tabs">
-        <button v-for="tab in availableTabs" :key="tab.key"
-          :class="['cpa-tab', { active: activeTab === tab.key }]"
-          @click="activeTab = tab.key">
-          {{ tab.icon }} {{ tab.label }}
-        </button>
+      <!-- Error State -->
+      <div v-else-if="error" class="bg-red-50 border border-red-200 text-red-700 p-6 rounded-lg text-center">
+        <p class="font-semibold">{{ error }}</p>
+        <p class="text-sm mt-2">Please contact your attorney for a new access link.</p>
       </div>
 
-      <!-- Documents tab -->
-      <div v-if="activeTab === 'documents'" class="cpa-section">
-        <div v-if="!data.documents?.length" class="cpa-empty">No documents available yet.</div>
-        <div v-else class="cpa-table-wrap">
-          <table class="cpa-table">
-            <thead>
-              <tr><th>Document</th><th>Type</th><th>Uploaded</th></tr>
-            </thead>
-            <tbody>
-              <tr v-for="d in data.documents" :key="d.id">
-                <td>{{ d.document_name }}</td>
-                <td><span class="cpa-chip">{{ d.source }}</span></td>
-                <td class="dim">{{ fmtDate(d.upload_date) }}</td>
-              </tr>
-            </tbody>
-          </table>
+      <!-- Portal Content -->
+      <div v-else class="grid grid-cols-1 lg:grid-cols-3 gap-8">
+        
+        <!-- Left Column: Case Info & Deadlines -->
+        <div class="lg:col-span-1 space-y-6">
+          <div class="bg-white rounded-lg shadow p-6">
+            <h2 class="text-lg font-bold border-b pb-2 mb-4">Case Information</h2>
+            <div v-if="portalData.matter" class="space-y-3 text-sm">
+              <div class="flex justify-between">
+                <span class="text-gray-500">Case Number:</span>
+                <span class="font-medium">{{ portalData.matter.case_number || 'N/A' }}</span>
+              </div>
+              <div class="flex justify-between">
+                <span class="text-gray-500">Status:</span>
+                <span class="font-medium bg-green-100 text-green-800 px-2 py-0.5 rounded">{{ portalData.matter.status || 'Pending' }}</span>
+              </div>
+              <div class="flex justify-between">
+                <span class="text-gray-500">Client:</span>
+                <span class="font-medium">{{ portalData.matter.client_name || portalData.access.client_name }}</span>
+              </div>
+            </div>
+          </div>
+
+          <div class="bg-white rounded-lg shadow p-6">
+            <h2 class="text-lg font-bold border-b pb-2 mb-4">Upcoming Deadlines</h2>
+            <div v-if="caseDetails.upcoming_deadlines && caseDetails.upcoming_deadlines.length > 0" class="space-y-3">
+              <div v-for="event in caseDetails.upcoming_deadlines" :key="event.id" class="text-sm">
+                <p class="font-medium text-gray-800">{{ event.title }}</p>
+                <p class="text-gray-500">{{ formatDate(event.event_date) }}</p>
+              </div>
+            </div>
+            <p v-else class="text-gray-400 text-sm">No upcoming deadlines scheduled.</p>
+          </div>
         </div>
-      </div>
 
-      <!-- Timeline tab -->
-      <div v-if="activeTab === 'timeline'" class="cpa-section">
-        <div v-if="!data.timeline?.length" class="cpa-empty">No timeline events yet.</div>
-        <div v-else class="cpa-timeline">
-          <div v-for="(ev, i) in data.timeline" :key="i" class="cpa-tl-item">
-            <div class="cpa-tl-dot" :class="`dot-${ev.significance || 'low'}`"></div>
-            <div class="cpa-tl-body">
-              <div class="cpa-tl-date dim">{{ ev.date }}</div>
-              <div class="cpa-tl-event">{{ ev.event }}</div>
+        <!-- Right Column: Tabs (Documents & Messages) -->
+        <div class="lg:col-span-2">
+          <div class="bg-white rounded-lg shadow">
+            <div class="border-b flex">
+              <button @click="activeTab = 'documents'" :class="activeTab === 'documents' ? 'border-blue-500 text-blue-600' : 'border-transparent text-gray-500'" class="px-6 py-3 font-medium text-sm border-b-2">
+                Documents
+              </button>
+              <button @click="activeTab = 'messages'" :class="activeTab === 'messages' ? 'border-blue-500 text-blue-600' : 'border-transparent text-gray-500'" class="px-6 py-3 font-medium text-sm border-b-2">
+                Messages
+              </button>
+            </div>
+
+            <!-- Documents Tab -->
+            <div v-show="activeTab === 'documents'" class="p-6">
+              <div class="mb-6 border-2 border-dashed border-gray-300 rounded-lg p-4 text-center">
+                <input type="file" ref="fileInput" @change="handleFileUpload" class="hidden" />
+                <button @click="$refs.fileInput.click()" class="text-blue-600 font-medium hover:text-blue-800">
+                  + Upload New Document
+                </button>
+                <p v-if="uploading" class="text-gray-500 text-sm mt-2">Uploading...</p>
+              </div>
+
+              <div class="space-y-3">
+                <div v-if="portalData.documents && portalData.documents.length === 0" class="text-gray-400 text-sm text-center py-4">
+                  No documents available yet.
+                </div>
+                <div v-for="doc in portalData.documents" :key="doc.id" class="flex justify-between items-center p-3 border rounded hover:bg-gray-50">
+                  <div>
+                    <p class="font-medium text-sm text-gray-800">{{ doc.document_name }}</p>
+                    <p class="text-xs text-gray-400">Uploaded: {{ formatDate(doc.upload_date) }}</p>
+                  </div>
+                  <button @click="downloadDocument(doc.id, doc.document_name)" class="text-blue-600 text-sm hover:underline">
+                    View
+                  </button>
+                </div>
+              </div>
+            </div>
+
+            <!-- Messages Tab -->
+            <div v-show="activeTab === 'messages'" class="p-6">
+              <div class="space-y-4 mb-6 max-h-96 overflow-y-auto">
+                <div v-if="messages.length === 0" class="text-gray-400 text-sm text-center py-4">
+                  No messages yet. Start the conversation below.
+                </div>
+                <div v-for="msg in messages" :key="msg.id" :class="msg.direction === 'inbound' ? 'text-right' : 'text-left'">
+                  <div :class="msg.direction === 'inbound' ? 'bg-blue-100' : 'bg-gray-100'" class="inline-block px-4 py-2 rounded-lg max-w-md">
+                    <p class="text-sm text-gray-800">{{ msg.message }}</p>
+                    <p class="text-xs text-gray-400 mt-1">{{ formatDate(msg.created_at) }}</p>
+                  </div>
+                </div>
+              </div>
+
+              <div class="border-t pt-4">
+                <textarea v-model="newMessage" rows="3" class="w-full border border-gray-300 rounded-md p-2 text-sm" placeholder="Type a message to your attorney..."></textarea>
+                <div class="flex justify-end mt-2">
+                  <button @click="sendMessage" :disabled="!newMessage.trim()" class="bg-blue-600 text-white px-4 py-2 rounded-md text-sm hover:bg-blue-700 disabled:opacity-50">
+                    Send Message
+                  </button>
+                </div>
+              </div>
             </div>
           </div>
         </div>
       </div>
-
-      <!-- Correspondence tab -->
-      <div v-if="activeTab === 'correspondence'" class="cpa-section">
-        <div v-if="!data.correspondence?.length" class="cpa-empty">No correspondence yet.</div>
-        <div v-else class="cpa-table-wrap">
-          <table class="cpa-table">
-            <thead>
-              <tr><th>Subject</th><th>Direction</th><th>Date</th></tr>
-            </thead>
-            <tbody>
-              <tr v-for="c in data.correspondence" :key="c.id">
-                <td>{{ c.subject || '—' }}</td>
-                <td><span class="cpa-chip" :class="`cpa-chip--${c.direction}`">{{ c.direction }}</span></td>
-                <td class="dim">{{ fmtDate(c.date) }}</td>
-              </tr>
-            </tbody>
-          </table>
-        </div>
-      </div>
-
-      <!-- Footer -->
-      <div class="cpa-footer">
-        <div>This is a secure, read-only view of your matter. For questions, contact your attorney.</div>
-        <div class="dim">Powered by ParaIQ Legal Intelligence</div>
-      </div>
-    </template>
+    </main>
   </div>
 </template>
 
 <script setup>
-import { ref, computed, onMounted } from 'vue'
+import { ref, onMounted } from 'vue'
 import { useRoute } from 'vue-router'
-import axios from 'axios'
 
-const route   = useRoute()
+const route = useRoute()
+const token = route.params.token
+
 const loading = ref(true)
-const error   = ref(null)
-const data    = ref(null)
+const error = ref(null)
 const activeTab = ref('documents')
+const portalData = ref({})
+const caseDetails = ref({})
+const messages = ref([])
+const newMessage = ref('')
+const fileInput = ref(null)
+const uploading = ref(false)
 
-const TABS = [
-  { key: 'documents',      label: 'Documents',      icon: '📄' },
-  { key: 'timeline',       label: 'Timeline',       icon: '📅' },
-  { key: 'correspondence', label: 'Correspondence', icon: '✉️' },
-]
+const formatDate = (dateStr) => {
+  if (!dateStr) return 'N/A'
+  return new Date(dateStr).toLocaleDateString('en-US', { year: 'numeric', month: 'short', day: 'numeric' })
+}
 
-const availableTabs = computed(() => {
-  if (!data.value?.access?.permissions) return TABS
-  const perms = data.value.access.permissions.split(',')
-  return TABS.filter(t => perms.includes(t.key))
-})
-
-async function loadPortal() {
+const fetchInitialData = async () => {
   loading.value = true
-  error.value   = null
   try {
-    const { data: d } = await axios.get(`/api/client-portal/view/${route.params.token}`)
-    data.value = d
-    // Set first available tab
-    if (availableTabs.value.length) {
-      activeTab.value = availableTabs.value[0].key
-    }
-  } catch (e) {
-    error.value = e?.response?.data?.detail || 'This portal link is invalid or has expired.'
+    // 1. Verify token & get portal data
+    const viewRes = await fetch(`/api/client-portal/view/${token}`)
+    if (!viewRes.ok) throw new Error('Invalid or expired portal link')
+    portalData.value = await viewRes.json()
+
+    // 2. Get case details & deadlines
+    const caseRes = await fetch(`/api/client-portal/cases/${token}`)
+    if (caseRes.ok) caseDetails.value = await caseRes.json()
+
+    // 3. Get messages
+    const msgRes = await fetch(`/api/client-portal/messages/${token}`)
+    if (msgRes.ok) messages.value = (await msgRes.json()).messages
+
+  } catch (err) {
+    error.value = err.message
   } finally {
     loading.value = false
   }
 }
 
-function fmtDate(d) {
-  if (!d) return '—'
-  return new Date(d).toLocaleDateString('en-US', { month: 'long', day: 'numeric', year: 'numeric' })
+const handleFileUpload = async (event) => {
+  const file = event.target.files[0]
+  if (!file) return
+  
+  uploading.value = true
+  const formData = new FormData()
+  formData.append('file', file)
+
+  try {
+    const res = await fetch(`/api/client-portal/upload/${token}`, {
+      method: 'POST',
+      body: formData
+    })
+    if (res.ok) {
+      // Refresh documents list
+      const docsRes = await fetch(`/api/client-portal/documents/${token}`)
+      if (docsRes.ok) {
+        portalData.value.documents = (await docsRes.json()).documents
+      }
+    }
+  } catch (err) {
+    console.error('Upload failed:', err)
+  } finally {
+    uploading.value = false
+    fileInput.value.value = '' // reset input
+  }
 }
 
-onMounted(loadPortal)
+const downloadDocument = async (docId, filename) => {
+  try {
+    const res = await fetch(`/api/client-portal/documents/${token}/${docId}`)
+    const data = await res.json()
+    
+    // Create a blob and download
+    const blob = new Blob([data.text], { type: 'text/plain' })
+    const url = window.URL.createObjectURL(blob)
+    const a = document.createElement('a')
+    a.href = url
+    a.download = filename
+    a.click()
+    window.URL.revokeObjectURL(url)
+  } catch (err) {
+    console.error('Download failed:', err)
+  }
+}
+
+const sendMessage = async () => {
+  if (!newMessage.value.trim()) return
+  try {
+    const res = await fetch(`/api/client-portal/message/${token}`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ message: newMessage.value })
+    })
+    if (res.ok) {
+      newMessage.value = ''
+      // Refresh messages
+      const msgRes = await fetch(`/api/client-portal/messages/${token}`)
+      if (msgRes.ok) messages.value = (await msgRes.json()).messages
+    }
+  } catch (err) {
+    console.error('Message failed:', err)
+  }
+}
+
+onMounted(() => {
+  fetchInitialData()
+})
 </script>
 
-<style scoped>
-.cpa-root {
-  min-height: 100vh;
-  background: #0a0a14;
-  color: #e2e8f0;
-  font-family: 'IBM Plex Sans', system-ui, sans-serif;
-  padding: 0;
-}
+python3 << 'EOF'
+file_path = 'frontend/paraiq-vue/src/router/index.js'
+with open(file_path, 'r') as f:
+    content = f.read()
 
-/* Loading / Error */
-.cpa-loading, .cpa-error {
-  display: flex; flex-direction: column; align-items: center;
-  justify-content: center; gap: 1rem; min-height: 100vh;
-  color: #64748b; font-size: 0.9rem;
-}
-.cpa-loading__spinner { font-size: 2rem; animation: spin 1s linear infinite; }
-@keyframes spin { from{transform:rotate(0deg)} to{transform:rotate(360deg)} }
-.cpa-error__icon  { font-size: 3rem; }
-.cpa-error__title { font-size: 1.25rem; font-weight: 600; color: #e2e8f0; }
-.cpa-error__msg   { color: #64748b; max-width: 360px; text-align: center; }
-
-/* Header */
-.cpa-header {
-  display: flex; align-items: center; justify-content: space-between;
-  padding: 1rem 2rem;
-  border-bottom: 1px solid #1e2530;
-  background: #0d1117;
-}
-.cpa-brand__logo { font-family: 'Crimson Pro', Georgia, serif; font-size: 1.4rem; color: #c89b3c; letter-spacing: 0.06em; }
-.cpa-brand__tag  { font-size: 0.7rem; color: #64748b; margin-left: 8px; text-transform: uppercase; letter-spacing: 0.08em; }
-.cpa-header__meta { display: flex; align-items: center; gap: 1rem; font-size: 0.78rem; }
-.cpa-access-badge { background: rgba(72,187,120,0.12); border: 1px solid rgba(72,187,120,0.3); border-radius: 4px; color: #48bb78; padding: 2px 8px; font-size: 0.72rem; }
-.cpa-expires { color: #64748b; }
-
-/* Matter card */
-.cpa-matter {
-  padding: 2rem;
-  border-bottom: 1px solid #1e2530;
-  background: linear-gradient(135deg, rgba(201,168,76,0.04) 0%, transparent 60%);
-}
-.cpa-matter__label { font-size: 0.7rem; color: #64748b; text-transform: uppercase; letter-spacing: 0.08em; margin-bottom: 0.5rem; }
-.cpa-matter__title { font-family: 'Crimson Pro', Georgia, serif; font-size: 1.8rem; font-weight: 400; color: #c89b3c; margin: 0 0 0.75rem; }
-.cpa-matter__meta  { display: flex; gap: 0.5rem; flex-wrap: wrap; margin-bottom: 1rem; }
-.cpa-matter__greeting { font-size: 0.875rem; color: #94a3b8; line-height: 1.6; }
-
-/* Chips */
-.cpa-chip { background: rgba(255,255,255,0.06); border: 1px solid #1e2530; border-radius: 4px; font-size: 0.72rem; padding: 2px 8px; color: #94a3b8; }
-.cpa-chip--open    { background: rgba(74,124,247,0.12); border-color: rgba(74,124,247,0.3); color: #4a7cf7; }
-.cpa-chip--inbound { background: rgba(72,187,120,0.12); border-color: rgba(72,187,120,0.3); color: #48bb78; }
-.cpa-chip--outbound{ background: rgba(74,124,247,0.12); border-color: rgba(74,124,247,0.3); color: #4a7cf7; }
-
-/* Tabs */
-.cpa-tabs { display: flex; gap: 0.25rem; padding: 0 2rem; border-bottom: 1px solid #1e2530; background: #0d1117; }
-.cpa-tab  { background: none; border: none; border-bottom: 2px solid transparent; color: #64748b; cursor: pointer; font-family: inherit; font-size: 0.875rem; padding: 0.75rem 1rem; transition: all .15s; }
-.cpa-tab:hover  { color: #e2e8f0; }
-.cpa-tab.active { border-bottom-color: #c89b3c; color: #c89b3c; }
-
-/* Sections */
-.cpa-section { padding: 1.5rem 2rem; max-width: 860px; }
-.cpa-empty { color: #64748b; font-size: 0.875rem; padding: 2rem 0; text-align: center; }
-
-/* Table */
-.cpa-table-wrap { border: 1px solid #1e2530; border-radius: 8px; overflow: hidden; }
-.cpa-table { border-collapse: collapse; width: 100%; font-size: 0.875rem; }
-.cpa-table th { background: #0d1117; border-bottom: 1px solid #1e2530; color: #64748b; font-size: 0.68rem; font-weight: 600; letter-spacing: 0.05em; padding: 0.65rem 1rem; text-align: left; text-transform: uppercase; }
-.cpa-table td { border-bottom: 1px solid #1e2530; padding: 0.7rem 1rem; }
-.cpa-table tr:last-child td { border-bottom: none; }
-.cpa-table tr:hover td { background: rgba(255,255,255,0.02); }
-
-/* Timeline */
-.cpa-timeline { display: flex; flex-direction: column; gap: 0; }
-.cpa-tl-item  { display: flex; gap: 1rem; }
-.cpa-tl-dot   { width: 12px; height: 12px; border-radius: 50%; flex-shrink: 0; margin-top: 4px; }
-.dot-high   { background: #fc8181; }
-.dot-medium { background: #ecc94b; }
-.dot-low    { background: #718096; }
-.cpa-tl-body  { padding-bottom: 1.25rem; flex: 1; }
-.cpa-tl-date  { font-size: 0.75rem; margin-bottom: 0.2rem; }
-.cpa-tl-event { font-size: 0.875rem; color: #e2e8f0; line-height: 1.5; }
-
-/* Footer */
-.cpa-footer {
-  padding: 1.5rem 2rem;
-  border-top: 1px solid #1e2530;
-  font-size: 0.75rem;
-  color: #475569;
-  display: flex; flex-direction: column; gap: 0.3rem;
-  margin-top: 2rem;
-}
-
-.dim { color: #64748b; }
-
-@media (max-width: 640px) {
-  .cpa-header { padding: 0.75rem 1rem; }
-  .cpa-matter { padding: 1.25rem 1rem; }
-  .cpa-section { padding: 1rem; }
-  .cpa-matter__title { font-size: 1.4rem; }
-  .cpa-header__meta .cpa-expires { display: none; }
-}
-</style>
+if '/client-portal/view/:token' not in content:
+    if 'const routes = [' in content:
+        content = content.replace(
+            'const routes = [',
+            "const routes = [\n  {\n    path: '/client-portal/view/:token',\n    name: 'ClientPortalAccess',\n    component: () => import('../views/portal/ClientPortalAccess.vue'),\n    meta: { requiresAuth: false, layout: 'blank' } // Public route\n  },"
+        )
+    elif 'routes: [' in content:
+         content = content.replace(
+            'routes: [',
+            "routes: [\n  {\n    path: '/client-portal/view/:token',\n    name: 'ClientPortalAccess',\n    component: () => import('../views/portal/ClientPortalAccess.vue'),\n    meta: { requiresAuth: false, layout: 'blank' } // Public route\n  },"
+        )
+    with open(file_path, 'w') as f:
+        f.write(content)
+    print("Successfully patched router/index.js for Client Portal")
+else:
+    print("Client Portal route already exists")

@@ -81,3 +81,6 @@ redaction.py
 .env.voice_bot
 logs/
 backend/demo1/analyses.db
+uvicorn.log
+*.log
+mlflow-artifacts/

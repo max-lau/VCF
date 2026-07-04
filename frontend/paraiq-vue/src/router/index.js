@@ -64,6 +64,12 @@ const ClientBillingView = () => import('@/views/admin/BillingView.vue')
 
 const routes = [
   {
+    path: '/workflows',
+    name: 'workflows',
+    component: () => import('../views/workflows/WorkflowsView.vue'),
+    meta: { requiresAuth: true }
+  },
+  {
     path: '/client-portal/view/:token',
     name: 'client_portal_access',
     component: ClientPortalAccess,
