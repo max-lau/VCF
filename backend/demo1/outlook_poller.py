@@ -298,21 +298,31 @@ def _save_to_db(msg: EmailMessage, result, firm_id: str):
 
 
 def _get_active_accounts() -> list:
+    """Enumerate active firms, then fetch each firm's accounts inside its own
+    tenant context. RLS-correct under FORCE ROW LEVEL SECURITY (migration 005):
+    the old single-query scan from 'default' context would silently see only
+    default-firm rows once attorney_email_accounts is forced."""
     from .pg import get_conn
-    with get_conn("default") as conn:  # noqa: intentional — background poller scans all firms
-        cur = conn.execute(
-            "SELECT * FROM attorney_email_accounts WHERE provider=%s AND is_active=TRUE",
-            ("outlook",)
-        )
-        rows = cur.fetchall() or []
-        if not rows:
-            return []
-        if hasattr(rows[0], 'keys'):
-            return [dict(r) for r in rows]
-        cols = [d[0] for d in cur.description]
-        return [dict(zip(cols, r)) for r in rows]
-
-
+    accounts: list = []
+    with get_conn("default") as conn:  # firms table: no firm_id, not forced -- readable anywhere
+        cur = conn.execute("SELECT id FROM firms WHERE active=TRUE")
+        firm_rows = cur.fetchall() or []
+    firm_ids = [r["id"] if hasattr(r, "keys") else r[0] for r in firm_rows]
+    for fid in firm_ids:
+        with get_conn(fid) as conn:
+            cur = conn.execute(
+                "SELECT * FROM attorney_email_accounts WHERE provider=%s AND is_active=TRUE",
+                ("outlook",),
+            )
+            rows = cur.fetchall() or []
+            if not rows:
+                continue
+            if hasattr(rows[0], "keys"):
+                accounts.extend(dict(r) for r in rows)
+            else:
+                cols = [d[0] for d in cur.description]
+                accounts.extend(dict(zip(cols, r)) for r in rows)
+    return accounts
 def _get_firm_settings(firm_id: str) -> dict:
     from .pg import get_conn
     try:
