@@ -10,7 +10,6 @@ const client = axios.create({
 client.interceptors.request.use(config => {
   const token = localStorage.getItem('paraiq_token')
   if (token) config.headers.Authorization = `Bearer ${token}`
-  config.headers['X-API-Key'] = import.meta.env.VITE_PARAIQ_KEY || ''
   return config
 })
 

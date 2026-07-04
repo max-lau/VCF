@@ -148,7 +148,9 @@ def save_work_product(endpoint: str, result: dict, firm_id: str, case_id=None, u
 
 EXEMPT_PATHS = {"/health", "/openapi.json", "/docs", "/redoc", "/favicon.ico", "/metrics"}
 EXEMPT_PREFIXES = ("/auth/", "/api/auth/", "/docs/", "/redoc/", "/client-portal/view/", "/esign/sign/")
-STATIC_EXTS = (".html", ".js", ".css", ".ico", ".png", ".svg", ".woff", ".woff2", ".json")
+STATIC_EXTS = (".html", ".js", ".css", ".ico", ".png", ".svg", ".woff", ".woff2")
+# Internal machine-to-machine paths: static key valid ONLY here, ONLY from localhost.
+M2M_PREFIXES = ("/intake/scan", "/discovery/process/ocr/", "/media/transcribe/discovery/")
 
 class APIKeyMiddleware(BaseHTTPMiddleware):
     async def dispatch(self, request: Request, call_next):
@@ -172,10 +174,19 @@ class APIKeyMiddleware(BaseHTTPMiddleware):
             except (jwt.InvalidTokenError, jwt.ExpiredSignatureError, KeyError, ValueError) as e:
                 logger.debug(f"[main] JWT decode failed: {e}")
                 has_bearer = False
-        if not PARAIQ_API_KEY or (key != PARAIQ_API_KEY and not has_bearer):
+        # JWT is the only browser-facing auth. The static key works solely for
+        # internal localhost self-calls (no X-Forwarded-For == not via Nginx/tunnel).
+        is_internal = ("x-forwarded-for" not in request.headers and "x-real-ip" not in request.headers)
+        key_ok = (
+            bool(PARAIQ_API_KEY)
+            and key == PARAIQ_API_KEY
+            and is_internal
+            and any(path.startswith(p) for p in M2M_PREFIXES)
+        )
+        if not (has_bearer or key_ok):
             return JSONResponse(
                 status_code=401,
-                content={"detail": "Invalid or missing API key"}
+                content={"detail": "Authentication required"}
             )
         request.state.client_id = request.headers.get("X-Client-ID", "")
         return await call_next(request)
