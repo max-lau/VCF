@@ -79,6 +79,7 @@ def train(
     lora_alpha: int   = 32,
     lora_dropout: float = 0.1,
     seed:       int   = 42,
+    firm_id:    str   = "default",
 ) -> dict:
     """
     LoRA fine-tuning loop for the legal sentence classifier.
@@ -91,6 +92,7 @@ def train(
 
     Per-epoch metrics logged to MLflow experiment "paraiq_lora_training".
     """
+    MODEL_DIR = Path(f"models/{firm_id}/legal_classifier_lora")  # per-firm (shadows module constant)
     import torch
     import torch.nn as nn
     from torch.utils.data import DataLoader

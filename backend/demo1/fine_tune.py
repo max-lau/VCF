@@ -21,12 +21,20 @@ import os
 import json
 import threading
 from datetime import datetime, timezone
-from fastapi import APIRouter, BackgroundTasks, HTTPException
+from fastapi import APIRouter, BackgroundTasks, HTTPException, Depends
+from backend.demo1.auth import get_current_user, require_admin
 from pydantic import BaseModel
 from typing import Optional
 
 router  = APIRouter()
 MODEL_DIR = "models/legal_classifier"
+
+def firm_model_dir(firm_id: str = "default") -> str:
+    """Per-firm artifact path; the shared/base model lives under 'default'."""
+    return f"models/{firm_id}/legal_classifier"
+
+_model_cache: dict = {}   # firm_id -> (model, tokenizer); tiny LRU, evicts oldest
+_MODEL_CACHE_MAX = 2
 
 # ── Training state (in-memory) ─────────────────────────────────────────────────
 training_state = {
@@ -125,7 +133,8 @@ def init_model_table():
 
 # ── Training engine ────────────────────────────────────────────────────────────
 
-def run_training(epochs: int = 3):
+def run_training(epochs: int = 3, firm_id: str = "default"):
+    MODEL_DIR = firm_model_dir(firm_id)  # per-firm path (shadows module constant)
     """Fine-tune DistilBERT on legal classification dataset."""
     global training_state
 
@@ -284,13 +293,14 @@ def run_training(epochs: int = 3):
 
         # Log to DB
         completed = datetime.now(timezone.utc).isoformat()
-        with get_conn("default") as conn:  # noqa: intentional — model training logs to system-level model_runs table
+        with get_conn(firm_id) as conn:
             conn.execute("""
                 INSERT INTO model_runs
-                  (started_at, completed_at, status, accuracy, f1_score,
+                  (firm_id, started_at, completed_at, status, accuracy, f1_score,
                    train_size, epochs, model_path, notes)
-                VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s)
+                VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)
             """, (
+                firm_id,
                 training_state["started_at"], completed, "complete",
                 accuracy, f1, len(train_texts), epochs, MODEL_DIR,
                 f"Legal classifier - {len(TRAINING_DATA)} samples"
@@ -319,29 +329,36 @@ def run_training(epochs: int = 3):
 _model     = None
 _tokenizer = None
 
-def load_model():
-    """Lazy-load the fine-tuned model for inference."""
-    global _model, _tokenizer
-    if _model is None:
-        if not os.path.exists(MODEL_DIR):
-            raise HTTPException(404, "No fine-tuned model found. Run /model/train first.")
-        from transformers import (
-            DistilBertTokenizerFast,
-            DistilBertForSequenceClassification,
-        )
-        import torch
-        _tokenizer = DistilBertTokenizerFast.from_pretrained(MODEL_DIR)
-        _model     = DistilBertForSequenceClassification.from_pretrained(MODEL_DIR)
-        _model.eval()
-    return _model, _tokenizer
+def load_model(firm_id: str = "default"):
+    """Load the caller firm's model if trained; else shared base; else legacy path."""
+    for key, path in ((firm_id, firm_model_dir(firm_id)),
+                      ("default", firm_model_dir("default")),
+                      ("_legacy", MODEL_DIR)):
+        if os.path.exists(path):
+            break
+    else:
+        raise HTTPException(404, "No fine-tuned model found. Run /model/train first.")
+    if key in _model_cache:
+        return _model_cache[key]
+    from transformers import (
+        DistilBertTokenizerFast,
+        DistilBertForSequenceClassification,
+    )
+    tokenizer = DistilBertTokenizerFast.from_pretrained(path)
+    model     = DistilBertForSequenceClassification.from_pretrained(path)
+    model.eval()
+    if len(_model_cache) >= _MODEL_CACHE_MAX:
+        _model_cache.pop(next(iter(_model_cache)))
+    _model_cache[key] = (model, tokenizer)
+    return _model_cache[key]
 
 
-def predict(text: str) -> dict:
-    """Run inference on text using fine-tuned model."""
+def predict(text: str, firm_id: str = "default") -> dict:
+    """Run inference using the caller firm's model (base fallback)."""
     import torch
     import torch.nn.functional as F
 
-    model, tokenizer = load_model()
+    model, tokenizer = load_model(firm_id)
     inputs = tokenizer(
         text, return_tensors="pt", truncation=True,
         padding=True, max_length=128
@@ -380,13 +397,13 @@ class PredictBody(BaseModel):
 # ── Routes ─────────────────────────────────────────────────────────────────────
 
 @router.post("/train")
-def start_training(body: TrainBody, background_tasks: BackgroundTasks):
+def start_training(body: TrainBody, background_tasks: BackgroundTasks, admin: dict = Depends(require_admin)):
     """Start fine-tuning DistilBERT on legal classification dataset."""
     if training_state["status"] == "training":
         return {"success": False, "message": "Training already in progress"}
 
     epochs = max(1, min(body.epochs, 10))
-    background_tasks.add_task(run_training, epochs)
+    background_tasks.add_task(run_training, epochs, admin.get("firm_id", "default"))
 
     return {
         "success": True,
@@ -408,14 +425,19 @@ def training_status():
 
 
 @router.post("/predict")
-def predict_text(body: PredictBody):
-    """Classify legal text using the fine-tuned model."""
+def predict_text(body: PredictBody, user: dict = Depends(get_current_user)):
+    """Classify legal text using the caller firm's model (base fallback)."""
+    fid = user.get("firm_id", "default")
     if not body.text.strip():
         raise HTTPException(400, "Text is required")
-    if training_state["status"] != "complete" and not os.path.exists(MODEL_DIR):
+    if training_state["status"] != "complete" and not (
+        os.path.exists(firm_model_dir(fid))
+        or os.path.exists(firm_model_dir("default"))
+        or os.path.exists(MODEL_DIR)
+    ):
         raise HTTPException(503, "Model not trained yet. Run POST /model/train first.")
 
-    result = predict(body.text)
+    result = predict(body.text, fid)
     return {
         "success": True,
         "label":   body.label,
@@ -424,7 +446,7 @@ def predict_text(body: PredictBody):
 
 
 @router.get("/info")
-def model_info():
+def model_info(user: dict = Depends(get_current_user)):
     """Get fine-tuned model metadata."""
     meta_path = f"{MODEL_DIR}/training_meta.json"
     if not os.path.exists(meta_path):
@@ -436,7 +458,7 @@ def model_info():
     with open(meta_path) as f:
         meta = json.load(f)
 
-    with get_conn("default") as conn:  # noqa: intentional — model status query, system-level table
+    with get_conn(user.get("firm_id", "default")) as conn:
         run = conn.execute(
             "SELECT * FROM model_runs ORDER BY id DESC LIMIT 1"
         ).fetchone()

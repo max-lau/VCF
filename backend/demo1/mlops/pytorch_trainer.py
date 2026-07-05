@@ -103,6 +103,7 @@ def train(
     batch_size: int   = 8,
     lr:         float = 2e-5,
     seed:       int   = 42,
+    firm_id:    str   = "default",
 ) -> dict:
     """
     Raw PyTorch training loop for legal sentence classifier.
@@ -112,6 +113,7 @@ def train(
 
     Returns final metrics dict.
     """
+    MODEL_DIR = Path(f"models/{firm_id}/legal_classifier_pytorch")  # per-firm (shadows module constant)
     import torch
     import torch.nn as nn
     from torch.utils.data import DataLoader

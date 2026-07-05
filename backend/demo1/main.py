@@ -193,6 +193,7 @@ class APIKeyMiddleware(BaseHTTPMiddleware):
 
 from backend.demo1.routers.workflows_router import router as workflows_router
 from backend.demo1.auth import require_admin as _require_admin
+from backend.demo1.auth import get_current_user as _get_current_user
 
 app = FastAPI(title="NLP Text Analyzer API")
 
@@ -263,7 +264,7 @@ async def startup_event():
 
 app.include_router(webauthn_router)
 app.include_router(intake_router, prefix="/intake", tags=["OCR Intake"])
-app.include_router(model_router, prefix="/model", tags=["Fine-Tuned Model"], dependencies=[Depends(_require_admin)])
+app.include_router(model_router, prefix="/model", tags=["Fine-Tuned Model"], dependencies=[Depends(_get_current_user)])  # /train is admin-gated inside fine_tune.py; predict open to any logged-in user
 
 
 # ── MLOps Module 2+3: PyTorch + LoRA training endpoints ───────────────────────
@@ -293,6 +294,7 @@ def start_pytorch_training(body: TrainMLOpsBody, background_tasks: BackgroundTas
         batch_size=body.batch_size,
         lr=body.lr,
         seed=body.seed,
+        firm_id=_admin.get("firm_id", "default"),
     )
     return {
         "success": True,
@@ -314,6 +316,7 @@ def start_lora_training(body: LoRATrainBody, background_tasks: BackgroundTasks, 
         lora_alpha=body.lora_alpha,
         lora_dropout=body.lora_dropout,
         seed=body.seed,
+        firm_id=_admin.get("firm_id", "default"),
     )
     return {
         "success": True,

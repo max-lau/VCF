@@ -5,6 +5,7 @@ FastAPI Middleware + APIRouter: Audit Trail (#20)
 Logs every API request to the audit_log table in Supabase Postgres.
 """
 
+import asyncio
 import time
 import csv as _csv
 import io as _io
