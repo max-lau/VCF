@@ -4,6 +4,8 @@ Prefix: /monitor
 Sections: health, api-stats, events, cloudflare, risk-log
 """
 from fastapi import APIRouter, Query
+from fastapi import Depends
+from backend.demo1.auth import require_super
 from typing import Optional
 import os, json, subprocess, logging
 from datetime import datetime, timezone, timedelta
@@ -11,7 +13,7 @@ import httpx
 
 from backend.demo1.pg import get_conn
 
-router = APIRouter(prefix="/monitor", tags=["Monitor"])
+router = APIRouter(prefix="/monitor", tags=["Monitor"], dependencies=[Depends(require_super)])
 logger = logging.getLogger(__name__)
 
 # System-level firm_id for admin monitoring queries (audit_log, risk_assessments).

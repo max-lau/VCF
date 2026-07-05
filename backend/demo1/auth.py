@@ -268,6 +268,13 @@ def require_admin(current_user: dict = Depends(get_current_user)) -> dict:
     return current_user
 
 
+def require_super(current_user: dict = Depends(get_current_user)) -> dict:
+    """Dependency — require paraiq_super (cross-tenant/system data)."""
+    if current_user.get("role") != "paraiq_super":
+        raise HTTPException(403, "Super-admin access required")
+    return current_user
+
+
 # ── Pydantic models ────────────────────────────────────────────────────────────
 
 class RegisterBody(BaseModel):

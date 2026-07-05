@@ -43,7 +43,7 @@ from backend.demo1.document_annotations import router as document_annotations_ro
 from backend.demo1.esignature import router as esign_router
 from backend.demo1.client_portal import router as client_portal_router
 from backend.demo1.time_tracker import router as time_tracker_router
-from fastapi import FastAPI, HTTPException, Query, Request, BackgroundTasks
+from fastapi import FastAPI, HTTPException, Query, Request, BackgroundTasks, Depends
 from fastapi.responses import JSONResponse
 from starlette.middleware.base import BaseHTTPMiddleware
 from fastapi.middleware.cors import CORSMiddleware
@@ -192,6 +192,7 @@ class APIKeyMiddleware(BaseHTTPMiddleware):
         return await call_next(request)
 
 from backend.demo1.routers.workflows_router import router as workflows_router
+from backend.demo1.auth import require_admin as _require_admin
 
 app = FastAPI(title="NLP Text Analyzer API")
 
@@ -262,7 +263,7 @@ async def startup_event():
 
 app.include_router(webauthn_router)
 app.include_router(intake_router, prefix="/intake", tags=["OCR Intake"])
-app.include_router(model_router, prefix="/model", tags=["Fine-Tuned Model"])
+app.include_router(model_router, prefix="/model", tags=["Fine-Tuned Model"], dependencies=[Depends(_require_admin)])
 
 
 # ── MLOps Module 2+3: PyTorch + LoRA training endpoints ───────────────────────
@@ -283,7 +284,7 @@ class LoRATrainBody(BaseModel):
     seed:         int   = 42
 
 @app.post("/model/pytorch-train", tags=["Fine-Tuned Model"])
-def start_pytorch_training(body: TrainMLOpsBody, background_tasks: BackgroundTasks):
+def start_pytorch_training(body: TrainMLOpsBody, background_tasks: BackgroundTasks, _admin: dict = Depends(_require_admin)):
     """Module 2: Raw PyTorch training loop with per-epoch MLflow tracking."""
     from backend.demo1.mlops.pytorch_trainer import train as pytorch_train
     background_tasks.add_task(
@@ -301,7 +302,7 @@ def start_pytorch_training(body: TrainMLOpsBody, background_tasks: BackgroundTas
     }
 
 @app.post("/model/lora-train", tags=["Fine-Tuned Model"])
-def start_lora_training(body: LoRATrainBody, background_tasks: BackgroundTasks):
+def start_lora_training(body: LoRATrainBody, background_tasks: BackgroundTasks, _admin: dict = Depends(_require_admin)):
     """Module 3: LoRA/PEFT fine-tuning — trains only ~0.5% of parameters."""
     from backend.demo1.mlops.lora_trainer import train as lora_train
     background_tasks.add_task(
