@@ -69,12 +69,12 @@ def register_client_enclave(
     with get_conn(firm_id) as conn:
         conn.execute("""
             INSERT INTO client_enclaves (client_id, enclave_url, api_key, firm_name, active, created_at, updated_at)
-            VALUES (%s,%s,%s,%s,1,%s,%s)
+            VALUES (%s,%s,%s,%s,TRUE,%s,%s)
             ON CONFLICT(client_id) DO UPDATE SET
                 enclave_url=excluded.enclave_url,
                 api_key=excluded.api_key,
                 firm_name=excluded.firm_name,
-                active=1,
+                active=TRUE,
                 updated_at=excluded.updated_at
         """, (client_id, enclave_url, api_key, firm_name, _now(), _now()))
 

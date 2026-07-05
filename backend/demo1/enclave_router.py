@@ -25,6 +25,8 @@ from backend.demo1.db_enclaves import (
     list_client_enclaves,
     deactivate_client_enclave,
 )
+from backend.demo1.auth import decode_token, SYSTEM_FIRM
+from backend.demo1.pg import get_conn as _auth_get_conn
 
 logger = logging.getLogger("enclave_router")
 router = APIRouter(tags=["privilege-enclave"])
@@ -36,9 +38,33 @@ ENCLAVE_TIMEOUT = 45.0   # seconds — generous for first-request model warmup
 
 # ── Auth helpers ─────────────────────────────────────────────────────────────
 
-def require_admin(credentials: HTTPAuthorizationCredentials = Depends(security)):
-    if credentials.credentials != ADMIN_KEY:
-        raise HTTPException(status_code=403, detail="Admin key required")
+def require_admin(request: Request,
+                  credentials: HTTPAuthorizationCredentials = Depends(security)) -> dict:
+    """Admin gate for enclave routes. Two accepted paths:
+      1. A valid admin JWT (browser/UI) -> returns the user dict (with firm_id).
+      2. The static PARAIQ_ADMIN_KEY, but ONLY from a direct localhost call
+         (provision_enclave.sh / M2M) -- never exposed to the browser.
+    """
+    token = credentials.credentials if credentials else ""
+    # Path 1: admin JWT.
+    try:
+        payload = decode_token(token)
+        uid = int(payload.get("sub", 0))
+        with _auth_get_conn(SYSTEM_FIRM) as conn:
+            user = conn.execute(
+                "SELECT id, username, role, firm_id, active FROM users WHERE id = %s",
+                (uid,)
+            ).fetchone()
+        if user and user["active"] and user["role"] in ("admin", "firm_admin", "paraiq_super"):
+            return dict(user)
+    except Exception:
+        pass
+    # Path 2: static key, localhost only (no proxy headers == internal call).
+    is_internal = ("x-forwarded-for" not in request.headers
+                   and "x-real-ip" not in request.headers)
+    if ADMIN_KEY and token == ADMIN_KEY and is_internal:
+        return {"firm_id": "default", "role": "paraiq_super", "via": "admin_key"}
+    raise HTTPException(status_code=403, detail="Admin access required")
 
 
 def get_client_id_from_request(request: Request) -> str:
@@ -195,7 +221,7 @@ async def enclave_health(client_id: str, _=Depends(require_admin)):
 # ── Admin endpoints (PARAIQ_ADMIN_KEY required) ────────────────────────────────
 
 @router.post("/admin/register-enclave")
-def register_enclave(payload: EnclaveRegistration, _=Depends(require_admin)):
+def register_enclave(payload: EnclaveRegistration, admin: dict = Depends(require_admin)):
     """
     Admin: provision a new client enclave in the registry.
     Called by provision_enclave.sh after spinning up a new VPS.
@@ -205,20 +231,21 @@ def register_enclave(payload: EnclaveRegistration, _=Depends(require_admin)):
         enclave_url=payload.enclave_url,
         api_key=payload.api_key,
         firm_name=payload.firm_name or "",
+        firm_id=admin.get("firm_id", "default"),
     )
     logger.info(f"Registered enclave for {payload.client_id} at {payload.enclave_url}")
     return {"status": "registered", "client_id": payload.client_id}
 
 
 @router.delete("/admin/deactivate-enclave/{client_id}")
-def deactivate_enclave(client_id: str, _=Depends(require_admin)):
-    deactivate_client_enclave(client_id)
+def deactivate_enclave(client_id: str, admin: dict = Depends(require_admin)):
+    deactivate_client_enclave(client_id, firm_id=admin.get("firm_id", "default"))
     return {"status": "deactivated", "client_id": client_id}
 
 
 @router.get("/admin/list-enclaves")
-def list_enclaves(_=Depends(require_admin)):
-    return {"enclaves": list_client_enclaves()}
+def list_enclaves(admin: dict = Depends(require_admin)):
+    return {"enclaves": list_client_enclaves(firm_id=admin.get("firm_id", "default"))}
 
 
 # ── Internal helpers ──────────────────────────────────────────────────────────

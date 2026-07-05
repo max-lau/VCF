@@ -22,7 +22,7 @@ async function fetchStatus() {
 async function fetchEnclaves() {
   loading.value = true
   try {
-    const { data } = await client.get('/api/privilege/enclaves')
+    const { data } = await client.get('/privilege/admin/list-enclaves')
     enclaves.value = Array.isArray(data) ? data : (data.enclaves || [])
   } catch { enclaves.value = [] }
   finally { loading.value = false }
@@ -31,8 +31,8 @@ async function fetchEnclaves() {
 async function testEnclave(enclave) {
   testing.value = { ...testing.value, [enclave.id || enclave.client_id]: true }
   try {
-    const url = enclave.enclave_url || enclave.url
-    const { data } = await client.get(`/api/privilege/enclave/health?url=${encodeURIComponent(url)}`)
+    const cid = enclave.client_id
+    const { data } = await client.get(`/privilege/health/${encodeURIComponent(cid)}`)
     alert(`Enclave ${enclave.enclave_name || enclave.client_id}: ${data.status || 'online'}`)
   } catch {
     alert('Could not reach enclave — check URL and network.')
@@ -47,7 +47,12 @@ async function createEnclave() {
   if (!form.value.client_id.trim() || !form.value.enclave_url.trim()) return
   saving.value = true
   try {
-    await client.post('/api/privilege/enclaves', form.value)
+    await client.post('/privilege/admin/register-enclave', {
+      client_id:   form.value.client_id,
+      enclave_url: form.value.enclave_url,
+      api_key:     form.value.api_key,
+      firm_name:   form.value.enclave_name,
+    })
     showCreate.value = false
     form.value = emptyForm()
     fetchEnclaves()
@@ -59,7 +64,7 @@ async function createEnclave() {
 async function deleteEnclave(id) {
   if (!confirm('Remove this enclave?')) return
   try {
-    await client.delete(`/api/privilege/enclaves/${id}`)
+    await client.delete(`/privilege/admin/deactivate-enclave/${id}`)
     fetchEnclaves()
   } catch {}
 }
