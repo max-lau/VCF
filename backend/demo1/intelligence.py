@@ -205,30 +205,28 @@ def mark_reviewed(contradiction_id: int):
 # FEATURE 2: AI CASE BRIEF
 # ─────────────────────────────────────────────────────────────────────────────
 
-def generate_case_brief(case_id: int) -> dict:
+def generate_case_brief(case_id: int, firm_id: str = "default") -> dict:
     """
     Aggregates all case data (documents, timeline, notes, risk scores)
     and generates a 2-page structured legal memo via Claude Sonnet.
     Saves the brief to case_briefs table and returns the dict.
     """
-    conn = _get_db()
-    case = conn.execute("SELECT * FROM cases WHERE id=%s", (case_id,)).fetchone()
-    if not case:
-        conn.close()
-        raise ValueError(f"Case {case_id} not found")
+    with _get_db(firm_id) as conn:
+        case = conn.execute("SELECT * FROM cases WHERE id=%s", (case_id,)).fetchone()
+        if not case:
+            raise ValueError(f"Case {case_id} not found")
 
-    docs = conn.execute(
-        """SELECT document_name, doc_text, summary, risk_score,
-                  events_json, entities_json
-           FROM case_documents WHERE case_id=%s ORDER BY upload_date ASC""",
-        (case_id,)
-    ).fetchall()
+        docs = conn.execute(
+            """SELECT document_name, doc_text, summary, risk_score,
+                      events_json, entities_json
+               FROM case_documents WHERE case_id=%s ORDER BY upload_date ASC""",
+            (case_id,)
+        ).fetchall()
 
-    notes = conn.execute(
-        "SELECT note, author FROM case_notes WHERE case_id=%s ORDER BY created_at ASC",
-        (case_id,)
-    ).fetchall()
-    conn.close()
+        notes = conn.execute(
+            "SELECT note, author FROM case_notes WHERE case_id=%s ORDER BY created_at ASC",
+            (case_id,)
+        ).fetchall()
 
     doc_blocks, all_events, all_entities, risk_scores = [], [], [], []
     for d in docs:
@@ -305,11 +303,9 @@ def generate_case_brief(case_id: int) -> dict:
         logger.warning(f"[intelligence] citation verification failed: {_e}")
         brief["citation_verification"] = {"overall_status": "check_failed", "error": str(_e)}
 
-    conn = _get_db()
-    conn.execute("INSERT INTO case_briefs (case_id, brief_json) VALUES (%s,%s)",
-                 (case_id, json.dumps(brief)))
-    conn.commit()
-    conn.close()
+    with _get_db(firm_id) as conn:
+        conn.execute("INSERT INTO case_briefs (firm_id, case_id, brief_json) VALUES (%s,%s,%s)",
+                     (firm_id, case_id, json.dumps(brief)))
     return brief
 
 

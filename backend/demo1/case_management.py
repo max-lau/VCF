@@ -633,10 +633,22 @@ async def review_contradiction(case_id: int, c_id: int):
     return {"success": True}
 
 
+@router.get("/{case_id}/brief")
+async def get_case_brief(case_id: int, firm_id: str = Depends(get_current_firm_id)):
+    """Return the most recent stored brief for a case, or 404 if none generated yet."""
+    with get_conn(firm_id) as conn:
+        row = conn.execute(
+            "SELECT brief_json FROM case_briefs WHERE case_id=%s ORDER BY generated_at DESC LIMIT 1",
+            (case_id,)).fetchone()
+    if not row:
+        raise HTTPException(status_code=404, detail="No brief found for this case")
+    b = row["brief_json"]
+    return json.loads(b) if isinstance(b, str) else b
+
 @router.post("/{case_id}/brief")
-async def case_brief(case_id: int):
+async def case_brief(case_id: int, firm_id: str = Depends(get_current_firm_id)):
     try:
-        brief = generate_case_brief(case_id)
+        brief = generate_case_brief(case_id, firm_id=firm_id)
         return {"success": True, "case_id": case_id, "brief": brief}
     except HTTPException:
         raise
