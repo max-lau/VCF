@@ -15,7 +15,13 @@
           <p class="text-gray-800 whitespace-pre-line text-sm leading-relaxed">{{ section.content }}</p>
         </div>
       </div>
-      <div v-else class="text-red-500 text-center py-8">No brief found for this case.</div>
+      <div v-else class="text-center py-8">
+        <p class="text-gray-500 mb-4">No brief has been generated for this case yet.</p>
+        <button @click="generateBrief" :disabled="generating"
+                class="px-4 py-2 bg-purple-600 text-white rounded hover:bg-purple-700 disabled:opacity-50">
+          {{ generating ? 'Generating… (this takes ~30s)' : 'Generate AI Brief' }}
+        </button>
+      </div>
     </div>
   </div>
 </template>
@@ -24,22 +30,32 @@
 import { ref, onMounted } from 'vue'
 import { useRoute } from 'vue-router'
 import AttorneyReviewGate from '@/components/ui/AttorneyReviewGate.vue'
+import client from '@/api/client'
 
 const route = useRoute()
 const caseId = route.params.caseId || route.params.id
 
 const loading = ref(true)
 const brief = ref(null)
+const generating = ref(false)
+
+const generateBrief = async () => {
+  generating.value = true
+  try {
+    const { data } = await client.post(`/cases/${caseId}/brief`)
+    brief.value = data.brief
+  } catch (error) {
+    console.error('Brief generation failed:', error)
+  } finally {
+    generating.value = false
+  }
+}
 
 const fetchBrief = async () => {
   loading.value = true
   try {
-    // Assuming you have an endpoint to fetch the brief JSON, 
-    // or you can adapt this to however your app currently loads briefs.
-    const res = await fetch(`/api/cases/${caseId}/brief`) 
-    if (res.ok) {
-      brief.value = await res.json()
-    }
+    const { data } = await client.get(`/cases/${caseId}/brief`)
+    brief.value = data
   } catch (error) {
     console.error('Failed to load brief:', error)
   } finally {

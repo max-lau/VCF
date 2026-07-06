@@ -84,7 +84,7 @@ async function fetchUsers() {
 async function fetchAudit() {
   auditLoading.value = true
   try {
-    const { data } = await axios.get('/api/audit/log?limit=50', { headers: authHdr() })
+    const { data } = await axios.get('/api/audit/logs?limit=50', { headers: authHdr() })
     auditRows.value = data.entries || data.log || (Array.isArray(data) ? data : [])
   } catch {
     auditRows.value = []

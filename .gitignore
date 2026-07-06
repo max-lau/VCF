@@ -84,3 +84,4 @@ backend/demo1/analyses.db
 uvicorn.log
 *.log
 mlflow-artifacts/
+logs/
