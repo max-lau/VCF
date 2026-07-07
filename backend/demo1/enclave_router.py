@@ -1,7 +1,7 @@
 """
 enclave_router.py
 Cloud-side FastAPI router for the ParaIQ multi-tenant privilege system.
-Add to main.py with: app.include_router(enclave_router, prefix="/api/privilege")
+Add to main.py with: app.include_router(enclave_router, prefix="/privilege")  # Nginx rewrites /api/* to /* before proxying
 
 Responsibilities:
   - Maintain registry of client_id → enclave_url + api_key

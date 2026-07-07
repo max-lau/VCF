@@ -348,7 +348,7 @@ app.include_router(bundler_router, tags=["Production Bundler"])
 app.include_router(privilege_router, tags=["Privilege Log"])
 app.include_router(media_router, tags=["Media Transcription"])
 app.include_router(messages_router, tags=["Message Parsers"])
-app.include_router(enclave_privilege_router, prefix="/api/privilege", tags=["Privilege Enclave"])
+app.include_router(enclave_privilege_router, prefix="/privilege", tags=["Privilege Enclave"])  # Nginx rewrites /api/* to /* before proxying
 app.include_router(correspondence_router)
 app.include_router(research_router)
 app.include_router(feedback_router)
@@ -365,7 +365,7 @@ async def shutdown_event():
     if _scheduler:
         _scheduler.shutdown(wait=False)
 app.include_router(calendar_router)
-app.include_router(calendar_sync_router)
+app.include_router(calendar_sync_router, prefix="/calendar", tags=["Calendar Sync"])
 app.include_router(contacts_router)
 app.include_router(reports_router)
 app.include_router(exports_router)
