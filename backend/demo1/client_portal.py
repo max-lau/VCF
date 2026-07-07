@@ -490,3 +490,60 @@ def revoke_portal_access(
             (row["id"],),
         )
     return {"revoked": token, "access_id": row["id"]}
+
+
+# ── Firm-side management routes (Option B consolidation: client_portal.py is canonical) ──
+# Ported from routers/misc_routers.py so this router is a superset serving both
+# ClientPortalManageView (grants/grant/revoke-by-token) and ClientPortalView
+# (matter/{id}/accesses, access/{id}). Resolves the dead-code mount from the
+# duplicate client_portal_router import in main.py.
+
+@router.get("/grants")
+def list_all_grants(firm_id: str = Depends(get_current_firm_id)):
+    """Firm-wide list of all portal accesses. Consumed by ClientPortalManageView.vue."""
+    with get_conn(firm_id) as conn:
+        rows = conn.execute(
+            """
+            SELECT id, matter_id, client_name, client_email, permissions,
+                   access_token, expires_at, last_accessed, is_active, created_at
+            FROM client_portal_access
+            WHERE firm_id = %s ORDER BY created_at DESC
+            """,
+            (firm_id,),
+        ).fetchall()
+    return {"grants": [dict(r) for r in rows]}
+
+
+@router.get("/matter/{matter_id}/accesses")
+def list_matter_accesses(matter_id: int, firm_id: str = Depends(get_current_firm_id)):
+    """Per-matter access list. Consumed by ClientPortalView.vue."""
+    with get_conn(firm_id) as conn:
+        rows = conn.execute(
+            """
+            SELECT id, client_name, client_email, permissions,
+                   expires_at, last_accessed, is_active, created_at, access_token
+            FROM client_portal_access
+            WHERE matter_id = %s ORDER BY created_at DESC
+            """,
+            (matter_id,),
+        ).fetchall()
+    return [dict(r) for r in rows]
+
+
+@router.delete("/access/{access_id}")
+def revoke_access_by_id(access_id: int, firm_id: str = Depends(get_current_firm_id)):
+    """Revoke by numeric id (ownership-scoped). Consumed by ClientPortalView.vue."""
+    with get_conn(firm_id) as conn:
+        row = conn.execute(
+            "SELECT id, firm_id FROM client_portal_access WHERE id = %s",
+            (access_id,),
+        ).fetchone()
+        if not row:
+            raise HTTPException(404, "Portal access not found")
+        if dict(row).get("firm_id") != firm_id:
+            raise HTTPException(403, "Not authorized to revoke this portal access")
+        conn.execute(
+            "UPDATE client_portal_access SET is_active = FALSE WHERE id = %s",
+            (access_id,),
+        )
+    return {"revoked": access_id}

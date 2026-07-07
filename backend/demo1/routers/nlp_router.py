@@ -37,6 +37,21 @@ def analyze_multilingual_endpoint(
         raise HTTPException(400, "Text too short")
     return analyze_multilingual(body.text, lang)
 
+@router.get("/multilingual/languages")
+def languages_alias():
+    """Alias for the Vue frontend (/multilingual/languages)."""
+    return {"languages": SUPPORTED_LANGUAGES}
+
+@router.post("/multilingual/analyze")
+def analyze_multilingual_alias(
+    body: TextInput,
+    lang: str = Query("auto", description="Language code: en, zh, es, fr, de, ja, ar, pt, auto")
+):
+    """Alias for the Vue frontend (/multilingual/analyze)."""
+    if not body.text or len(body.text.strip()) < 10:
+        raise HTTPException(400, "Text too short")
+    return analyze_multilingual(body.text, lang)
+
 @router.post("/detect/language")
 def detect_language_endpoint(body: TextInput):
     """Detect the language of any text."""

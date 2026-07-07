@@ -86,8 +86,8 @@ from backend.demo1.routers.research_router       import router as research_route
 from backend.demo1.routers.reports_router        import router as reports_router
 from backend.demo1.routers.misc_routers import (
     exports_router, ai_config_router,
-    client_portal_router, legal_bert_router,
-)
+    legal_bert_router,
+)  # client_portal_router removed: canonical version imported from client_portal.py (line ~44); duplicate import here shadowed it, leaving the full portal unmounted
 from backend.demo1.kanban_router import router as kanban_router
 from backend.demo1.drafting_router import router as drafting_router
 from backend.demo1.routers.approval_router import router as approval_router
