@@ -352,7 +352,7 @@ async def process_ocr(file_id: int, request: Request):
                 "http://localhost:5003/intake/scan",
                 headers={"X-API-Key": os.environ.get("PARAIQ_API_KEY","")},
                 files={"file": (row["original_name"], f, row["mime_type"])},
-                data={"engine": "claude"}
+                data={"engine": "claude", "firm_id": firm_id}
             )
 
     result = resp.json()

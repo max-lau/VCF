@@ -43,14 +43,23 @@ def init_intake_table():
 
 def ocr_with_claude(image_bytes: bytes, mime_type: str = "image/jpeg",
                     firm_id: str = "default") -> dict:
-    """Use Claude Vision to transcribe handwritten/scanned documents."""
+    """Use Claude Vision to transcribe handwritten/scanned documents, and to
+    extract structured intake fields directly from the image in the same
+    call (rather than a separate English-regex pass over the transcribed
+    text). Regex on OCR output can't read non-Latin names, can't tell a
+    client's own phone number from a firm's letterhead number, and can't
+    use layout/context -- Claude reading the image directly can do all
+    three. If the JSON response can't be parsed for any reason, this
+    falls back to plain-text mode and the caller falls back to the old
+    regex-based extract_form_fields() on the transcribed text.
+    """
     from backend.demo1.main import claude_with_retry, client, LLM_STRONG
     b64_image = base64.standard_b64encode(image_bytes).decode("utf-8")
 
     response = claude_with_retry(
         client.messages.create,
         model=LLM_STRONG,
-        max_tokens=1000,
+        max_tokens=1500,
         messages=[{
             "role": "user",
             "content": [
@@ -64,24 +73,61 @@ def ocr_with_claude(image_bytes: bytes, mime_type: str = "image/jpeg",
                 },
                 {
                     "type": "text",
-                    "text": """Transcribe ALL text in this document image exactly as written.
-Rules:
-- Preserve line breaks and labels (Client:, Date:, etc.)
-- Transcribe every word and number visible
-- Return ONLY the transcribed text, no commentary."""
+                    "text": """Read this document image and respond with ONLY a JSON object (no markdown fences, no commentary) with exactly these two top-level keys:
+
+"text": the complete verbatim transcription of every word and number visible in the document, in its original language, preserving line breaks and labels (Client:, Date:, etc.)
+
+"fields": an object with these keys, extracted directly from what you see in the image using the document's own layout and language (not an English template):
+  "client_name": the client's/claimant's own name, or null if not present. Must be the person the intake is about, not a firm name, attorney name, or letterhead.
+  "date": the date on the form in its original format, or null.
+  "matter_type": your best classification of the legal matter (e.g. "employment", "criminal", "civil", "immigration", "real estate", "family", "personal injury"), or null.
+  "opposing_party": the opposing party/employer/defendant if mentioned, or null.
+  "phone": the CLIENT's own phone number, not a firm/letterhead phone number, or null.
+  "email": the CLIENT's own email address, not a firm email, or null.
+  "key_facts": an array of up to 5 short sentences capturing the most legally significant facts.
+  "urgent": true if the document indicates urgency (approaching deadline, emergency, ASAP), otherwise false.
+
+Return ONLY the JSON object."""
                 }
             ]
         }],
         firm_id=firm_id,
     )
 
-    text = response.content[0].text.strip()
-    return {
+    raw = response.content[0].text.strip()
+    if raw.startswith("```"):
+        raw = re.sub(r'^```(?:json)?\s*', '', raw)
+        raw = re.sub(r'\s*```$', '', raw)
+
+    text = raw
+    form_fields = None
+    try:
+        parsed = json.loads(raw)
+        text = (parsed.get("text") or "").strip()
+        f = parsed.get("fields") or {}
+        form_fields = {
+            "client_name":    f.get("client_name"),
+            "date":           f.get("date"),
+            "matter_type":    f.get("matter_type"),
+            "opposing_party": f.get("opposing_party"),
+            "phone":          f.get("phone"),
+            "email":          f.get("email"),
+            "key_facts":      (f.get("key_facts") or [])[:5],
+            "urgent":         bool(f.get("urgent")),
+        }
+    except (json.JSONDecodeError, AttributeError) as e:
+        logger.warning(f"[Intake] Vision JSON parse failed, falling back to plain-text mode: {e}")
+        text = raw
+
+    result = {
         "text":       text,
         "word_count": len(text.split()),
         "confidence": 95.0,
         "engine":     "claude-vision",
     }
+    if form_fields is not None:
+        result["form_fields"] = form_fields
+    return result
 
 
 # ── Tesseract OCR ──────────────────────────────────────────────────────────────
@@ -207,10 +253,22 @@ async def scan_document(
     request: Request,
     file: UploadFile = File(...),
     lang: str = Form(default="eng"),
-    engine: str = Form(default="auto")
+    engine: str = Form(default="auto"),
+    firm_id: Optional[str] = Form(default=None)
 ):
     """Upload image/PDF → extract text via OCR."""
-    firm_id = getattr(request.state, "firm_id", "default")
+    # APIKeyMiddleware already gates entry: if there's no Bearer header here,
+    # this request only got through via the validated static API key (M2M path).
+    is_jwt_auth = request.headers.get("Authorization", "").startswith("Bearer ")
+    if is_jwt_auth:
+        firm_id = getattr(request.state, "firm_id", "default")
+    else:
+        if not firm_id:
+            raise HTTPException(status_code=400, detail="firm_id is required for API-key requests")
+        with get_conn(firm_id) as conn:
+            row = conn.execute("SELECT id FROM firms WHERE id=%s", (firm_id,)).fetchone()
+        if not row:
+            raise HTTPException(status_code=400, detail="Unknown firm_id")
     contents = await file.read()
     mime_type = file.content_type
     if file.content_type == "application/pdf":
@@ -266,7 +324,7 @@ async def analyze_document(
     from backend.demo1.custom_entities import extract_custom_entities
     custom_ents = extract_custom_entities(text)
 
-    form_fields = extract_form_fields(text)
+    form_fields = ocr_result.get("form_fields") or extract_form_fields(text)
 
     with get_conn(firm_id) as conn:
         conn.execute(
@@ -319,7 +377,7 @@ async def extract_intake_form(
         "raw_text":    text,
         "confidence":  ocr_result["confidence"],
         "engine":      ocr_result["engine"],
-        "form_fields": extract_form_fields(text),
+        "form_fields": ocr_result.get("form_fields") or extract_form_fields(text),
     }
 
 

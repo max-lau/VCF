@@ -1,0 +1,170 @@
+================================================================================
+READ sites (getattr fallback pattern) -- 118 total across 16 files
+================================================================================
+
+backend/demo1/main.py  (38 sites)
+  L413: firm_id = getattr(request.state, "firm_id", "default")
+  L429: firm_id = getattr(request.state, "firm_id", "default")
+  L442: firm_id = getattr(request.state, "firm_id", "default")
+  L455: firm_id = getattr(request.state, "firm_id", "default")
+  L480: firm_id = getattr(request.state, "firm_id", "default")
+  L788: return await loop.run_in_executor(executor, run_analysis, body.text, "", getattr(request.state, 'firm_id', 'default'))
+  L797: firm_id = getattr(request.state, 'firm_id', 'default')
+  L831: firm_id = getattr(request.state, 'firm_id', 'default')
+  L909: firm_id=getattr(request.state, "firm_id", "default"),
+  L914: save_work_product('/timeline', _timeline_result, getattr(request.state, 'firm_id', 'default'), getattr(body, 'case_id', None), input_preview=body.text[:100])
+  L933: results = query_analyses(sentiment=sentiment, keyword=keyword, limit=limit, firm_id=getattr(request.state, 'firm_id', 'default'))
+  L944: firm_id = getattr(request.state, 'firm_id', 'default')
+  L968: firm_id = getattr(request.state, 'firm_id', 'default')
+  L1029: firm_id=getattr(request.state, "firm_id", "default"),
+  L1033: save_work_product("/interrogate", json.loads(cleaned), getattr(request.state, "firm_id", "default"), body.case_id, input_preview=body.transcript[:100])
+  L1073: firm_id=getattr(request.state, "firm_id", "default"),
+  L1076: save_work_product("/documents/lease-diff", _lease_result, getattr(request.state, "firm_id", "default"), body.case_id, input_preview=body.doc_a[:100])
+  L1140: firm_id=getattr(request.state, "firm_id", "default"),
+  L1144: save_work_product("/credibility/score", _cred_result, getattr(request.state, "firm_id", "default"), body.case_id, input_preview=body.witness_name)
+  L1215: firm_id=getattr(request.state, "firm_id", "default"),
+  L1219: save_work_product('/deposition/summarize', _depo_result, getattr(request.state, 'firm_id', 'default'), body.case_id, input_preview=body.deponent)
+  L1275: firm_id=getattr(request.state, "firm_id", "default"),
+  L1279: save_work_product("/entities/legal", _entities_result, getattr(request.state, "firm_id", "default"), getattr(body, "case_id", None), input_preview=body.text[:100])
+  L1296: firm_id = getattr(request.state, "firm_id", "default")
+  L1367: firm_id = getattr(request.state, "firm_id", "default")
+  L1471: firm_id = getattr(request.state, "firm_id", "default")
+  L1663: firm_id = getattr(request.state, "firm_id", "default")
+  L1692: firm_id = getattr(request.state, "firm_id", "default")
+  L1718: firm_id = getattr(request.state, "firm_id", "default")
+  L1745: firm_id = getattr(request.state, "firm_id", "default")
+  L1794: firm_id = getattr(request.state, "firm_id", "default")
+  L1823: firm_id = getattr(request.state, "firm_id", "default")
+  L1857: firm_id = getattr(request.state, "firm_id", "default")
+  L1872: firm_id = getattr(request.state, "firm_id", "default")
+  L1888: firm_id = getattr(request.state, "firm_id", "default")
+  L1896: firm_id = getattr(request.state, "firm_id", "default")
+  L1908: firm_id = getattr(request.state, "firm_id", "default")
+  L1925: firm_id = getattr(request.state, "firm_id", "default")
+
+backend/demo1/discovery_intake.py  (15 sites)
+  L170: effective_firm = firm_id or getattr(request.state, "firm_id", "default")
+  L251: firm_id = getattr(request.state, "firm_id", "default")
+  L270: firm_id = getattr(request.state, "firm_id", "default")
+  L286: firm_id = getattr(request.state, "firm_id", "default")
+  L304: firm_id = getattr(request.state, "firm_id", "default")
+  L321: firm_id = getattr(request.state, "firm_id", "default")
+  L337: firm_id = getattr(request.state, "firm_id", "default")
+  L377: firm_id = getattr(request.state, "firm_id", "default")
+  L461: firm_id = getattr(request.state, "firm_id", "default")
+  L519: firm_id = getattr(request.state, "firm_id", "default")
+  L569: firm_id = getattr(request.state, "firm_id", "default")
+  L608: firm_id = getattr(request.state, "firm_id", "default")
+  L625: firm_id = getattr(request.state, "firm_id", "default")
+  L659: firm_id = getattr(request.state, "firm_id", "default")
+  L737: firm_id      = getattr(request.state, "firm_id", "default")
+
+backend/demo1/legal_modules.py  (15 sites)
+  L32: firm_id = getattr(request.state, "firm_id", "default")
+  L48: firm_id = getattr(request.state, "firm_id", "default")
+  L58: firm_id = getattr(request.state, "firm_id", "default")
+  L70: firm_id = getattr(request.state, "firm_id", "default")
+  L81: firm_id = getattr(request.state, "firm_id", "default")
+  L101: firm_id = getattr(request.state, "firm_id", "default")
+  L116: firm_id = getattr(request.state, "firm_id", "default")
+  L130: firm_id = getattr(request.state, "firm_id", "default")
+  L142: firm_id = getattr(request.state, "firm_id", "default")
+  L153: firm_id = getattr(request.state, "firm_id", "default")
+  L174: firm_id = getattr(request.state, "firm_id", "default")
+  L189: firm_id = getattr(request.state, "firm_id", "default")
+  L203: firm_id = getattr(request.state, "firm_id", "default")
+  L217: firm_id = getattr(request.state, "firm_id", "default")
+  L230: firm_id = getattr(request.state, "firm_id", "default")
+
+backend/demo1/privilege_log.py  (8 sites)
+  L84: firm_id = getattr(request.state, "firm_id", "default")
+  L140: firm_id = getattr(request.state, "firm_id", "default")
+  L157: firm_id = getattr(request.state, "firm_id", "default")
+  L173: firm_id = getattr(request.state, "firm_id", "default")
+  L203: firm_id = getattr(request.state, "firm_id", "default")
+  L228: firm_id = getattr(request.state, "firm_id", "default")
+  L283: firm_id = getattr(request.state, "firm_id", "default")
+  L316: firm_id = getattr(request.state, "firm_id", "default")
+
+backend/demo1/media_transcription.py  (6 sites)
+  L101: firm_id = getattr(request.state, "firm_id", "default")
+  L142: firm_id = getattr(request.state, "firm_id", "default")
+  L191: firm_id = getattr(request.state, "firm_id", "default")
+  L212: firm_id = getattr(request.state, "firm_id", "default")
+  L231: firm_id = getattr(request.state, "firm_id", "default")
+  L253: firm_id = getattr(request.state, "firm_id", "default")
+
+backend/demo1/bates.py  (5 sites)
+  L74: firm_id = getattr(request.state, "firm_id", "default")
+  L91: firm_id = getattr(request.state, "firm_id", "default")
+  L185: firm_id = getattr(request.state, "firm_id", "default")
+  L202: firm_id = getattr(request.state, "firm_id", "default")
+  L213: firm_id = getattr(request.state, "firm_id", "default")
+
+backend/demo1/redaction.py  (5 sites)
+  L176: findings = _claude_enhance(req.text, findings, req.style, firm_id=getattr(request.state, "firm_id", "default"))
+  L203: firm_id = getattr(request.state, "firm_id", "default")
+  L281: firm_id = getattr(request.state, "firm_id", "default")
+  L304: firm_id = getattr(request.state, "firm_id", "default")
+  L326: firm_id = getattr(request.state, "firm_id", "default")
+
+backend/demo1/audit_trail.py  (5 sites)
+  L150: firm_id = getattr(request.state, "firm_id", "default")
+  L176: firm_id = getattr(request.state, "firm_id", "default")
+  L240: firm_id = getattr(request.state, "firm_id", "default")
+  L291: firm_id = getattr(request.state, "firm_id", "default")
+  L323: firm_id = getattr(request.state, "firm_id", "default")
+
+backend/demo1/ocr_intake.py  (5 sites)
+  L259: firm_id = getattr(request.state, "firm_id", "default")
+  L291: firm_id = getattr(request.state, "firm_id", "default")
+  L352: firm_id = getattr(request.state, "firm_id", "default")
+  L374: firm_id = getattr(request.state, "firm_id", "default")
+  L424: firm_id = getattr(request.state, "firm_id", "default")
+
+backend/demo1/message_parser.py  (4 sites)
+  L69: firm_id = getattr(request.state, "firm_id", "default")
+  L126: firm_id = getattr(request.state, "firm_id", "default")
+  L220: firm_id = getattr(request.state, "firm_id", "default")
+  L305: firm_id = getattr(request.state, "firm_id", "default")
+
+backend/demo1/pdf_export.py  (3 sites)
+  L323: firm_id = getattr(request.state, "firm_id", "default")
+  L340: firm_id = getattr(request.state, "firm_id", "default")
+  L359: firm_id = getattr(request.state, "firm_id", "default")
+
+backend/demo1/matter_exports.py  (3 sites)
+  L46: firm_id = getattr(request.state, "firm_id", "default")
+  L135: firm_id = getattr(request.state, "firm_id", "default")
+  L211: firm_id = getattr(request.state, "firm_id", "default")
+
+backend/demo1/production_bundler.py  (3 sites)
+  L19: firm_id = getattr(request.state, "firm_id", "default")
+  L35: firm_id = getattr(request.state, "firm_id", "default")
+  L112: firm_id = getattr(request.state, "firm_id", "default")
+
+backend/demo1/enclave_router.py  (1 sites)
+  L79: return getattr(request.state, "firm_id", "default")
+
+backend/demo1/pg.py  (1 sites)
+  L133: firm_id = getattr(request.state, "firm_id", "default")
+
+backend/demo1/auth_firm_id_hardening.py  (1 sites)
+  L4: # Replaces: getattr(request.state, "firm_id", "default")
+
+================================================================================
+WRITE sites (request.state.firm_id = ...) -- 1 total
+================================================================================
+Check each of these for a silent '"default"' write on the API-key path.
+
+backend/demo1/pg.py
+  L180: request.state.firm_id = firm_id
+
+================================================================================
+Suggested risk-first migration order (adjust to your actual counts above):
+  1. privilege_log.py
+  2. redaction.py
+  3. matter_exports.py
+  4. pdf_export.py
+  5. everything else, lowest-stakes last
+================================================================================
