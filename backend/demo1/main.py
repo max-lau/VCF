@@ -147,7 +147,20 @@ def save_work_product(endpoint: str, result: dict, firm_id: str, case_id=None, u
 
 
 EXEMPT_PATHS = {"/health", "/openapi.json", "/docs", "/redoc", "/favicon.ico", "/metrics"}
-EXEMPT_PREFIXES = ("/auth/", "/api/auth/", "/docs/", "/redoc/", "/client-portal/view/", "/esign/sign/")
+EXEMPT_PREFIXES = (
+    "/auth/", "/api/auth/", "/docs/", "/redoc/", "/esign/sign/",
+    # Client-portal public token-gated routes -- auth is the token itself,
+    # verified inside _lookup_access(), not a JWT. Deliberately NOT exempting
+    # the bare "/client-portal/" prefix: that would also open /grant, /grants,
+    # /revoke/, /access/, /matter/, which are firm-JWT-gated and must stay
+    # behind this middleware.
+    "/client-portal/view/",
+    "/client-portal/cases/",
+    "/client-portal/upload/",
+    "/client-portal/documents/",
+    "/client-portal/message/",
+    "/client-portal/messages/",
+)
 STATIC_EXTS = (".html", ".js", ".css", ".ico", ".png", ".svg", ".woff", ".woff2")
 # Internal machine-to-machine paths: static key valid ONLY here, ONLY from localhost.
 M2M_PREFIXES = ("/intake/scan", "/discovery/process/ocr/", "/media/transcribe/discovery/")

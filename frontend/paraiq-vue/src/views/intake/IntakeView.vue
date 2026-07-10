@@ -1,5 +1,5 @@
 <script setup>
-import { ref, onMounted } from 'vue'
+import { ref, computed, onMounted } from 'vue'
 import client from '@/api/client'
 
 const mode      = ref('analyze')
@@ -49,6 +49,110 @@ function fmtDate(d) {
   return new Date(d).toLocaleDateString('en-US', { month:'short', day:'numeric', year:'numeric' })
 }
 
+// ── Result formatting (replaces raw JSON dump) ─────────────────────────────
+function firstNonNull(...args) { return args.find(a => a !== undefined && a !== null) }
+
+const extractedText = computed(() => {
+  const r = result.value
+  if (!r) return ''
+  if (typeof r === 'string') return r
+  return firstNonNull(r.ocr?.text, r.text, r.transcription, '')
+})
+
+function escapeHtml(str) {
+  return str.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;')
+}
+function boldify(s) {
+  return s.replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>')
+}
+function renderExtractedText(text) {
+  if (!text) return ''
+  const lines = escapeHtml(text).split('\n')
+  let html = ''
+  let i = 0
+  let paraBuf = []
+  function flushPara() {
+    if (paraBuf.length) { html += `<p>${paraBuf.join(' ')}</p>`; paraBuf = [] }
+  }
+  while (i < lines.length) {
+    const line = lines[i]
+    if (/^\|.*\|\s*$/.test(line)) {
+      flushPara()
+      const tableLines = []
+      while (i < lines.length && /^\|.*\|\s*$/.test(lines[i])) { tableLines.push(lines[i]); i++ }
+      const rows = tableLines
+        .map(l => l.replace(/^\||\|$/g, '').split('|').map(c => c.trim()))
+        .filter(cells => !cells.every(c => /^:?-+:?$/.test(c)))
+      if (rows.length) {
+        const header = rows[0]
+        const body = rows.slice(1)
+        html += '<table class="ocr-table"><tbody>'
+        html += `<tr>${header.map(h=>`<th>${boldify(h)}</th>`).join('')}</tr>`
+        body.forEach(r => { html += `<tr>${r.map(c=>`<td>${boldify(c)}</td>`).join('')}</tr>` })
+        html += '</tbody></table>'
+      }
+      continue
+    }
+    const h3 = line.match(/^###\s+(.*)/)
+    const h2 = line.match(/^##\s+(.*)/)
+    const h1 = line.match(/^#\s+(.*)/)
+    if (h3) { flushPara(); html += `<h5 class="ocr-h">${boldify(h3[1])}</h5>`; i++; continue }
+    if (h2) { flushPara(); html += `<h4 class="ocr-h">${boldify(h2[1])}</h4>`; i++; continue }
+    if (h1) { flushPara(); html += `<h3 class="ocr-h">${boldify(h1[1])}</h3>`; i++; continue }
+    if (/^_{3,}$/.test(line.trim())) { flushPara(); html += '<hr class="ocr-hr">'; i++; continue }
+    if (line.trim() === '') { flushPara(); i++; continue }
+    paraBuf.push(boldify(line))
+    i++
+  }
+  flushPara()
+  return html
+}
+const formattedOcrText = computed(() => renderExtractedText(extractedText.value))
+
+const riskInfo = computed(() => (result.value && typeof result.value === 'object') ? result.value.risk : null)
+const CATEGORY_LABELS = { personal_injury: 'Personal Injury' }
+function friendlyCategory(c) {
+  return CATEGORY_LABELS[c] || (c || '').replace(/_/g,' ').replace(/\b\w/g, ch => ch.toUpperCase())
+}
+
+// Drops entities that are clearly NER noise (markdown symbols, whole lines
+// mistagged as an entity, low-value bare single digits) without trying to
+// re-classify genuinely ambiguous short tokens (e.g. abbreviations) — that
+// would risk hiding real entities in other documents.
+function isJunkEntity(e) {
+  const t = (e.text || '').trim()
+  if (!t) return true
+  if (/^[^\w]+$/.test(t)) return true
+  if (t.length > 40) return true
+  if (e.type === 'MONEY' && !/[\d$]/.test(t)) return true
+  if (e.type === 'CARDINAL' && /^\d{1,2}$/.test(t) && Number(t) <= 3) return true
+  return false
+}
+const cleanEntities = computed(() => {
+  const r = result.value
+  const ents = (r && typeof r === 'object') ? (r.entities || []) : []
+  return ents.filter(e => !isJunkEntity(e))
+})
+const ENTITY_TYPE_LABELS = { PERSON:'Person', ORG:'Organization', GPE:'Location', DATE:'Date', MONEY:'Amount', CARDINAL:'Number' }
+function friendlyEntityType(t) { return ENTITY_TYPE_LABELS[t] || t }
+
+const FORM_FIELD_LABELS = {
+  client_name: 'Client Name', date: 'Date', matter_type: 'Matter Type',
+  opposing_party: 'Opposing Party', phone: 'Phone', email: 'Email', urgent: 'Urgent',
+}
+const formFieldRows = computed(() => {
+  const r = result.value
+  const ff = (r && typeof r === 'object') ? r.form_fields : null
+  if (!ff) return []
+  const rows = Object.entries(FORM_FIELD_LABELS)
+    .filter(([k]) => k in ff)
+    .map(([k, label]) => ({ label, value: k === 'urgent' ? (ff[k] ? 'Yes' : 'No') : ff[k] }))
+  if (Array.isArray(ff.key_facts) && ff.key_facts.length) {
+    rows.push({ label: 'Key Facts', value: ff.key_facts.join('; ') })
+  }
+  return rows
+})
+
 onMounted(fetchHistory)
 </script>
 
@@ -92,7 +196,49 @@ onMounted(fetchHistory)
     <!-- Result -->
     <div v-if="result" class="result-card">
       <div class="result-card__title">Result</div>
-      <pre class="result-pre">{{ typeof result === 'string' ? result : JSON.stringify(result, null, 2) }}</pre>
+      <div v-if="extractedText" class="result-block">
+        <div class="result-block__label">Extracted Text</div>
+        <div class="ocr-text" v-html="formattedOcrText"></div>
+      </div>
+      <div v-if="riskInfo" class="result-block">
+        <div class="result-block__label">Risk Assessment</div>
+        <div class="risk-row">
+          <span class="status-pill" :class="'risk-' + riskInfo.level">{{ riskInfo.level }} risk</span>
+          <span class="risk-score">Score: {{ riskInfo.score }}</span>
+        </div>
+        <ul v-if="riskInfo.top_signals && riskInfo.top_signals.length" class="risk-signals">
+          <li v-for="(s, idx) in riskInfo.top_signals" :key="idx">
+            {{ friendlyCategory(s.category) }} — {{ s.matches }} match<span v-if="s.matches !== 1">es</span>
+          </li>
+        </ul>
+      </div>
+      <div v-if="cleanEntities.length" class="result-block">
+        <div class="result-block__label">Key Entities</div>
+        <div class="piq-table-wrap">
+          <table class="piq-table">
+            <thead><tr><th>Text</th><th>Type</th></tr></thead>
+            <tbody>
+              <tr v-for="(e, idx) in cleanEntities" :key="idx">
+                <td class="bold">{{ e.text }}</td>
+                <td class="dim">{{ friendlyEntityType(e.type) }}</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+      <div v-if="formFieldRows.length" class="result-block">
+        <div class="result-block__label">Form Fields</div>
+        <div class="field-grid">
+          <div v-for="f in formFieldRows" :key="f.label" class="field-row">
+            <span class="field-row__label">{{ f.label }}</span>
+            <span class="field-row__value" :class="{ dim: !f.value }">{{ f.value || 'Not detected' }}</span>
+          </div>
+        </div>
+      </div>
+      <details class="raw-fallback">
+        <summary>Raw response (debug)</summary>
+        <pre class="result-pre">{{ typeof result === 'string' ? result : JSON.stringify(result, null, 2) }}</pre>
+      </details>
     </div>
 
     <!-- History -->
@@ -154,4 +300,30 @@ onMounted(fetchHistory)
 .bold { color: var(--text-primary); font-weight: 500; }
 .dim  { color: var(--text-muted); }
 .status-pill { border-radius: 4px; font-size: .72rem; font-weight: 600; padding: .2rem .5rem; text-transform: capitalize; background: rgba(72,187,120,.15); color: #48bb78; }
+.result-block { margin-bottom: 1.5rem; }
+.result-block:last-child { margin-bottom: 0; }
+.result-block__label { font-size: .72rem; color: var(--text-muted); font-weight: 600; letter-spacing: .05em; margin-bottom: .6rem; text-transform: uppercase; }
+.ocr-text { background: var(--bg-raised, #0d0d1a); border-radius: 6px; padding: 1rem 1.25rem; color: var(--text-primary); font-size: .875rem; line-height: 1.7; }
+.ocr-text p { margin: 0 0 .85rem; }
+.ocr-text p:last-child { margin-bottom: 0; }
+.ocr-h { color: var(--gold); font-family: var(--font-display); margin: 1rem 0 .5rem; }
+.ocr-h:first-child { margin-top: 0; }
+.ocr-table { border-collapse: collapse; margin: .5rem 0 1rem; width: 100%; }
+.ocr-table td, .ocr-table th { border: 1px solid var(--border); padding: .4rem .7rem; font-size: .83rem; text-align: left; }
+.ocr-table th { background: var(--bg-card); color: var(--text-muted); font-weight: 600; }
+.ocr-hr { border: none; border-top: 1px solid var(--border); margin: 1rem 0; }
+.risk-row { align-items: center; display: flex; gap: .75rem; margin-bottom: .5rem; }
+.risk-score { color: var(--text-muted); font-size: .82rem; }
+.risk-low { background: rgba(72,187,120,.15); color: #48bb78; }
+.risk-medium { background: rgba(214,158,46,.15); color: #d69e2e; }
+.risk-high { background: rgba(252,129,129,.15); color: #fc8181; }
+.risk-signals { color: var(--text-muted); font-size: .82rem; line-height: 1.7; margin: 0; padding-left: 1.1rem; }
+.field-grid { display: grid; gap: .6rem; grid-template-columns: 1fr 1fr; }
+.field-row { display: flex; flex-direction: column; gap: .15rem; }
+.field-row__label { color: var(--text-muted); font-size: .72rem; font-weight: 600; letter-spacing: .04em; text-transform: uppercase; }
+.field-row__value { color: var(--text-primary); font-size: .875rem; }
+.field-row__value.dim { color: var(--text-muted); font-style: italic; }
+.raw-fallback { margin-top: 1rem; }
+.raw-fallback summary { color: var(--text-muted); cursor: pointer; font-size: .78rem; }
+.raw-fallback .result-pre { margin-top: .5rem; }
 </style>

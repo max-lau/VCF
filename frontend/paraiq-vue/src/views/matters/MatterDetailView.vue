@@ -569,7 +569,15 @@ watch(() => activeTab.value, (tab) => {
               </thead>
               <tbody>
                 <tr v-for="d in docs" :key="d.id">
-                  <td class="doc-name">{{ d.document_name || d.original_filename || d.filename }}</td>
+                  <td class="doc-name">
+                  <!-- WAW DEMO — TEMPORARY: linkify only the known WaW demo filenames.
+                       Remove this v-if/v-else pair and restore the single line above
+                       after the prospect demo — see WAW_DEMO_ROLLBACK.md -->
+                  <a v-if="(d.document_name || '').match(/^(chen_weiming|krystyna_nowak)_/)"
+                     :href="`/demo-files/${d.document_name}`"
+                     target="_blank" rel="noopener">{{ d.document_name || d.original_filename || d.filename }}</a>
+                  <span v-else>{{ d.document_name || d.original_filename || d.filename }}</span>
+                </td>
                   <td><span class="type-pill">{{ d.doc_type || d.document_type || '—' }}</span></td>
                   <td class="dim">{{ fmtSize(d.file_size) }}</td>
                   <td class="dim nowrap">{{ fmtDate(d.upload_date || d.created_at) }}</td>

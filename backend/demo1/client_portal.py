@@ -105,7 +105,6 @@ class PortalAccessCreate(BaseModel):
 
 class ClientMessageCreate(BaseModel):
     message: str
-    subject: Optional[str] = None
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -113,18 +112,34 @@ class ClientMessageCreate(BaseModel):
 # ─────────────────────────────────────────────────────────────────────────────
 
 def _lookup_access(token: str) -> dict:
-    """Look up a portal access row by token. Returns dict or raises 403."""
-    with get_conn("default") as conn:  # noqa: intentional — token lookup bypasses RLS
+    """Look up a portal access row by token. Returns dict or raises 403.
+
+    client_portal_access has FORCE RLS scoped by firm_id, but at lookup
+    time we don't yet know which firm the token belongs to -- that's the
+    whole point of this function. The portal_token_lookup RLS policy
+    (migration 009) grants SELECT visibility into exactly the one row
+    matching this exact token via a session-local setting, independent
+    of firm context. Once we know the row's real firm_id, the
+    last_accessed bump reconnects using that firm's own context, so
+    it's a normal, correctly-scoped RLS write rather than a second
+    bypass.
+    """
+    with get_conn("default") as conn:
+        conn.execute("SELECT set_config('app.portal_lookup_token', %s, false)", (token,))
         access = conn.execute(
             "SELECT * FROM client_portal_access WHERE access_token = %s AND is_active = TRUE",
             (token,),
         ).fetchone()
-        if not access:
-            raise HTTPException(403, "Invalid or expired portal link")
-        a = dict(access)
-        if a.get("expires_at") and str(a["expires_at"]) < datetime.now().isoformat():
-            raise HTTPException(403, "Portal link has expired")
-        # bump last_accessed
+        conn.execute("SELECT set_config('app.portal_lookup_token', '', false)", ())
+
+    if not access:
+        raise HTTPException(403, "Invalid or expired portal link")
+    a = dict(access)
+    if a.get("expires_at") and str(a["expires_at"]) < datetime.now().isoformat():
+        raise HTTPException(403, "Portal link has expired")
+
+    portal_firm = a.get("firm_id", "default")
+    with get_conn(portal_firm) as conn:
         conn.execute(
             "UPDATE client_portal_access SET last_accessed = %s WHERE id = %s",
             (datetime.now().isoformat(), a["id"]),
@@ -332,11 +347,15 @@ async def upload_document(token: str, file: UploadFile = File(...)):
     with get_conn(portal_firm) as conn:
         cur = conn.execute(
             """
-            INSERT INTO case_documents (case_id, document_name, source, doc_text)
-            VALUES (%s,%s,%s,%s)
+            INSERT INTO case_documents
+              (firm_id, case_id, document_name, source, source_ref, doc_text)
+            VALUES (%s,%s,%s,%s,%s,%s)
             RETURNING id
             """,
-            (matter_id, file.filename, source_path, doc_text),
+            # source has a CHECK constraint limited to
+            # 'uploaded'/'pacer'/'email'/'manual' -- the actual saved file
+            # path goes in source_ref instead, not in source.
+            (portal_firm, matter_id, file.filename, "uploaded", source_path, doc_text),
         )
         doc_id = cur.fetchone()["id"]
 
@@ -407,31 +426,34 @@ def get_document(token: str, doc_id: int):
 
 @router.post("/message/{token}")
 def send_message(token: str, body: ClientMessageCreate):
-    """Client sends a message to the firm. Stored in client_messages."""
+    """Client sends a message to the firm. Stored in client_messages.
+
+    Schema note: client_messages has FORCE RLS keyed on firm_id, and its
+    real columns are (id, firm_id, case_id, sender, recipient, message,
+    read, created_at) -- not the matter_id/portal_access_id/client_name/
+    subject/direction/read_by_firm/read_by_client columns this endpoint
+    was originally written against. Fixed to match the actual schema and
+    to connect using the portal's own firm_id so RLS's WITH CHECK passes.
+    """
     a = _lookup_access(token)
     matter_id = a["matter_id"]
     portal_firm = a.get("firm_id", "default")
 
-    with get_conn("default") as conn:  # client_messages has RLS disabled
+    with get_conn(portal_firm) as conn:
         cur = conn.execute(
             """
             INSERT INTO client_messages
-              (firm_id, matter_id, portal_access_id, client_name, client_email,
-               subject, message, direction, read_by_firm, read_by_client)
-            VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)
+              (firm_id, case_id, sender, recipient, message, read)
+            VALUES (%s,%s,%s,%s,%s,%s)
             RETURNING id
             """,
             (
                 portal_firm,
-                matter_id,
-                a.get("id"),
-                a.get("client_name"),
-                a.get("client_email"),
-                body.subject,
+                str(matter_id),
+                "client",
+                "firm",
                 body.message,
-                "inbound",
                 False,
-                True,
             ),
         )
         msg_id = cur.fetchone()["id"]
@@ -445,24 +467,37 @@ def send_message(token: str, body: ClientMessageCreate):
 
 @router.get("/messages/{token}")
 def list_messages(token: str):
-    """List messages between client and firm (both directions)."""
+    """List messages between client and firm (both directions).
+
+    direction is derived from sender since the table stores sender/
+    recipient roles rather than a direction column: 'inbound' means
+    client -> firm, 'outbound' means firm -> client. There is currently
+    no firm-side reply endpoint anywhere in the codebase, so every row
+    will read as inbound until one is built -- flagging this as a real
+    gap rather than fixing it here, since it's a feature decision.
+    """
     a = _lookup_access(token)
     matter_id = a["matter_id"]
     portal_firm = a.get("firm_id", "default")
 
-    with get_conn("default") as conn:  # client_messages has RLS disabled
+    with get_conn(portal_firm) as conn:
         rows = conn.execute(
             """
-            SELECT id, subject, message, direction,
-                   read_by_firm, read_by_client, created_at
+            SELECT id, sender, recipient, message, read, created_at
             FROM client_messages
-            WHERE firm_id = %s AND matter_id = %s
+            WHERE firm_id = %s AND case_id = %s
             ORDER BY created_at ASC
             """,
-            (portal_firm, matter_id),
+            (portal_firm, str(matter_id)),
         ).fetchall()
 
-    return {"messages": [dict(r) for r in rows]}
+    messages = []
+    for r in rows:
+        d = dict(r)
+        d["direction"] = "inbound" if d.get("sender") == "client" else "outbound"
+        messages.append(d)
+
+    return {"messages": messages}
 
 
 # ─────────────────────────────────────────────────────────────────────────────

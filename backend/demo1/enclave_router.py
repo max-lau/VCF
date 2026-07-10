@@ -205,9 +205,17 @@ async def attorney_review(payload: ReviewPayload, request: Request):
     )
 
 
-@router.get("/stats")
+@router.get("/enclave-stats")
 async def enclave_stats(request: Request):
-    """Get privilege screening stats for this client's enclave."""
+    """Get privilege screening stats for this client's enclave.
+
+    Renamed from /stats: this router and privilege_log.py both mount at
+    the /privilege prefix, and privilege_log.py's own /stats (registered
+    first in main.py) was silently winning every request -- this route
+    was unreachable dead code. No frontend or voice-shortcut consumer
+    referenced the old /stats path here, so this rename has no callers
+    to update.
+    """
     client_id = get_client_id_from_request(request)
     return await _call_enclave(client_id=client_id, path="/stats", method="GET", firm_id=_firm_id(request))
 
