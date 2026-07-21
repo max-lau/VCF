@@ -3,9 +3,7 @@ from dotenv import load_dotenv
 load_dotenv()
 from backend.demo1.ocr_intake import init_intake_table, router as intake_router
 from backend.demo1.intake_jobs import init_intake_jobs_table, router as intake_jobs_router
-from backend.demo1.voice_router import router as voice_router
-from backend.demo1.voice_shortcuts_router import router as voice_shortcuts_router
-from backend.demo1.fine_tune import init_model_table, router as model_router
+from backend.demo1.fine_tune import init_model_table
 # pytorch_trainer and lora_trainer are imported lazily inside endpoints
 # to avoid pulling in torch/mlflow at server startup (keeps CI fast)
 from backend.demo1.slack_teams import init_notify_table, router as notify_router
@@ -19,25 +17,20 @@ from backend.demo1.rate_limit import check_rate_limit
 from backend.demo1.observability.tracer import trace_claude_call
 from backend.demo1.mlops.tracker import log_inference as _mlflow_log
 from backend.demo1.pii import redact_text as _pii_redact, redaction_summary as _pii_summary
-from backend.demo1.risk_scorer import router as risk_router
-from backend.demo1.document_comparison import router as comparison_router
 from backend.demo1.case_management   import router as cases_router
 from backend.demo1.matter_exports import router as matter_export_router
 from backend.demo1.redaction import router as redaction_router, init_redaction_table
-from backend.demo1.production_bundler import router as bundler_router
-from backend.demo1.media_transcription import router as media_router, init_transcription_table
+from backend.demo1.media_transcription import init_transcription_table
 from backend.demo1.message_parser import router as messages_router, init_messages_table
 from backend.demo1.email_router import router as email_router
 from backend.demo1.multilingual import analyze_multilingual, detect_language, SUPPORTED_LANGUAGES
 from backend.demo1.summary_scorer import score_summary
 from backend.demo1.entity_confidence import score_entities, get_entity_summary
 from backend.demo1.entity_linker import find_linked_entities, link_documents_by_entity
-from backend.demo1.semantic_search import router as semantic_search_router
 from backend.demo1.calendar_sync import router as calendar_sync_router
 from backend.demo1.document_annotations import router as document_annotations_router
 from backend.demo1.esignature import router as esign_router
 from backend.demo1.client_portal import router as client_portal_router
-from backend.demo1.time_tracker import router as time_tracker_router
 from backend.demo1.acp_vcf_config import APP_NAME, FIRM_NAME, FIRM_ID, VCF_DEADLINES
 from fastapi import FastAPI, HTTPException, Query, Request, BackgroundTasks, Depends
 from fastapi.responses import JSONResponse
@@ -96,11 +89,7 @@ from backend.demo1.routers.misc_routers import (
     exports_router, ai_config_router,
 )  # client_portal_router removed: canonical version imported from client_portal.py (line ~44); duplicate import here shadowed it, leaving the full portal unmounted
 from backend.demo1.kanban_router import router as kanban_router
-from backend.demo1.drafting_router import router as drafting_router
 from backend.demo1.routers.approval_router import router as approval_router
-from backend.demo1.routers.morning_brief_router import router as brief_router
-from backend.demo1.routers.time_router import router as time_router
-from backend.demo1.routers.billing_router import router as billing_router
 from backend.demo1.notifications_router import router as notifications_router
 
 # ── Phase 1: AI Infrastructure Modules ─────────────────────────────────────────
@@ -278,6 +267,12 @@ async def startup_event():
     init_crm_tables()
     from backend.demo1.communications import init_communications_tables
     init_communications_tables()
+    # Security: VCF account prep sheets may contain credentials / SSN / financial data.
+    if not os.getenv("VCF_PREP_ENC_KEY", "").strip():
+        logging.warning(
+            "[SECURITY] VCF_PREP_ENC_KEY is not set. VCF account prep sheets will be stored unencrypted. "
+            "Generate a Fernet key and set VCF_PREP_ENC_KEY before processing real claimant data."
+        )
     # 3. Poller tasks — keep references so GC cannot collect them
     #    Skip in TESTING mode to avoid asyncio interference with live-server tests
         # Email pollers disabled for ACP-VCF local development
@@ -306,69 +301,10 @@ async def startup_event():
 # app.include_router(webauthn_router)
 app.include_router(intake_router, prefix="/intake", tags=["OCR Intake"])
 app.include_router(intake_jobs_router, prefix="/intake", tags=["Intake Jobs"])
-app.include_router(model_router, prefix="/model", tags=["Fine-Tuned Model"], dependencies=[Depends(_get_current_user)])  # /train is admin-gated inside fine_tune.py; predict open to any logged-in user
-
-
-# ── MLOps Module 2+3: PyTorch + LoRA training endpoints ───────────────────────
-
-class TrainMLOpsBody(BaseModel):
-    epochs:       int   = 5
-    batch_size:   int   = 8
-    lr:           float = 2e-5
-    seed:         int   = 42
-
-class LoRATrainBody(BaseModel):
-    epochs:       int   = 5
-    batch_size:   int   = 8
-    lr:           float = 3e-4
-    lora_r:       int   = 8
-    lora_alpha:   int   = 32
-    lora_dropout: float = 0.1
-    seed:         int   = 42
 
 class TextInput(BaseModel):
     text: str
 
-@app.post("/model/pytorch-train", tags=["Fine-Tuned Model"])
-def start_pytorch_training(body: TrainMLOpsBody, background_tasks: BackgroundTasks, _admin: dict = Depends(_require_admin)):
-    """Module 2: Raw PyTorch training loop with per-epoch MLflow tracking."""
-    from backend.demo1.mlops.pytorch_trainer import train as pytorch_train
-    background_tasks.add_task(
-        pytorch_train,
-        epochs=body.epochs,
-        batch_size=body.batch_size,
-        lr=body.lr,
-        seed=body.seed,
-        firm_id=_admin.get("firm_id", "default"),
-    )
-    return {
-        "success": True,
-        "message": f"PyTorch training started — {body.epochs} epochs, lr={body.lr}",
-        "mlflow_experiment": "paraiq_pytorch_training",
-        "model_output": "models/legal_classifier_pytorch/",
-    }
-
-@app.post("/model/lora-train", tags=["Fine-Tuned Model"])
-def start_lora_training(body: LoRATrainBody, background_tasks: BackgroundTasks, _admin: dict = Depends(_require_admin)):
-    """Module 3: LoRA/PEFT fine-tuning — trains only ~0.5% of parameters."""
-    from backend.demo1.mlops.lora_trainer import train as lora_train
-    background_tasks.add_task(
-        lora_train,
-        epochs=body.epochs,
-        batch_size=body.batch_size,
-        lr=body.lr,
-        lora_r=body.lora_r,
-        lora_alpha=body.lora_alpha,
-        lora_dropout=body.lora_dropout,
-        seed=body.seed,
-        firm_id=_admin.get("firm_id", "default"),
-    )
-    return {
-        "success": True,
-        "message": f"LoRA training started — r={body.lora_r}, alpha={body.lora_alpha}, {body.epochs} epochs",
-        "mlflow_experiment": "paraiq_lora_training",
-        "model_output": "models/legal_classifier_lora/",
-    }
 app.include_router(notify_router, prefix="/notify", tags=["Slack & Teams"])
 app.include_router(auth_router, prefix="/auth", tags=["Authentication"])
 app.include_router(custom_entities_router, prefix="/entities/custom", tags=["Custom Entities"])
@@ -376,13 +312,9 @@ app.include_router(webhook_router, prefix="/webhooks", tags=["Webhooks"])
 app.include_router(pdf_router, prefix="/export", tags=["PDF Export"])
 app.include_router(module_pdf_router, prefix="/export", tags=["PDF Export"])
 app.include_router(audit_router, prefix="/audit", tags=["Audit Trail"])
-app.include_router(risk_router, prefix="/risk", tags=["Risk Scoring"])
-app.include_router(comparison_router, prefix="/documents", tags=["Document Comparison"])
 app.include_router(cases_router, prefix="/cases", tags=["Case Management"])
 app.include_router(matter_export_router, prefix="/export", tags=["Matter Exports"])
 app.include_router(redaction_router, prefix="/redact", tags=["Redaction"])
-app.include_router(bundler_router, tags=["Production Bundler"])
-app.include_router(media_router, tags=["Media Transcription"])
 app.include_router(messages_router, tags=["Message Parsers"])
 app.include_router(vcf_disbursements_router, tags=["VCF Disbursements"])
 app.include_router(correspondence_router)
@@ -407,20 +339,12 @@ app.include_router(reports_router)
 app.include_router(exports_router)
 app.include_router(ai_config_router)
 app.include_router(client_portal_router)
-app.include_router(voice_router)
-app.include_router(voice_shortcuts_router)
 app.include_router(email_router)
 app.include_router(kanban_router)
-app.include_router(drafting_router, prefix="/draft", tags=["drafting"])
 app.include_router(notifications_router, prefix="", tags=["notifications"])
 app.include_router(approval_router, prefix="/approvals", tags=["approvals"])
-app.include_router(brief_router, prefix="/brief", tags=["brief"])
-app.include_router(time_router, prefix="/time", tags=["time"])
-app.include_router(billing_router, prefix="/billing", tags=["billing"])
-app.include_router(semantic_search_router, prefix="/search", tags=["semantic-search"])
 app.include_router(document_annotations_router, prefix="/documents", tags=["document-annotations"])
 app.include_router(esign_router, prefix="/esign", tags=["e-signature"])
-app.include_router(time_tracker_router, prefix="/time-tracker", tags=["time-tracking"])
 app.include_router(workflows_router, tags=["workflows"])
 app.include_router(vcf_deadlines_router, tags=["VCF Deadlines"])
 app.include_router(vcf_account_router, prefix="/vcf", tags=["VCF Account Prep"])
