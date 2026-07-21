@@ -1,5 +1,24 @@
 -- 013_performance_indexes.sql
 -- Performance indexes for high-volume VCFClaimsIQ operations (10k+ claims).
+-- Self-healing: ensures firm_id exists on legacy tables before indexing.
+
+-- Ensure firm_id columns exist on legacy tables (idempotent)
+ALTER TABLE cases ADD COLUMN IF NOT EXISTS firm_id TEXT NOT NULL DEFAULT 'default';
+DO $$
+BEGIN
+    IF EXISTS (
+        SELECT 1 FROM information_schema.tables
+        WHERE table_schema = 'public' AND table_name = 'case_documents'
+    ) THEN
+        ALTER TABLE case_documents ADD COLUMN IF NOT EXISTS firm_id TEXT NOT NULL DEFAULT 'default';
+    END IF;
+    IF EXISTS (
+        SELECT 1 FROM information_schema.tables
+        WHERE table_schema = 'public' AND table_name = 'intake_scans'
+    ) THEN
+        ALTER TABLE intake_scans ADD COLUMN IF NOT EXISTS firm_id TEXT NOT NULL DEFAULT 'default';
+    END IF;
+END $$;
 
 -- Claim lookup / filtering
 CREATE INDEX IF NOT EXISTS idx_cases_firm_status ON cases(firm_id, status);

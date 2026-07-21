@@ -21,10 +21,16 @@ ALTER TABLE cases
 ALTER TABLE cases ADD COLUMN IF NOT EXISTS firm_id TEXT NOT NULL DEFAULT 'default';
 DO $$
 BEGIN
-    IF EXISTS (SELECT 1 FROM information_schema.tables WHERE table_name = 'case_documents') THEN
+    IF EXISTS (
+        SELECT 1 FROM information_schema.tables
+        WHERE table_schema = 'public' AND table_name = 'case_documents'
+    ) THEN
         ALTER TABLE case_documents ADD COLUMN IF NOT EXISTS firm_id TEXT NOT NULL DEFAULT 'default';
     END IF;
-    IF EXISTS (SELECT 1 FROM information_schema.tables WHERE table_name = 'intake_scans') THEN
+    IF EXISTS (
+        SELECT 1 FROM information_schema.tables
+        WHERE table_schema = 'public' AND table_name = 'intake_scans'
+    ) THEN
         ALTER TABLE intake_scans ADD COLUMN IF NOT EXISTS firm_id TEXT NOT NULL DEFAULT 'default';
     END IF;
 END $$;
