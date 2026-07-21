@@ -2,23 +2,9 @@
 -- VCFClaimsIQ core schema additions: claim lifecycle fields, deadlines, disbursements.
 -- Run after 010_vcf_account_prep.sql.
 
--- ── Extend cases table with VCF-specific fields ───────────────────────────────
-ALTER TABLE cases
-    ADD COLUMN IF NOT EXISTS claim_stage          TEXT DEFAULT 'intake',
-    ADD COLUMN IF NOT EXISTS vcf_status           TEXT DEFAULT 'pending',
-    ADD COLUMN IF NOT EXISTS presence_proof_status TEXT DEFAULT 'not_started',
-    ADD COLUMN IF NOT EXISTS award_amount         NUMERIC(12,2),
-    ADD COLUMN IF NOT EXISTS vcf_account_created  BOOLEAN DEFAULT FALSE,
-    ADD COLUMN IF NOT EXISTS vcf_claim_submitted  BOOLEAN DEFAULT FALSE,
-    ADD COLUMN IF NOT EXISTS date_of_birth        DATE,
-    ADD COLUMN IF NOT EXISTS ssn_last4            TEXT,
-    ADD COLUMN IF NOT EXISTS preferred_language   TEXT,
-    ADD COLUMN IF NOT EXISTS exposure_location    TEXT,
-    ADD COLUMN IF NOT EXISTS presence_dates       TEXT,
-    ADD COLUMN IF NOT EXISTS wtc_health_program   BOOLEAN;
-
--- Existing ParaIQ tables may not have firm_id; add it before creating tenant-scoped indexes.
-ALTER TABLE cases ADD COLUMN IF NOT EXISTS firm_id TEXT NOT NULL DEFAULT 'default';
+-- ── Ensure tenant column exists on legacy tables first ────────────────────────
+-- This must succeed before any tenant-scoped indexes are created.
+ALTER TABLE IF EXISTS cases ADD COLUMN IF NOT EXISTS firm_id TEXT NOT NULL DEFAULT 'default';
 DO $$
 BEGIN
     IF EXISTS (
@@ -35,10 +21,49 @@ BEGIN
     END IF;
 END $$;
 
+-- ── Extend cases table with VCF-specific fields ───────────────────────────────
+ALTER TABLE cases
+    ADD COLUMN IF NOT EXISTS claim_stage          TEXT DEFAULT 'intake',
+    ADD COLUMN IF NOT EXISTS vcf_status           TEXT DEFAULT 'pending',
+    ADD COLUMN IF NOT EXISTS presence_proof_status TEXT DEFAULT 'not_started',
+    ADD COLUMN IF NOT EXISTS award_amount         NUMERIC(12,2),
+    ADD COLUMN IF NOT EXISTS vcf_account_created  BOOLEAN DEFAULT FALSE,
+    ADD COLUMN IF NOT EXISTS vcf_claim_submitted  BOOLEAN DEFAULT FALSE,
+    ADD COLUMN IF NOT EXISTS date_of_birth        DATE,
+    ADD COLUMN IF NOT EXISTS ssn_last4            TEXT,
+    ADD COLUMN IF NOT EXISTS preferred_language   TEXT,
+    ADD COLUMN IF NOT EXISTS exposure_location    TEXT,
+    ADD COLUMN IF NOT EXISTS presence_dates       TEXT,
+    ADD COLUMN IF NOT EXISTS wtc_health_program   BOOLEAN;
+
+-- ── GIN/trigram indexes (conditional so missing columns don’t abort migration) ─
 CREATE EXTENSION IF NOT EXISTS pg_trgm;
-CREATE INDEX IF NOT EXISTS idx_cases_claim_stage          ON cases(firm_id, claim_stage);
-CREATE INDEX IF NOT EXISTS idx_cases_vcf_status           ON cases(firm_id, vcf_status);
-CREATE INDEX IF NOT EXISTS idx_cases_client_name_trgm     ON cases USING gin (client_name gin_trgm_ops);
+DO $$
+BEGIN
+    IF EXISTS (
+        SELECT 1 FROM information_schema.columns
+        WHERE table_schema = 'public' AND table_name = 'cases' AND column_name = 'firm_id'
+    ) THEN
+        IF EXISTS (
+            SELECT 1 FROM information_schema.columns
+            WHERE table_schema = 'public' AND table_name = 'cases' AND column_name = 'claim_stage'
+        ) THEN
+            EXECUTE 'CREATE INDEX IF NOT EXISTS idx_cases_claim_stage ON cases(firm_id, claim_stage)';
+        END IF;
+        IF EXISTS (
+            SELECT 1 FROM information_schema.columns
+            WHERE table_schema = 'public' AND table_name = 'cases' AND column_name = 'vcf_status'
+        ) THEN
+            EXECUTE 'CREATE INDEX IF NOT EXISTS idx_cases_vcf_status ON cases(firm_id, vcf_status)';
+        END IF;
+    END IF;
+    IF EXISTS (
+        SELECT 1 FROM information_schema.columns
+        WHERE table_schema = 'public' AND table_name = 'cases' AND column_name = 'client_name'
+    ) THEN
+        EXECUTE 'CREATE INDEX IF NOT EXISTS idx_cases_client_name_trgm ON cases USING gin (client_name gin_trgm_ops)';
+    END IF;
+END $$;
 
 -- ── VCF deadlines ─────────────────────────────────────────────────────────────
 CREATE TABLE IF NOT EXISTS vcf_deadlines (

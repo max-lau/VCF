@@ -12,6 +12,14 @@ CREATE TABLE IF NOT EXISTS claim_stage_history (
     note        TEXT,
     created_at  TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
+ALTER TABLE claim_stage_history
+    ADD COLUMN IF NOT EXISTS firm_id     TEXT NOT NULL DEFAULT 'default',
+    ADD COLUMN IF NOT EXISTS case_id     INTEGER NOT NULL DEFAULT 0,
+    ADD COLUMN IF NOT EXISTS from_stage  TEXT,
+    ADD COLUMN IF NOT EXISTS to_stage    TEXT NOT NULL DEFAULT 'intake',
+    ADD COLUMN IF NOT EXISTS changed_by  TEXT,
+    ADD COLUMN IF NOT EXISTS note        TEXT,
+    ADD COLUMN IF NOT EXISTS created_at  TIMESTAMPTZ NOT NULL DEFAULT NOW();
 
 CREATE INDEX IF NOT EXISTS idx_claim_stage_history_case ON claim_stage_history(case_id, created_at DESC);
 
@@ -37,6 +45,16 @@ CREATE TABLE IF NOT EXISTS claim_checklists (
     updated_at  TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     UNIQUE (firm_id, case_id, stage, item_key)
 );
+ALTER TABLE claim_checklists
+    ADD COLUMN IF NOT EXISTS firm_id     TEXT NOT NULL DEFAULT 'default',
+    ADD COLUMN IF NOT EXISTS case_id     INTEGER NOT NULL DEFAULT 0,
+    ADD COLUMN IF NOT EXISTS stage       TEXT NOT NULL DEFAULT 'intake',
+    ADD COLUMN IF NOT EXISTS item_key    TEXT NOT NULL DEFAULT 'unknown',
+    ADD COLUMN IF NOT EXISTS label       TEXT NOT NULL DEFAULT '',
+    ADD COLUMN IF NOT EXISTS status      TEXT NOT NULL DEFAULT 'pending',
+    ADD COLUMN IF NOT EXISTS note        TEXT,
+    ADD COLUMN IF NOT EXISTS created_at  TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    ADD COLUMN IF NOT EXISTS updated_at  TIMESTAMPTZ NOT NULL DEFAULT NOW();
 
 CREATE INDEX IF NOT EXISTS idx_claim_checklists_case ON claim_checklists(case_id, stage);
 
@@ -67,6 +85,20 @@ CREATE TABLE IF NOT EXISTS communications (
     created_at  TIMESTAMPTZ DEFAULT NOW(),
     created_by  TEXT
 );
+ALTER TABLE communications
+    ADD COLUMN IF NOT EXISTS firm_id     TEXT NOT NULL DEFAULT 'default',
+    ADD COLUMN IF NOT EXISTS case_id     BIGINT,
+    ADD COLUMN IF NOT EXISTS direction   TEXT NOT NULL DEFAULT 'inbound',
+    ADD COLUMN IF NOT EXISTS channel     TEXT NOT NULL DEFAULT 'email',
+    ADD COLUMN IF NOT EXISTS party_type  TEXT NOT NULL DEFAULT 'client',
+    ADD COLUMN IF NOT EXISTS party_name  TEXT,
+    ADD COLUMN IF NOT EXISTS sender      TEXT,
+    ADD COLUMN IF NOT EXISTS recipient   TEXT,
+    ADD COLUMN IF NOT EXISTS subject     TEXT,
+    ADD COLUMN IF NOT EXISTS body        TEXT,
+    ADD COLUMN IF NOT EXISTS sent_at     TIMESTAMPTZ DEFAULT NOW(),
+    ADD COLUMN IF NOT EXISTS created_at  TIMESTAMPTZ DEFAULT NOW(),
+    ADD COLUMN IF NOT EXISTS created_by  TEXT;
 
 CREATE INDEX IF NOT EXISTS idx_communications_case      ON communications(case_id, sent_at DESC);
 CREATE INDEX IF NOT EXISTS idx_communications_party     ON communications(firm_id, party_type, sent_at DESC);
