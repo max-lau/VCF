@@ -17,6 +17,19 @@ ALTER TABLE cases
     ADD COLUMN IF NOT EXISTS presence_dates       TEXT,
     ADD COLUMN IF NOT EXISTS wtc_health_program   BOOLEAN;
 
+-- Existing ParaIQ tables may not have firm_id; add it before creating tenant-scoped indexes.
+ALTER TABLE cases ADD COLUMN IF NOT EXISTS firm_id TEXT NOT NULL DEFAULT 'default';
+DO $$
+BEGIN
+    IF EXISTS (SELECT 1 FROM information_schema.tables WHERE table_name = 'case_documents') THEN
+        ALTER TABLE case_documents ADD COLUMN IF NOT EXISTS firm_id TEXT NOT NULL DEFAULT 'default';
+    END IF;
+    IF EXISTS (SELECT 1 FROM information_schema.tables WHERE table_name = 'intake_scans') THEN
+        ALTER TABLE intake_scans ADD COLUMN IF NOT EXISTS firm_id TEXT NOT NULL DEFAULT 'default';
+    END IF;
+END $$;
+
+CREATE EXTENSION IF NOT EXISTS pg_trgm;
 CREATE INDEX IF NOT EXISTS idx_cases_claim_stage          ON cases(firm_id, claim_stage);
 CREATE INDEX IF NOT EXISTS idx_cases_vcf_status           ON cases(firm_id, vcf_status);
 CREATE INDEX IF NOT EXISTS idx_cases_client_name_trgm     ON cases USING gin (client_name gin_trgm_ops);
