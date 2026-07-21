@@ -14,32 +14,32 @@ export default defineConfig({
     port: 5174,
     proxy: {
       '/vcf': {
-        target: 'http://localhost:8000',
+        target: 'http://localhost:5003',
         changeOrigin: true
       },
       '/auth': {
-        target: 'http://localhost:8000',
+        target: 'http://localhost:5003',
         changeOrigin: true
       },
       '/api': {
-        target: 'http://localhost:8000',
+        target: 'http://localhost:5003',
         changeOrigin: true,
         rewrite: (path) => path.replace(/^\/api/, '')
       },
       '/cases': {
-        target: 'http://localhost:8000',
+        target: 'http://localhost:5003',
         changeOrigin: true
       },
       '/intake': {
-        target: 'http://localhost:8000',
+        target: 'http://localhost:5003',
         changeOrigin: true
       },
       '/dashboard': {
-        target: 'http://localhost:8000',
+        target: 'http://localhost:5003',
         changeOrigin: true
       },
       '/communications': {
-        target: 'http://localhost:8000',
+        target: 'http://localhost:5003',
         changeOrigin: true
       }
     }
