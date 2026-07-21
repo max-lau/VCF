@@ -77,6 +77,15 @@ CREATE TABLE IF NOT EXISTS vcf_deadlines (
     created_at    TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     updated_at    TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
+ALTER TABLE vcf_deadlines
+    ADD COLUMN IF NOT EXISTS firm_id       TEXT NOT NULL DEFAULT 'default',
+    ADD COLUMN IF NOT EXISTS case_id       INTEGER NOT NULL DEFAULT 0,
+    ADD COLUMN IF NOT EXISTS deadline_type TEXT NOT NULL DEFAULT 'general',
+    ADD COLUMN IF NOT EXISTS due_date      DATE NOT NULL DEFAULT CURRENT_DATE,
+    ADD COLUMN IF NOT EXISTS status        TEXT NOT NULL DEFAULT 'pending',
+    ADD COLUMN IF NOT EXISTS description   TEXT,
+    ADD COLUMN IF NOT EXISTS created_at    TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    ADD COLUMN IF NOT EXISTS updated_at    TIMESTAMPTZ NOT NULL DEFAULT NOW();
 
 CREATE INDEX IF NOT EXISTS idx_vcf_deadlines_case      ON vcf_deadlines(case_id);
 CREATE INDEX IF NOT EXISTS idx_vcf_deadlines_due_date  ON vcf_deadlines(firm_id, due_date);
@@ -108,6 +117,21 @@ CREATE TABLE IF NOT EXISTS vcf_disbursements (
     created_at          TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     updated_at          TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
+ALTER TABLE vcf_disbursements
+    ADD COLUMN IF NOT EXISTS firm_id             TEXT NOT NULL DEFAULT 'default',
+    ADD COLUMN IF NOT EXISTS case_id             INTEGER NOT NULL DEFAULT 0,
+    ADD COLUMN IF NOT EXISTS gross_award         NUMERIC(12,2) DEFAULT 0,
+    ADD COLUMN IF NOT EXISTS attorney_fee_pct    NUMERIC(5,2)  DEFAULT 10.0,
+    ADD COLUMN IF NOT EXISTS attorney_fee_amount NUMERIC(12,2) DEFAULT 0,
+    ADD COLUMN IF NOT EXISTS medicare_lien       NUMERIC(12,2) DEFAULT 0,
+    ADD COLUMN IF NOT EXISTS medicaid_lien       NUMERIC(12,2) DEFAULT 0,
+    ADD COLUMN IF NOT EXISTS workers_comp_lien   NUMERIC(12,2) DEFAULT 0,
+    ADD COLUMN IF NOT EXISTS other_lien          NUMERIC(12,2) DEFAULT 0,
+    ADD COLUMN IF NOT EXISTS other_lien_desc     TEXT,
+    ADD COLUMN IF NOT EXISTS net_to_claimant     NUMERIC(12,2) DEFAULT 0,
+    ADD COLUMN IF NOT EXISTS status              TEXT DEFAULT 'pending',
+    ADD COLUMN IF NOT EXISTS created_at          TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    ADD COLUMN IF NOT EXISTS updated_at          TIMESTAMPTZ NOT NULL DEFAULT NOW();
 
 CREATE INDEX IF NOT EXISTS idx_vcf_disbursements_case ON vcf_disbursements(case_id);
 
