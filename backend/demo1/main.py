@@ -2,6 +2,7 @@
 from dotenv import load_dotenv
 load_dotenv()
 from backend.demo1.ocr_intake import init_intake_table, router as intake_router
+from backend.demo1.intake_jobs import init_intake_jobs_table, router as intake_jobs_router
 from backend.demo1.voice_router import router as voice_router
 from backend.demo1.voice_shortcuts_router import router as voice_shortcuts_router
 from backend.demo1.fine_tune import init_model_table, router as model_router
@@ -256,6 +257,7 @@ async def startup_event():
     init_notify_table()
     init_model_table()
     init_intake_table()
+    init_intake_jobs_table()
     init_redaction_table()
     init_transcription_table()
     init_messages_table()
@@ -302,6 +304,7 @@ async def startup_event():
 
 # app.include_router(webauthn_router)
 app.include_router(intake_router, prefix="/intake", tags=["OCR Intake"])
+app.include_router(intake_jobs_router, prefix="/intake", tags=["Intake Jobs"])
 app.include_router(model_router, prefix="/model", tags=["Fine-Tuned Model"], dependencies=[Depends(_get_current_user)])  # /train is admin-gated inside fine_tune.py; predict open to any logged-in user
 
 

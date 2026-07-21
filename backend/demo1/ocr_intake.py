@@ -216,11 +216,32 @@ def ocr_with_tesseract(image_pages: Union[bytes, list], lang: str = "eng") -> di
 
 # ── Smart dispatcher ───────────────────────────────────────────────────────────
 
+def _looks_printed_english(text: str) -> bool:
+    """Heuristic: high ratio of ASCII printable chars suggests printed English."""
+    if not text:
+        return False
+    ascii_printable = sum(1 for c in text if 32 <= ord(c) <= 126 or c in "\n\r\t")
+    return ascii_printable / max(len(text), 1) > 0.90
+
+
 def extract_text(image_pages: Union[bytes, list], lang: str = "eng",
                  engine: str = "auto", mime_type: str = "image/jpeg",
                  firm_id: str = "default") -> dict:
+    # Explicit Tesseract mode.
     if engine == "tesseract":
         return ocr_with_tesseract(image_pages, lang)
+
+    # Auto mode: try low-cost Tesseract first for clean printed English.
+    if engine == "auto":
+        try:
+            tess = ocr_with_tesseract(image_pages, lang)
+            if tess.get("confidence", 0) >= 70 and _looks_printed_english(tess.get("text", "")):
+                logger.info(f"[Intake] Tesseract pre-filter accepted (conf={tess['confidence']})")
+                return tess
+        except Exception as e:
+            logger.debug(f"[Intake] Tesseract pre-filter skipped: {e}")
+
+    # Primary: Claude Vision (handwriting, mixed-language, complex layouts).
     try:
         return ocr_with_claude(image_pages, mime_type, firm_id=firm_id)
     except (httpx.HTTPError, httpx.TimeoutException, KeyError, IndexError, ValueError) as e:
