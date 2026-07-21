@@ -30,11 +30,11 @@ logger = logging.getLogger(__name__)
 
 _DEFAULT_CSP = (
     "default-src 'self'; "
-    "script-src 'self' 'unsafe-inline'; "
-    "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; "
+    "script-src 'self' 'unsafe-inline' https://cdn.jsdelivr.net; "
+    "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com https://cdn.jsdelivr.net; "
     "font-src 'self' https://fonts.gstatic.com data:; "
     "img-src 'self' data: blob: https:; "
-    "connect-src 'self' https://api.anthropic.com https://cloud.langfuse.com; "
+    "connect-src 'self' https://api.anthropic.com https://cloud.langfuse.com https://cdn.jsdelivr.net; "
     "frame-ancestors 'none'; "
     "form-action 'self'; "
     "base-uri 'self'; "

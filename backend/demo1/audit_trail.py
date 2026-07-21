@@ -11,6 +11,7 @@ import csv as _csv
 import io as _io
 import logging
 import jwt
+import psycopg2
 from datetime import datetime, timezone
 from fastapi import APIRouter, Request
 from fastapi.responses import JSONResponse, StreamingResponse as SR

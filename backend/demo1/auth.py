@@ -127,46 +127,64 @@ def build_permissions_for_user(user_id: int, firm_id: str = "default") -> dict:
     """
     try:
         with get_conn(firm_id) as conn:
-            row = conn.execute("""
-                SELECT r.name AS role_name, r.tier, r.default_open
-                FROM role_assignments ra
-                JOIN roles r ON r.id = ra.role_id
-                WHERE ra.user_id = %s AND ra.firm_id = %s
-            """, (user_id, firm_id)).fetchone()
+            # Check if role_assignments table exists to prevent crashes
+            table_exists = conn.execute("""
+                SELECT EXISTS (
+                    SELECT FROM information_schema.tables 
+                    WHERE  table_schema = 'public'
+                    AND    table_name   = 'role_assignments'
+                );
+            """).fetchone()["exists"]
 
-            if not row:
+            if not table_exists:
+                # Fallback directly to users table
                 user_row = conn.execute(
                     "SELECT role FROM users WHERE id = %s", (user_id,)
                 ).fetchone()
                 legacy    = user_row["role"] if user_row else "associate"
-                # Use the role directly from users table if it's a known role
-                role_name = legacy if legacy in ROLE_TIER_MAP else ("firm_admin" if legacy == "admin" else "associate")
-                tier      = ROLE_TIER_MAP.get(role_name, 3)
+                role_name = legacy if legacy in ROLE_TIER_MAP or legacy in ("firm_admin", "admin") else "associate"
+                tier      = 1 if role_name in ("firm_admin", "admin") else ROLE_TIER_MAP.get(role_name, 3)
                 modules   = {}
             else:
-                role_name = row["role_name"]
-                tier      = row["tier"]
+                row = conn.execute("""
+                    SELECT r.name AS role_name, r.tier, r.default_open
+                    FROM role_assignments ra
+                    JOIN roles r ON r.id = ra.role_id
+                    WHERE ra.user_id = %s AND ra.firm_id = %s
+                """, (user_id, firm_id)).fetchone()
 
-                module_rows = conn.execute("""
-                    SELECT mp.module, mp.can_read, mp.can_write,
-                           mp.can_delete, mp.can_export, mp.can_admin
-                    FROM module_permissions mp
-                    WHERE mp.role_id = (
-                        SELECT role_id FROM role_assignments
-                        WHERE user_id = %s AND firm_id = %s
-                    )
-                """, (user_id, firm_id)).fetchall()
+                if not row:
+                    user_row = conn.execute(
+                        "SELECT role FROM users WHERE id = %s", (user_id,)
+                    ).fetchone()
+                    legacy    = user_row["role"] if user_row else "associate"
+                    role_name = legacy if legacy in ROLE_TIER_MAP or legacy in ("firm_admin", "admin") else "associate"
+                    tier      = 1 if role_name in ("firm_admin", "admin") else ROLE_TIER_MAP.get(role_name, 3)
+                    modules   = {}
+                else:
+                    role_name = row["role_name"]
+                    tier      = row["tier"]
 
-                modules = {
-                    r["module"]: {
-                        "read":   r["can_read"],
-                        "write":  r["can_write"],
-                        "delete": r["can_delete"],
-                        "export": r["can_export"],
-                        "admin":  r["can_admin"],
+                    module_rows = conn.execute("""
+                        SELECT mp.module, mp.can_read, mp.can_write,
+                               mp.can_delete, mp.can_export, mp.can_admin
+                        FROM module_permissions mp
+                        WHERE mp.role_id = (
+                            SELECT role_id FROM role_assignments
+                            WHERE user_id = %s AND firm_id = %s
+                        )
+                    """, (user_id, firm_id)).fetchall()
+
+                    modules = {
+                        r["module"]: {
+                            "read":   r["can_read"],
+                            "write":  r["can_write"],
+                            "delete": r["can_delete"],
+                            "export": r["can_export"],
+                            "admin":  r["can_admin"],
+                        }
+                        for r in module_rows
                     }
-                    for r in module_rows
-                }
 
         return {
             "role":      role_name,
@@ -183,7 +201,6 @@ def build_permissions_for_user(user_id: int, firm_id: str = "default") -> dict:
             "is_scoped": False,
             "modules":   {},
         }
-
 
 # ── JWT helpers ────────────────────────────────────────────────────────────────
 

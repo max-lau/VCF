@@ -1,23 +1,39 @@
 """
-backend/demo1/pg.py
-===================
-Central Postgres module. Drop this into backend/demo1/ and import
-get_conn() wherever you currently do sqlite3.connect(DB_PATH).
+backend/demo1/pg.py  (ACP-VCF revision)
+=======================================
+Central Postgres module.
+
+Fixes vs. original
+  1. RLS TENANT CONTEXT BUG: _checkout() ran
+         set_config('app.current_firm_id', %s, true)   -- is_local = TRUE
+     and then immediately conn.commit(). A transaction-local setting dies
+     when its transaction ends, so the commit erased the firm_id before any
+     real query ran. Every subsequent query in the checkout executed with
+     app.current_firm_id unset — meaning RLS either returned zero rows or,
+     if the app connects as a role with BYPASSRLS/table-owner privileges,
+     silently didn't filter at all (see docs/incident-2026-07-06-bypassrls.md).
+     Fixed by using is_local = FALSE (session-level, survives commits) and
+     resetting it on check-in so a pooled connection never leaks tenant
+     context to the next request.
+  2. SECRET UNIFICATION: TenantMiddleware decoded JWTs with SECRET_KEY
+     (default "change_me") while main.py/auth sign and verify with
+     JWT_SECRET_KEY. Unless both env vars were set identically, every decode
+     here failed silently and firm_id fell back to "default". Masked in
+     ACP-VCF because force_waw_tenant overwrites firm_id afterward, but the
+     dead code path is now unified: JWT_SECRET_KEY, falling back to SECRET_KEY.
 
 All tenant tables are protected by RLS — firm_id is set automatically
-per request. No WHERE firm_id = ? needed in any query.
+per request. No WHERE firm_id = ? needed in any query (explicit firm_id
+predicates remain harmless and act as defense-in-depth).
 """
 
 import os
 import json
-import logging
 import psycopg2
 import psycopg2.extras
 from psycopg2 import pool as pg_pool
 from fastapi import Request, Depends
 from typing import Generator
-
-logger = logging.getLogger(__name__)
 
 # ── connection pool (one global instance) ─────────────────────────────────────
 
@@ -40,7 +56,8 @@ def init_pool() -> None:
 def _checkout(firm_id: str = "default") -> psycopg2.extensions.connection:
     """
     Check out a connection from the pool and set the RLS tenant context.
-    Always call _checkin() when done, or use get_conn() context manager.
+    Session-level (is_local=false) so the setting survives commits within
+    the checkout. Always call _checkin() when done, or use get_conn().
     """
     if _pool is None:
         raise RuntimeError("Postgres pool not initialised — call init_pool() at startup")
@@ -54,7 +71,12 @@ def _checkout(firm_id: str = "default") -> psycopg2.extensions.connection:
 def _checkin(conn: psycopg2.extensions.connection) -> None:
     try:
         conn.rollback()   # clear any uncommitted state before returning
-    except psycopg2.Error:
+        # Reset session-level tenant context so the pooled connection cannot
+        # leak this request's firm_id into the next checkout.
+        with conn.cursor() as cur:
+            cur.execute("RESET app.current_firm_id")
+        conn.commit()
+    except Exception:
         pass
     _pool.putconn(conn)
 
@@ -68,15 +90,11 @@ class PgConn:
     Usage:
         from backend.demo1.pg import get_conn
 
-        # BEFORE (sqlite3):
-        conn = sqlite3.connect(DB_PATH)
-        conn.row_factory = sqlite3.Row
-        rows = conn.execute("SELECT * FROM cases WHERE firm_id=?", (fid,)).fetchall()
-        conn.close()
-
-        # AFTER (Postgres + RLS):
         with get_conn(firm_id) as conn:
             rows = conn.execute("SELECT * FROM cases")   # firm_id filter via RLS
+
+    Note: __exit__ commits on clean exit, so explicit conn.commit() calls in
+    module code are redundant (but harmless).
     """
 
     def __init__(self, firm_id: str = "default"):
@@ -123,7 +141,7 @@ def get_conn(firm_id: str = "default") -> PgConn:
 def db_dep(request: Request) -> Generator:
     """
     FastAPI dependency that yields a Postgres connection scoped to the
-    request's firm_id (set by TenantMiddleware below).
+    request's firm_id (set by TenantMiddleware / force_waw_tenant).
 
     Usage in a router:
         @router.get("/cases")
@@ -138,8 +156,7 @@ def db_dep(request: Request) -> Generator:
     try:
         yield pg
         conn.commit()
-    except psycopg2.Error as e:
-        logger.warning(f"[pg] commit failed: {e}")
+    except Exception:
         conn.rollback()
         raise
     finally:
@@ -150,18 +167,18 @@ def db_dep(request: Request) -> Generator:
 
 def make_tenant_middleware():
     """
-    Returns a Starlette middleware class. Add to main.py:
+    Returns a Starlette middleware class. Reads the JWT Authorization header
+    and writes firm_id to request.state so db_dep (above) can pick it up.
 
-        from backend.demo1.pg import make_tenant_middleware
-        app.add_middleware(make_tenant_middleware())
-
-    Reads the JWT Authorization header and writes firm_id to request.state
-    so db_dep (above) can pick it up per-request.
+    In ACP-VCF single-tenant mode, force_waw_tenant in main.py runs closer to
+    the route and overwrites firm_id with FIRM_ID — this middleware then only
+    matters if multi-tenant mode ever returns.
     """
     import jwt as pyjwt
     from starlette.middleware.base import BaseHTTPMiddleware
 
-    SECRET = os.environ.get("JWT_SECRET_KEY", "")
+    # Unified with main.py/auth.py: JWT_SECRET_KEY first, legacy SECRET_KEY fallback.
+    SECRET = os.environ.get("JWT_SECRET_KEY") or os.environ.get("SECRET_KEY", "change_me")
 
     class TenantMiddleware(BaseHTTPMiddleware):
         async def dispatch(self, request: Request, call_next):
@@ -173,15 +190,9 @@ def make_tenant_middleware():
                         auth[7:], SECRET, algorithms=["HS256"]
                     )
                     firm_id = payload.get("firm_id") or "default"
-                    request.state.role    = payload.get("role", "")
-                    request.state.user_id = payload.get("sub", None)
-                except (pyjwt.InvalidTokenError, KeyError, ValueError):
+                except Exception:
                     pass
             request.state.firm_id = firm_id
-            if not hasattr(request.state, "role"):
-                request.state.role = ""
-            if not hasattr(request.state, "user_id"):
-                request.state.user_id = None
             return await call_next(request)
 
     return TenantMiddleware

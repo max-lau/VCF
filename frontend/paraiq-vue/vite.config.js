@@ -1,6 +1,7 @@
 import { defineConfig } from 'vite'
 import vue from '@vitejs/plugin-vue'
 import { fileURLToPath, URL } from 'node:url'
+
 export default defineConfig({
   plugins: [vue()],
   resolve: {
@@ -12,11 +13,35 @@ export default defineConfig({
     host: '0.0.0.0',
     port: 5174,
     proxy: {
-      '/api': {
-        target: 'http://localhost:5003',
-        changeOrigin: true,
-        rewrite: (path) => path.replace(/^\/api/, ''),
+      '/vcf': {
+        target: 'http://localhost:8000',
+        changeOrigin: true
       },
+      '/auth': {
+        target: 'http://localhost:8000',
+        changeOrigin: true
+      },
+      '/api': {
+        target: 'http://localhost:8000',
+        changeOrigin: true,
+        rewrite: (path) => path.replace(/^\/api/, '')
+      },
+      '/cases': {
+        target: 'http://localhost:8000',
+        changeOrigin: true
+      },
+      '/intake': {
+        target: 'http://localhost:8000',
+        changeOrigin: true
+      },
+      '/dashboard': {
+        target: 'http://localhost:8000',
+        changeOrigin: true
+      },
+      '/communications': {
+        target: 'http://localhost:8000',
+        changeOrigin: true
+      }
     }
   },
   build: {

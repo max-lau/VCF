@@ -1,4 +1,5 @@
 <script setup>
+const token = () => localStorage.getItem('paraiq_token')
 import { ref, computed, onMounted } from 'vue'
 import client from '@/api/client'
 
@@ -137,16 +138,33 @@ const ENTITY_TYPE_LABELS = { PERSON:'Person', ORG:'Organization', GPE:'Location'
 function friendlyEntityType(t) { return ENTITY_TYPE_LABELS[t] || t }
 
 const FORM_FIELD_LABELS = {
-  client_name: 'Client Name', date: 'Date', matter_type: 'Matter Type',
-  opposing_party: 'Opposing Party', phone: 'Phone', email: 'Email', urgent: 'Urgent',
+  doc_type: 'Document Type',
+  client_name: 'Client Name',
+  date_of_birth: 'Date of Birth',
+  ssn_last4: 'SSN (Last 4)',
+  exposure_location: 'Exposure Location',
+  presence_dates: 'Presence Dates',
+  employer: 'Employer',
+  provider_name: 'Provider Name',
+  benefit_amount: 'Benefit Amount',
+  annual_income: 'Annual Income',
+  medical_conditions: 'Medical Conditions',
+  phone: 'Phone', 
+  email: 'Email', 
+  urgent: 'Urgent',
 }
 const formFieldRows = computed(() => {
   const r = result.value
   const ff = (r && typeof r === 'object') ? r.form_fields : null
   if (!ff) return []
   const rows = Object.entries(FORM_FIELD_LABELS)
-    .filter(([k]) => k in ff)
-    .map(([k, label]) => ({ label, value: k === 'urgent' ? (ff[k] ? 'Yes' : 'No') : ff[k] }))
+    .filter(([k]) => k in ff && ff[k] !== null)
+    .map(([k, label]) => {
+      let val = ff[k]
+      if (Array.isArray(val)) val = val.join(', ')
+      if (k === 'urgent') val = val ? 'Yes' : 'No'
+      return { label, value: val }
+    })
   if (Array.isArray(ff.key_facts) && ff.key_facts.length) {
     rows.push({ label: 'Key Facts', value: ff.key_facts.join('; ') })
   }
@@ -246,15 +264,24 @@ onMounted(fetchHistory)
       <div class="section-label">Recent intake history</div>
       <div class="piq-table-wrap">
         <table class="piq-table">
-          <thead><tr><th>File</th><th>Mode</th><th>Date</th><th>Status</th></tr></thead>
+              <div v-if="history.length" class="history-section">
+      <div class="section-label">Recent intake history</div>
+      <div class="piq-table-wrap">
+        <table class="piq-table">
+          <thead><tr><th>File</th><th>Date</th><th>OCR Engine</th><th>View File</th></tr></thead>
           <tbody>
             <tr v-for="h in history" :key="h.id">
-              <td class="bold">{{ h.filename || h.file_name || '—' }}</td>
-              <td class="dim">{{ h.mode || '—' }}</td>
+              <td class="bold">{{ h.filename || '—' }}</td>
               <td class="dim">{{ fmtDate(h.created_at) }}</td>
-              <td><span class="status-pill" :class="'s-' + (h.status||'done')">{{ h.status || 'done' }}</span></td>
+              <td class="dim">{{ h.ocr_engine || '—' }}</td>
+              <td><a v-if="h.file_url" :href="`/intake/file/${h.file_url}?token=${token()}`" target="_blank" class="bl-link">View PDF ↗</a>
+                <span v-else class="dim">—</span>
+              </td>
             </tr>
           </tbody>
+        </table>
+      </div>
+    </div>
         </table>
       </div>
     </div>

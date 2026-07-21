@@ -27,9 +27,28 @@ async function fetchCases() {
 let t = null
 function onSearch() { clearTimeout(t); t = setTimeout(fetchCases, 300) }
 
-function riskColor(r)   { return { low:'#48bb78', medium:'#ecc94b', high:'#fc8181', unknown:'#718096' }[r]||'#718096' }
-function statusColor(s) { return { open:'#4a7cf7', closed:'#718096', pending:'#ecc94b' }[s]||'#718096' }
-function fmtDate(d) { return d ? new Date(d).toLocaleDateString('en-US',{month:'short',day:'numeric',year:'numeric'}) : '—' }
+// VCF-specific color mappings
+function vcfStatusColor(s) { 
+  return { 
+    intake: '#4a7cf7', 
+    eligibility: '#9f7aea', 
+    review: '#ecc94b', 
+    award: '#48bb78', 
+    disbursement: '#38b2ac', 
+    closed: '#718096' 
+  }[s] || '#718096' 
+}
+function presenceColor(p) { 
+  return { 
+    missing: '#fc8181', 
+    pending: '#ecc94b', 
+    verified: '#48bb78' 
+  }[p] || '#718096' 
+}
+
+function fmtMoney(v) {
+  return v ? new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD', minimumFractionDigits: 0 }).format(v) : '—'
+}
 
 onMounted(() => Promise.all([fetchStats(), fetchCases()]))
 </script>
@@ -37,42 +56,45 @@ onMounted(() => Promise.all([fetchStats(), fetchCases()]))
 <template>
   <div class="cases">
     <div class="cases__header">
-      <div><h1 class="cases__title">Matters</h1><p class="cases__sub">Active cases and client matters</p></div>
-      <button class="new-btn" @click="router.push('/matters/new')">+ New Matter</button>
+      <div><h1 class="cases__title">VCF Claims</h1><p class="cases__sub">Active 9/11 Victim Compensation Fund claims</p></div>
+      <button class="new-btn" @click="router.push('/matters/new')">+ New VCF Claim</button>
     </div>
 
     <div v-if="stats" class="stats-bar">
-      <div class="stat-card"><div class="stat-val">{{ stats.total_cases }}</div><div class="stat-lbl">Total Matters</div></div>
+      <div class="stat-card"><div class="stat-val">{{ stats.total_cases }}</div><div class="stat-lbl">Total Claims</div></div>
       <div class="stat-card" v-for="(count, status) in stats.by_status" :key="status">
-        <div class="stat-val" :style="{ color: statusColor(status) }">{{ count }}</div>
+        <div class="stat-val" :style="{ color: vcfStatusColor(status) }">{{ count }}</div>
         <div class="stat-lbl">{{ status.charAt(0).toUpperCase() + status.slice(1) }}</div>
       </div>
       <div class="stat-card"><div class="stat-val">{{ stats.total_documents }}</div><div class="stat-lbl">Documents</div></div>
     </div>
 
     <div class="search-bar">
-      <input v-model="search" class="piq-input" placeholder="Search matters, clients, case numbers…" @input="onSearch" />
+      <input v-model="search" class="piq-input" placeholder="Search claimants, claim numbers…" @input="onSearch" />
     </div>
 
-    <div v-if="loading" class="state-msg">Loading matters…</div>
+    <div v-if="loading" class="state-msg">Loading claims…</div>
     <div v-else-if="!cases.length" class="empty-state">
       <div class="empty-state__icon">⬡</div>
-      <div class="empty-state__title">No matters found</div>
-      <div class="empty-state__sub">Create a new matter to get started.</div>
+      <div class="empty-state__title">No claims found</div>
+      <div class="empty-state__sub">Create a new VCF claim to get started.</div>
     </div>
 
     <div v-else class="case-grid">
       <div v-for="c in cases" :key="c.id" class="case-card" @click="router.push('/matters/' + c.id)">
         <div class="case-card__top">
           <span class="mono dim">{{ c.case_number }}</span>
-          <span class="risk-pill" :style="{ background: riskColor(c.risk_level)+'22', color: riskColor(c.risk_level) }">{{ c.risk_level }}</span>
+          <span class="status-pill" :style="{ background: vcfStatusColor(c.vcf_status)+'22', color: vcfStatusColor(c.vcf_status) }">{{ c.vcf_status || 'intake' }}</span>
         </div>
         <div class="case-card__client">{{ c.client_name }}</div>
         <div class="case-card__meta">
-          <span v-if="c.court" class="dim">{{ c.court }}</span>
-          <span v-if="c.filing_date" class="dim">Filed {{ fmtDate(c.filing_date) }}</span>
-          <span class="status-pill" :style="{ background: statusColor(c.status)+'22', color: statusColor(c.status) }">{{ c.status }}</span>
-          <span class="dim">{{ c.doc_count }} doc{{ c.doc_count !== 1 ? 's' : '' }}</span>
+          <span class="dim">Presence: 
+            <span :style="{ color: presenceColor(c.presence_proof_status) }">
+              {{ c.presence_proof_status || 'missing' }}
+            </span>
+          </span>
+          <span v-if="c.award_amount > 0" class="award-amt">{{ fmtMoney(c.award_amount) }}</span>
+          <span class="dim">{{ c.doc_count || 0 }} doc{{ c.doc_count !== 1 ? 's' : '' }}</span>
         </div>
       </div>
     </div>
@@ -98,9 +120,9 @@ onMounted(() => Promise.all([fetchStats(), fetchCases()]))
 .case-card:hover { border-color: var(--gold); transform: translateY(-1px); }
 .case-card__top    { align-items: center; display: flex; justify-content: space-between; margin-bottom: 0.4rem; }
 .case-card__client { color: var(--text-primary); font-size: 0.95rem; font-weight: 600; margin-bottom: 0.5rem; }
-.case-card__meta   { align-items: center; display: flex; flex-wrap: wrap; gap: 0.5rem; font-size: 0.78rem; }
-.risk-pill   { border-radius: 4px; font-size: 0.7rem; font-weight: 600; padding: 0.15rem 0.45rem; text-transform: uppercase; }
-.status-pill { border-radius: 4px; font-size: 0.7rem; font-weight: 600; padding: 0.15rem 0.45rem; }
+.case-card__meta   { align-items: center; display: flex; flex-wrap: wrap; gap: 0.75rem; font-size: 0.78rem; }
+.status-pill { border-radius: 4px; font-size: 0.7rem; font-weight: 600; padding: 0.15rem 0.45rem; text-transform: capitalize; }
+.award-amt { color: var(--green); font-weight: 700; }
 .empty-state { padding: 4rem 2rem; text-align: center; }
 .empty-state__icon  { color: var(--gold); font-size: 2.5rem; margin-bottom: 1rem; opacity: .4; }
 .empty-state__title { color: var(--text-primary); font-size: 1.1rem; font-weight: 600; margin-bottom: 0.5rem; }

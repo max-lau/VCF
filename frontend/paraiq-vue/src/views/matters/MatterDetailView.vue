@@ -41,21 +41,17 @@ const newNote     = ref('')
 const savingNote  = ref(false)
 
 const TABS = [
-  { key: 'kanban', label: 'Kanban', icon: '⚖️' },
+  { key: 'kanban', label: 'Workflow', icon: '⚖️' },
+  { key: 'disbursements', label: 'Disbursements', icon: '💵' },
   { key: 'drafting', label: 'Drafting', icon: '✍️' },
   { key: 'documents',    label: 'Documents',    icon: '📄' },
-  { key: 'discovery',    label: 'Discovery',    icon: '🔍' },
   { key: 'notes',        label: 'Notes',        icon: '📝' },
   { key: 'intelligence', label: 'Intelligence', icon: '🧠' },
   { key: 'timeline',       label: 'Timeline',       icon: '📅' },
   { key: 'contacts',       label: 'Contacts',       icon: '👤' },
-  { key: 'correspondence', label: 'Correspondence', icon: '✉️'  },
-  { key: 'contracts',      label: 'Contracts',      icon: '📋' },
-  { key: 'motions',        label: 'Motions',        icon: '⚖️'  },
-  { key: 'calendar',       label: 'Calendar',       icon: '🗓'  },
+  { key: 'correspondence', label: 'Comms Tracker',  icon: '✉️'  },
+  { key: 'calendar',       label: 'Deadlines',      icon: '🗓'  },
   { key: 'binder',         label: 'Binder',         icon: '🗂️'  },
-  { key: 'docketing',      label: 'Docketing',      icon: '⚖️'  },
-  { key: 'billing',        label: 'Billing',        icon: '💳'  },
 ]
 
 const PIPELINE_COLORS = {
@@ -106,8 +102,10 @@ function switchTab(key) {
   if (key === 'timeline'     && !timeline.value.length)            fetchTimeline()
   if (key === 'intelligence' && !intelligence.value.signals?.length) fetchIntelligence()
   if (key === 'binder')                                            fetchBinder()
+  if (key === 'disbursements')                                     fetchDisbursement()
   if (MOD_KEYS.includes(key)) fetchModule(key)
 }
+
 async function fetchBinder() {
   binderLoading.value = true
   try {
@@ -233,6 +231,11 @@ async function fetchIntelligence() {
 }
 
 onMounted(fetchMatter)
+
+const disbursementForm = ref({ gross_award: 0, attorney_fee_pct: 10, medicare_lien: 0, medicaid_lien: 0, other_liens: 0 })
+const calculateFee = computed(() => (parseFloat(disbursementForm.value.gross_award || 0) * (parseFloat(disbursementForm.value.attorney_fee_pct || 0) / 100)))
+const calculateLiens = computed(() => (parseFloat(disbursementForm.value.medicare_lien || 0) + parseFloat(disbursementForm.value.medicaid_lien || 0) + parseFloat(disbursementForm.value.other_liens || 0)))
+const calculateNet = computed(() => (parseFloat(disbursementForm.value.gross_award || 0) - calculateFee.value - calculateLiens.value))
 
 // ── Docketing ─────────────────────────────────────────────────────────────
 const docketingChains      = ref([])
@@ -460,6 +463,67 @@ watch(() => activeTab.value, (tab) => {
   if (tab === 'billing') fetchBillingLedger()
 })
 
+// ── VCF Specific Helpers ───────────────────────────────────────────────────
+function vcfStatusColor(s) { 
+  return { 
+    intake: '#4a7cf7', 
+    eligibility: '#9f7aea', 
+    review: '#ecc94b', 
+    award: '#48bb78', 
+    disbursement: '#38b2ac', 
+    closed: '#718096' 
+  }[s] || '#718096' 
+}
+function presenceColor(p) { 
+  return { 
+    missing: '#fc8181', 
+    pending: '#ecc94b', 
+    verified: '#48bb78' 
+  }[p] || '#718096' 
+}
+
+// ── Disbursements Module ───────────────────────────────────────────────────
+const disbursement = ref(null)
+const disbLoading = ref(false)
+const disbSaving = ref(false)
+
+async function fetchDisbursement() {
+  console.log("fetchDisbursement triggered! Case ID:", caseId.value, "Matter:", matter.value)
+  if (!matter.value?.id) return
+  disbLoading.value = true
+  try {
+    const { data } = await axios.get(`/vcf/cases/${caseId.value}/disbursement`, { headers: authHdr() })
+    disbursement.value = data.disbursement
+  } catch (e) {
+    console.error('Disbursement fetch failed', e)
+    disbursement.value = null
+  } finally {
+    disbLoading.value = false
+  }
+}
+
+async function saveDisbursement() {
+  if (!disbursement.value) return
+  disbSaving.value = true
+  try {
+    // Send the whole object, backend will recalculate net and fees
+    const payload = { ...disbursement.value }
+    const { data } = await axios.put(`/vcf/cases/${caseId.value}/disbursement`, payload, { headers: authHdr() })
+    disbursement.value = data.disbursement
+    // Also update the award amount on the main matter object just in case
+    matter.value.award_amount = data.disbursement.gross_award
+  } catch (e) {
+    alert('Failed to save disbursement data.')
+    console.error(e)
+  } finally {
+    disbSaving.value = false
+  }
+}
+
+function fmtMoney(v) {
+  return new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD', minimumFractionDigits: 2 }).format(v || 0)
+}
+
 </script>
 
 <template>
@@ -476,20 +540,21 @@ watch(() => activeTab.value, (tab) => {
 
     <template v-else>
 
-      <!-- Header card -->
+            <!-- Header card -->
       <div class="case-header">
         <div class="case-header__left">
           <div class="mono dim sm">{{ matter.case_number }}</div>
           <h1 class="case-header__title">{{ matter.client_name }}</h1>
           <div class="case-header__pills">
-            <span class="risk-pill" :style="{ background: riskColor(matter.risk_level)+'22', color: riskColor(matter.risk_level) }">
-              {{ matter.risk_level }} risk
+            <span class="status-pill" :style="{ background: vcfStatusColor(matter.vcf_status)+'22', color: vcfStatusColor(matter.vcf_status) }">
+              {{ matter.vcf_status || 'intake' }}
             </span>
-            <span class="status-pill" :style="{ background: statusColor(matter.status)+'22', color: statusColor(matter.status) }">
-              {{ matter.status }}
+            <span class="meta-chip" :style="{ background: presenceColor(matter.presence_proof_status)+'22', color: presenceColor(matter.presence_proof_status) }">
+              Presence: {{ matter.presence_proof_status || 'missing' }}
             </span>
-            <span v-if="matter.court"       class="meta-chip">⚖ {{ matter.court }}</span>
-            <span v-if="matter.filing_date" class="meta-chip">Filed {{ fmtDate(matter.filing_date) }}</span>
+            <span v-if="matter.award_amount > 0" class="meta-chip" style="background: #48bb7822; color: #48bb78;">
+              Award: {{ fmtMoney(matter.award_amount) }}
+            </span>
           </div>
         </div>
         <div class="case-header__actions">
@@ -498,7 +563,7 @@ watch(() => activeTab.value, (tab) => {
         </div>
       </div>
 
-      <!-- Meta grid -->
+            <!-- Meta grid -->
       <div class="meta-grid">
         <div class="meta-item" v-if="matter.matter_number">
           <div class="meta-item__label">Matter #</div>
@@ -511,10 +576,6 @@ watch(() => activeTab.value, (tab) => {
         <div class="meta-item">
           <div class="meta-item__label">Documents</div>
           <div class="meta-item__val">{{ docs.length }}</div>
-        </div>
-        <div class="meta-item">
-          <div class="meta-item__label">Discovery</div>
-          <div class="meta-item__val">{{ discoveryQ.length || '—' }}</div>
         </div>
         <div class="meta-item meta-item--wide" v-if="matter.description">
           <div class="meta-item__label">Description</div>
@@ -544,14 +605,92 @@ watch(() => activeTab.value, (tab) => {
         <CaseKanban :case-id="caseId" />
       </div>
 
+      <!-- Disbursements -->
+      <div v-else-if="activeTab === 'disbursements'" class="mod-pane">
+        <div v-if="disbLoading" class="state-msg">Loading award data…</div>
+        <div v-else-if="!disbursement" class="empty-tab">
+          <div class="empty-tab__icon">💵</div>
+          <div class="empty-tab__title">No Disbursement Data</div>
+        </div>
+        <div v-else class="disb-container">
+          <div class="disb-grid">
+            <!-- Left Column: Inputs -->
+            <div class="disb-card">
+              <h3 class="disb-card__title">Award & Fees</h3>
+              <div class="disb-field">
+                <label>Gross VCF Award</label>
+                <input type="number" v-model.number="disbursement.gross_award" @change="saveDisbursement" class="piq-input w100" />
+              </div>
+              <div class="disb-field">
+                <label>Attorney Fee (%)</label>
+                <input type="number" v-model.number="disbursement.attorney_fee_pct" @change="saveDisbursement" class="piq-input w100" />
+              </div>
+              <div class="disb-field">
+                <label>Attorney Fee Amount</label>
+                <input type="number" v-model.number="disbursement.attorney_fee_amount" disabled class="piq-input w100 disb-disabled" />
+              </div>
+            </div>
+
+            <!-- Right Column: Liens -->
+            <div class="disb-card">
+              <h3 class="disb-card__title">Liens & Offsets</h3>
+              <div class="disb-field">
+                <label>Medicare Lien</label>
+                <input type="number" v-model.number="disbursement.medicare_lien" @change="saveDisbursement" class="piq-input w100" />
+              </div>
+              <div class="disb-field">
+                <label>Medicaid Lien</label>
+                <input type="number" v-model.number="disbursement.medicaid_lien" @change="saveDisbursement" class="piq-input w100" />
+              </div>
+              <div class="disb-field">
+                <label>Workers' Comp Lien</label>
+                <input type="number" v-model.number="disbursement.workers_comp_lien" @change="saveDisbursement" class="piq-input w100" />
+              </div>
+              <div class="disb-field">
+                <label>Other Liens</label>
+                <input type="number" v-model.number="disbursement.other_lien" @change="saveDisbursement" class="piq-input w100" />
+              </div>
+            </div>
+          </div>
+
+          <!-- Bottom: Net Summary -->
+          <div class="disb-summary">
+            <div class="disb-summary__row">
+              <span>Gross Award:</span>
+              <span>{{ fmtMoney(disbursement.gross_award) }}</span>
+            </div>
+            <div class="disb-summary__row">
+              <span>Less Attorney Fee:</span>
+              <span>- {{ fmtMoney(disbursement.attorney_fee_amount) }}</span>
+            </div>
+            <div class="disb-summary__row">
+              <span>Less Total Liens:</span>
+              <span>- {{ fmtMoney(disbursement.medicare_lien + disbursement.medicaid_lien + disbursement.workers_comp_lien + disbursement.other_lien) }}</span>
+            </div>
+            <div class="disb-summary__row disb-summary__row--net">
+              <span>Net to Claimant:</span>
+              <span>{{ fmtMoney(disbursement.net_to_claimant) }}</span>
+            </div>
+            
+            <div class="disb-status">
+              <label>Status:</label>
+              <select v-model="disbursement.status" @change="saveDisbursement" class="piq-input" style="width: 200px; margin-left: 10px;">
+                <option value="pending">Pending</option>
+                <option value="approved">Approved</option>
+                <option value="disbursed">Disbursed</option>
+              </select>
+            </div>
+          </div>
+        </div>
+      </div>
+
       <!-- Drafting -->
-      <div v-if="activeTab === 'drafting'">
+      <div v-else-if="activeTab === 'drafting'">
         <DraftingAssistant :case-id="caseId" />
       </div>
 
-
-
-      <div v-if="activeTab === 'documents'">
+      <!-- Documents -->
+      <div v-else-if="activeTab === 'documents'">
         <div v-if="!docs.length" class="empty-tab">
           <div class="empty-tab__icon">📄</div>
           <div class="empty-tab__title">No documents yet</div>
@@ -570,14 +709,8 @@ watch(() => activeTab.value, (tab) => {
               <tbody>
                 <tr v-for="d in docs" :key="d.id">
                   <td class="doc-name">
-                  <!-- WAW DEMO — TEMPORARY: linkify only the known WaW demo filenames.
-                       Remove this v-if/v-else pair and restore the single line above
-                       after the prospect demo — see WAW_DEMO_ROLLBACK.md -->
-                  <a v-if="(d.document_name || '').match(/^(chen_weiming|krystyna_nowak)_/)"
-                     :href="`/demo-files/${d.document_name}`"
-                     target="_blank" rel="noopener">{{ d.document_name || d.original_filename || d.filename }}</a>
-                  <span v-else>{{ d.document_name || d.original_filename || d.filename }}</span>
-                </td>
+                    <span>{{ d.document_name || d.original_filename || d.filename }}</span>
+                  </td>
                   <td><span class="type-pill">{{ d.doc_type || d.document_type || '—' }}</span></td>
                   <td class="dim">{{ fmtSize(d.file_size) }}</td>
                   <td class="dim nowrap">{{ fmtDate(d.upload_date || d.created_at) }}</td>
@@ -593,61 +726,7 @@ watch(() => activeTab.value, (tab) => {
         </div>
       </div>
 
-      <!-- ── Discovery ── -->
-      <div v-else-if="activeTab === 'discovery'">
-        <div v-if="loadingDisc" class="state-msg">Loading discovery files…</div>
-        <div v-else-if="!discoveryQ.length" class="empty-tab">
-          <div class="empty-tab__icon">🔍</div>
-          <div class="empty-tab__title">No discovery files for {{ matter.case_number }}</div>
-          <div class="empty-tab__sub dim sm">
-            Upload documents and they will appear here once processed.
-          </div>
-          <button class="btn-gold sm" @click="showUpload = true">↑ Upload Documents</button>
-        </div>
-        <div v-else>
-          <!-- Pipeline summary -->
-          <div class="pipeline-summary">
-            <div v-for="(color, status) in PIPELINE_COLORS" :key="status" class="pipeline-chip">
-              <span class="pipeline-chip__dot" :style="{ background: color }"></span>
-              <span class="pipeline-chip__label dim sm">{{ status.replace('_',' ') }}</span>
-              <span class="pipeline-chip__count" :style="{ color }">
-                {{ discoveryQ.filter(f => f.status === status).length }}
-              </span>
-            </div>
-          </div>
-          <div class="tab-toolbar">
-            <span class="dim sm">{{ discoveryQ.length }} file{{ discoveryQ.length !== 1 ? 's' : '' }}</span>
-            <button class="btn-gold sm" @click="showUpload = true">↑ Upload More</button>
-          </div>
-          <div class="table-wrap">
-            <table class="piq-table">
-              <thead>
-                <tr><th>Filename</th><th>Route</th><th>Status</th><th>Size</th><th>Ingested</th></tr>
-              </thead>
-              <tbody>
-                <tr v-for="f in discoveryQ" :key="f.id">
-                  <td class="doc-name">{{ f.original_name }}</td>
-                  <td>
-                    <span class="route-pill"
-                      :style="{ background: routeColor(f.route)+'22', color: routeColor(f.route) }">
-                      {{ f.route }}
-                    </span>
-                  </td>
-                  <td>
-                    <span class="status-chip" :class="'s-'+f.status">
-                      {{ f.status?.replace(/_/g,' ') }}
-                    </span>
-                  </td>
-                  <td class="dim">{{ fmtSize(f.file_size) }}</td>
-                  <td class="dim nowrap">{{ fmtDateTime(f.created_at) }}</td>
-                </tr>
-              </tbody>
-            </table>
-          </div>
-        </div>
-      </div>
-
-      <!-- ── Notes ── -->
+      <!-- Notes -->
       <div v-else-if="activeTab === 'notes'" class="notes-pane">
         <div class="note-composer">
           <textarea v-model="newNote" class="note-input" placeholder="Add a case note…" rows="3"></textarea>
@@ -667,7 +746,7 @@ watch(() => activeTab.value, (tab) => {
         </div>
       </div>
 
-      <!-- ── Intelligence ── -->
+      <!-- Intelligence -->
       <div v-else-if="activeTab === 'intelligence'" class="intel-pane">
         <div v-if="loadingIntel" class="state-msg">Loading intelligence…</div>
         <template v-else>
@@ -694,7 +773,7 @@ watch(() => activeTab.value, (tab) => {
         </template>
       </div>
 
-      <!-- ── Timeline ── -->
+      <!-- Timeline -->
       <div v-else-if="activeTab === 'timeline'" class="tl-pane">
         <div v-if="loadingTL" class="state-msg">Loading timeline…</div>
         <template v-else>
@@ -727,11 +806,11 @@ watch(() => activeTab.value, (tab) => {
         </template>
       </div>
 
-      <!-- ── Contacts ── -->
+      <!-- Contacts -->
       <div v-else-if="activeTab === 'contacts'" class="mod-pane">
         <div class="tab-toolbar">
           <span class="dim sm">{{ contacts.length }} contact{{ contacts.length !== 1 ? 's' : '' }}</span>
-          <button class="btn-gold sm" @click="openAdd({role:'Opposing Counsel'})">+ Add Contact</button>
+          <button class="btn-gold sm" @click="openAdd({role:'VCF Claimant'})">+ Add Contact</button>
         </div>
         <div v-if="loadingMod" class="state-msg">Loading…</div>
         <div v-else-if="!contacts.length" class="empty-tab"><div class="empty-tab__icon">👤</div><div class="empty-tab__title">No contacts yet</div></div>
@@ -752,7 +831,7 @@ watch(() => activeTab.value, (tab) => {
         </div>
       </div>
 
-      <!-- ── Correspondence ── -->
+      <!-- Correspondence -->
       <div v-else-if="activeTab === 'correspondence'" class="mod-pane">
         <div class="tab-toolbar">
           <span class="dim sm">{{ correspondence.length }} item{{ correspondence.length !== 1 ? 's' : '' }}</span>
@@ -776,56 +855,7 @@ watch(() => activeTab.value, (tab) => {
         </div>
       </div>
 
-      <!-- ── Contracts ── -->
-      <div v-else-if="activeTab === 'contracts'" class="mod-pane">
-        <div class="tab-toolbar">
-          <span class="dim sm">{{ contracts.length }} contract{{ contracts.length !== 1 ? 's' : '' }}</span>
-          <button class="btn-gold sm" @click="openAdd({status:'draft'})">+ Add Contract</button>
-        </div>
-        <div v-if="loadingMod" class="state-msg">Loading…</div>
-        <div v-else-if="!contracts.length" class="empty-tab"><div class="empty-tab__icon">📋</div><div class="empty-tab__title">No contracts yet</div></div>
-        <div v-else class="table-wrap">
-          <table class="piq-table">
-            <thead><tr><th>Title</th><th>Status</th><th>Executed</th><th>Expiry</th><th></th></tr></thead>
-            <tbody>
-              <tr v-for="c in contracts" :key="c.id">
-                <td class="doc-name">{{ c.title }}</td>
-                <td><span class="status-chip" :class="'s-'+c.status">{{ c.status }}</span></td>
-                <td class="dim nowrap">{{ c.executed_at ? fmtDate(c.executed_at * 1000) : '—' }}</td>
-                <td class="dim nowrap">{{ c.expiry_at   ? fmtDate(c.expiry_at   * 1000) : '—' }}</td>
-                <td><button class="del-btn" @click="deleteModItem('contracts', c.id)">✕</button></td>
-              </tr>
-            </tbody>
-          </table>
-        </div>
-      </div>
-
-      <!-- ── Motions ── -->
-      <div v-else-if="activeTab === 'motions'" class="mod-pane">
-        <div class="tab-toolbar">
-          <span class="dim sm">{{ motions.length }} motion{{ motions.length !== 1 ? 's' : '' }}</span>
-          <button class="btn-gold sm" @click="openAdd({status:'draft'})">+ Add Motion</button>
-        </div>
-        <div v-if="loadingMod" class="state-msg">Loading…</div>
-        <div v-else-if="!motions.length" class="empty-tab"><div class="empty-tab__icon">⚖️</div><div class="empty-tab__title">No motions yet</div></div>
-        <div v-else class="table-wrap">
-          <table class="piq-table">
-            <thead><tr><th>Title</th><th>Status</th><th>Filed</th><th>Hearing</th><th>Ruling</th><th></th></tr></thead>
-            <tbody>
-              <tr v-for="m in motions" :key="m.id">
-                <td class="doc-name">{{ m.title }}</td>
-                <td><span class="status-chip" :class="'s-'+m.status">{{ m.status }}</span></td>
-                <td class="dim nowrap">{{ m.filed_at   ? fmtDate(m.filed_at   * 1000) : '—' }}</td>
-                <td class="dim nowrap">{{ m.hearing_at ? fmtDate(m.hearing_at * 1000) : '—' }}</td>
-                <td class="dim">{{ m.ruling || '—' }}</td>
-                <td><button class="del-btn" @click="deleteModItem('motions', m.id)">✕</button></td>
-              </tr>
-            </tbody>
-          </table>
-        </div>
-      </div>
-
-      <!-- ── Calendar ── -->
+      <!-- Calendar / Deadlines -->
       <div v-else-if="activeTab === 'calendar'" class="mod-pane">
         <div class="tab-toolbar">
           <span class="dim sm">{{ calendarEvents.length }} event{{ calendarEvents.length !== 1 ? 's' : '' }}</span>
@@ -849,250 +879,7 @@ watch(() => activeTab.value, (tab) => {
         </div>
       </div>
 
-      <!-- ── Docketing ── -->
-      <div v-else-if="activeTab === 'docketing'" class="mod-pane">
-
-        <!-- Service Method Modal -->
-        <div v-if="showServiceModal" class="dock-modal-overlay">
-          <div class="dock-modal">
-            <div class="dock-modal__header">
-              <span class="dock-modal__title">⚖️ Start Docketing Chain</span>
-              <button class="dock-modal__close" @click="showServiceModal=false">✕</button>
-            </div>
-
-            <div class="dock-modal__row">
-              <label class="dock-modal__label">Jurisdiction</label>
-              <select v-model="docketingJurisdiction" class="piq-input" @change="previewChain">
-                <option v-for="j in JURISDICTIONS" :key="j" :value="j">{{ j.replace('_',' ') }}</option>
-              </select>
-            </div>
-
-            <div class="dock-modal__row">
-              <label class="dock-modal__label">Complaint Filed / Trigger Date</label>
-              <input type="date" v-model="docketingTriggerDate" class="piq-input" @change="previewChain" />
-            </div>
-
-            <div class="dock-modal__service-title">How was the complaint served?</div>
-            <div class="dock-modal__service-subtitle">Select service method to calculate answer deadline</div>
-
-            <div class="dock-modal__methods">
-              <div v-for="m in SERVICE_METHODS" :key="m.key"
-                class="dock-method-row"
-                :class="{ 'dock-method-row--shortest': m.warning, 'dock-method-row--selected': selectedServiceMethod === m.key }"
-                @click="selectedServiceMethod = m.key">
-                <div class="dock-method-row__check">
-                  <input type="radio" :value="m.key" v-model="selectedServiceMethod"
-                    :class="m.warning ? 'dock-radio--large' : 'dock-radio--normal'" />
-                </div>
-                <div class="dock-method-row__body">
-                  <span class="dock-method-row__label" :class="{ 'dock-method-row__label--bold': m.warning }">
-                    {{ m.label }}
-                    <span v-if="m.warning" class="dock-shortest-tag">SHORTEST DEADLINE</span>
-                  </span>
-                  <span class="dock-method-row__date">
-                    Answer due: <strong>{{ docketingPreviews[m.key]?.[0]?.calculated_date || '…' }}</strong>
-                    <span v-if="docketingPreviews[m.key]?.[0]?.is_business_day_adj" class="dock-rolled-note">*rolled</span>
-                  </span>
-                </div>
-              </div>
-            </div>
-
-            <div v-if="selectedServiceMethod !== 'personal'" class="dock-non-shortest-warn">
-              ⚠ You are selecting a longer deadline. Confirm you have independently verified the service method.
-            </div>
-
-            <div class="dock-disclaimer">
-              ⚠ {{ docketingDisclaimer }}
-            </div>
-
-            <div class="dock-modal__footer">
-              <button class="piq-btn piq-btn--ghost" @click="showServiceModal=false">Cancel</button>
-              <button class="piq-btn piq-btn--primary" @click="triggerDocketing" :disabled="docketingTriggering">
-                {{ docketingTriggering ? 'Generating…' : 'Confirm & Generate Chain' }}
-              </button>
-            </div>
-          </div>
-        </div>
-
-        <!-- Chain view -->
-        <div class="tab-toolbar">
-          <span class="dim sm">{{ docketingChains.length }} chain{{ docketingChains.length !== 1 ? 's' : '' }}</span>
-          <button class="btn-gold sm" @click="openDocketingModal">+ Start Docketing Chain</button>
-        </div>
-
-        <div v-if="docketingLoading" class="state-msg">Loading…</div>
-        <div v-else-if="!docketingChains.length" class="empty-tab">
-          <div class="empty-tab__icon">⚖️</div>
-          <div class="empty-tab__title">No docketing chains yet</div>
-          <div class="empty-tab__sub">Click "Start Docketing Chain" to auto-generate deadlines from court rules.</div>
-        </div>
-
-        <div v-else>
-          <div v-for="chain in docketingChains" :key="chain.id" class="dock-chain">
-            <div class="dock-chain__header">
-              <span class="dock-chain__juris">{{ chain.jurisdiction.replace('_',' ') }}</span>
-              <span class="dock-chain__trigger">{{ chain.trigger_event }} · {{ chain.trigger_date?.slice(0,10) }}</span>
-              <span class="dock-chain__service">Service: {{ chain.service_method }}</span>
-            </div>
-
-            <div class="dock-events">
-              <div v-for="ev in chain.events" :key="ev.id" class="dock-event"
-                :class="{ 'dock-event--court': ev.is_court_date }">
-                <div class="dock-event__left">
-                  <span class="dock-date-pill"
-                    :class="[
-                      ev.confirmation_state === 'pending'   ? 'dock-date-pill--pending' :
-                      ev.confirmation_state === 'confirmed' ? 'dock-date-pill--confirmed' :
-                      ev.confirmation_state === 'modified'  ? (ev.postponed ? 'dock-date-pill--postponed' : 'dock-date-pill--modified') :
-                      'dock-date-pill--overdue'
-                    ]">
-                    {{ (ev.confirmed_date || ev.calculated_date)?.slice(0,10) }}
-                  </span>
-                  <div class="dock-event__info">
-                    <span class="dock-event__title">{{ ev.title }}</span>
-                    <span v-if="ev.rule_reference" class="dock-event__rule">{{ ev.rule_reference }}</span>
-                    <span v-if="ev.is_business_day_adj" class="dock-rolled-note">{{ ev.business_day_note }}</span>
-                    <span v-if="ev.postponement_note" class="dock-postpone-note">📌 {{ ev.postponement_note }}</span>
-                  </div>
-                </div>
-                <div class="dock-event__right">
-                  <span class="dock-state-pill" :class="docketStatePill(ev.confirmation_state, ev.postponed).cls">
-                    {{ docketStatePill(ev.confirmation_state, ev.postponed).label }}
-                  </span>
-                  <span v-if="ev.confirmation_state === 'pending' && ev.days_unconfirmed > 0"
-                    class="dock-lap-counter">
-                    {{ daysLapLabel(ev.days_unconfirmed) }}
-                  </span>
-                  <button v-if="ev.confirmation_state === 'pending'"
-                    class="piq-btn piq-btn--success piq-btn--sm"
-                    @click="confirmDocketingEvent(ev.id, null, null)">
-                    ✓ Confirm
-                  </button>
-                </div>
-              </div>
-            </div>
-          </div>
-
-          <div class="dock-disclaimer dock-disclaimer--bottom">⚠ {{ docketingDisclaimer }}</div>
-        </div>
-      </div>
-
-      <!-- ── Billing Ledger ── -->
-      <div v-else-if="activeTab === 'billing'" class="mod-pane">
-        <div v-if="billingLoading" class="state-msg">Loading billing ledger…</div>
-        <div v-else-if="!billingLedger" class="empty-tab">
-          <div class="empty-tab__icon">💳</div>
-          <div class="empty-tab__title">No billing data yet</div>
-        </div>
-        <div v-else>
-
-          <!-- Summary bar -->
-          <div class="bl-ledger-summary">
-            <div class="bl-ledger-stat">
-              <span class="bl-ledger-stat__label">Total Billed</span>
-              <span class="bl-ledger-stat__value">${{ billingLedger.total_billed?.toFixed(2) }}</span>
-            </div>
-            <div class="bl-ledger-stat">
-              <span class="bl-ledger-stat__label">Total Paid</span>
-              <span class="bl-ledger-stat__value bl-ledger-stat__value--paid">${{ billingLedger.total_paid?.toFixed(2) }}</span>
-            </div>
-            <div class="bl-ledger-stat">
-              <span class="bl-ledger-stat__label">Balance Due</span>
-              <span class="bl-ledger-stat__value" :class="billingLedger.balance_due > 0 ? 'bl-ledger-stat__value--due' : 'bl-ledger-stat__value--paid'">
-                ${{ billingLedger.balance_due?.toFixed(2) }}
-              </span>
-            </div>
-            <div v-if="billingLedger.unbilled_total > 0" class="bl-ledger-stat">
-              <span class="bl-ledger-stat__label">Unbilled Time</span>
-              <span class="bl-ledger-stat__value bl-ledger-stat__value--warn">${{ billingLedger.unbilled_total?.toFixed(2) }}</span>
-            </div>
-          </div>
-
-          <!-- Unbilled entries warning -->
-          <div v-if="billingLedger.unbilled_entries?.length" class="bl-unbilled-warn">
-            ⚠ {{ billingLedger.unbilled_entries.length }} certified time
-            {{ billingLedger.unbilled_entries.length === 1 ? 'entry' : 'entries' }}
-            (${{ billingLedger.unbilled_total?.toFixed(2) }}) not yet invoiced.
-            <a href="/client-billing" class="bl-link">Go to Client Billing →</a>
-          </div>
-
-          <!-- Invoice cards -->
-          <div v-if="!billingLedger.invoices?.length" class="empty-tab" style="padding:16px 0">
-            <div class="empty-tab__icon">📄</div>
-            <div class="empty-tab__title">No invoices yet</div>
-            <div class="empty-tab__sub">Generate invoices from the <a href="/client-billing" class="bl-link">Client Billing Dashboard</a></div>
-          </div>
-
-          <div v-for="inv in billingLedger.invoices" :key="inv.id" class="bl-invoice-card">
-            <!-- Invoice header -->
-            <div class="bl-invoice-card__header">
-              <div class="bl-invoice-card__left">
-                <span class="bl-inv-number">{{ inv.invoice_number }}</span>
-                <span class="bl-inv-status" :class="`bl-inv-status--${inv.status}`">
-                  {{ inv.status?.replace(/_/g,' ').toUpperCase() }}
-                </span>
-                <span v-if="inv.running_balance > 0" class="bl-inv-balance">
-                  Balance: ${{ inv.running_balance?.toFixed(2) }}
-                </span>
-                <span v-else class="bl-inv-paid">✓ PAID</span>
-              </div>
-              <div class="bl-invoice-card__right">
-                <span class="bl-inv-meta">Issued: {{ inv.issue_date?.slice(0,10) }}</span>
-                <span class="bl-inv-meta">Due: {{ inv.due_date?.slice(0,10) }}</span>
-                <button class="bl-pdf-btn" @click="previewInvoicePdf(inv.id)" title="Preview PDF">👁 Preview</button>
-                <button class="bl-pdf-btn" @click="downloadInvoicePdf(inv.id, inv.invoice_number)" title="Download PDF">⬇ PDF</button>
-              </div>
-            </div>
-
-            <!-- Line items -->
-            <table class="piq-table bl-items-table">
-              <thead>
-                <tr><th>Date</th><th>Description</th><th>Activity</th><th>Hrs</th><th>Rate</th><th>Amount</th></tr>
-              </thead>
-              <tbody>
-                <tr v-for="item in inv.items" :key="item.id">
-                  <td class="dim nowrap">{{ item.date?.slice(0,10) }}</td>
-                  <td>{{ item.description }}</td>
-                  <td><span class="type-pill">{{ item.activity_type || '—' }}</span></td>
-                  <td class="dim">{{ parseFloat(item.quantity || 0).toFixed(2) }}</td>
-                  <td class="dim">${{ parseFloat(item.rate || 0).toFixed(2) }}/hr</td>
-                  <td class="dim">${{ parseFloat(item.amount || 0).toFixed(2) }}</td>
-                </tr>
-              </tbody>
-              <tfoot>
-                <tr class="bl-totals-row">
-                  <td colspan="4"></td>
-                  <td class="dim">Subtotal</td>
-                  <td>${{ parseFloat(inv.subtotal || 0).toFixed(2) }}</td>
-                </tr>
-                <tr v-if="parseFloat(inv.tax_amount) > 0" class="bl-totals-row">
-                  <td colspan="4"></td>
-                  <td class="dim">Tax</td>
-                  <td>${{ parseFloat(inv.tax_amount || 0).toFixed(2) }}</td>
-                </tr>
-                <tr class="bl-totals-row bl-totals-row--total">
-                  <td colspan="4"></td>
-                  <td>Total</td>
-                  <td>${{ parseFloat(inv.total || 0).toFixed(2) }}</td>
-                </tr>
-              </tfoot>
-            </table>
-
-            <!-- Payments -->
-            <div v-if="inv.payments?.length" class="bl-payments">
-              <div class="bl-payments__title">Payments Received</div>
-              <div v-for="pay in inv.payments" :key="pay.id" class="bl-payment-row">
-                <span class="dim">{{ pay.payment_date?.slice(0,10) }}</span>
-                <span class="dim">{{ pay.method }}</span>
-                <span class="dim">{{ pay.reference || '—' }}</span>
-                <span class="bl-payment-amt">+${{ parseFloat(pay.amount || 0).toFixed(2) }}</span>
-              </div>
-            </div>
-            <div v-else class="bl-no-payments">No payments recorded yet.</div>
-          </div>
-        </div>
-      </div>
-
+      <!-- Binder -->
       <div v-else-if="activeTab === 'binder'" class="mod-pane">
         <div class="tab-toolbar">
           <span class="dim sm">{{ binderItems.length }} item{{ binderItems.length !== 1 ? 's' : '' }}</span>
@@ -1157,7 +944,7 @@ watch(() => activeTab.value, (tab) => {
 
             <template v-if="activeTab==='contacts'">
               <div class="field"><label class="field__label">Name *</label><input v-model="modForm.name" class="piq-input w100" placeholder="Jane Smith" /></div>
-              <div class="field"><label class="field__label">Role</label><input v-model="modForm.role" class="piq-input w100" placeholder="Opposing Counsel" /></div>
+              <div class="field"><label class="field__label">Role</label><input v-model="modForm.role" class="piq-input w100" placeholder="VCF Claimant" /></div>
               <div class="field"><label class="field__label">Organization</label><input v-model="modForm.organization" class="piq-input w100" /></div>
               <div class="field"><label class="field__label">Email</label><input v-model="modForm.email" class="piq-input w100" type="email" /></div>
               <div class="field"><label class="field__label">Phone</label><input v-model="modForm.phone" class="piq-input w100" /></div>
@@ -1172,26 +959,10 @@ watch(() => activeTab.value, (tab) => {
               <div class="field"><label class="field__label">Body</label><textarea v-model="modForm.body" class="note-input w100" rows="3"></textarea></div>
             </template>
 
-            <template v-else-if="activeTab==='contracts'">
-              <div class="field"><label class="field__label">Title *</label><input v-model="modForm.title" class="piq-input w100" /></div>
-              <div class="field"><label class="field__label">Status</label>
-                <select v-model="modForm.status" class="piq-input w100"><option>draft</option><option>executed</option><option>expired</option><option>terminated</option></select>
-              </div>
-              <div class="field"><label class="field__label">Notes</label><textarea v-model="modForm.notes" class="note-input w100" rows="2"></textarea></div>
-            </template>
-
-            <template v-else-if="activeTab==='motions'">
-              <div class="field"><label class="field__label">Title *</label><input v-model="modForm.title" class="piq-input w100" placeholder="Motion to Dismiss" /></div>
-              <div class="field"><label class="field__label">Status</label>
-                <select v-model="modForm.status" class="piq-input w100"><option>draft</option><option>filed</option><option>pending</option><option>granted</option><option>denied</option></select>
-              </div>
-              <div class="field"><label class="field__label">Ruling</label><input v-model="modForm.ruling" class="piq-input w100" /></div>
-            </template>
-
             <template v-else-if="activeTab==='calendar'">
-              <div class="field"><label class="field__label">Title *</label><input v-model="modForm.title" class="piq-input w100" placeholder="Deposition — Jane Smith" /></div>
+              <div class="field"><label class="field__label">Title *</label><input v-model="modForm.title" class="piq-input w100" placeholder="VCF Missing Info Response" /></div>
               <div class="field"><label class="field__label">Type</label>
-                <select v-model="modForm.event_type" class="piq-input w100"><option>deadline</option><option>hearing</option><option>deposition</option><option>meeting</option><option>trial</option></select>
+                <select v-model="modForm.event_type" class="piq-input w100"><option>deadline</option><option>hearing</option><option>meeting</option></select>
               </div>
               <div class="field"><label class="field__label">Date</label>
                 <input type="date" class="piq-input w100"
@@ -1209,7 +980,6 @@ watch(() => activeTab.value, (tab) => {
         </div>
       </div>
     </Teleport>
-
 
     <DiscoveryUpload
       v-if="matter"
@@ -1469,5 +1239,19 @@ watch(() => activeTab.value, (tab) => {
 .bl-payment-row           { display:flex;gap:16px;align-items:center;font-size:12px;padding:3px 0; }
 .bl-payment-amt           { color:#34d399;font-weight:700;margin-left:auto; }
 .bl-no-payments           { padding:8px 14px;font-size:12px;color:var(--text-tertiary);border-top:1px solid var(--border); }
+
+/* Disbursements */
+.disb-container { display: flex; flex-direction: column; gap: 1.5rem; }
+.disb-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 1rem; }
+@media (max-width: 768px) { .disb-grid { grid-template-columns: 1fr; } }
+.disb-card { background: var(--bg-card); border: 1px solid var(--border); border-radius: 8px; padding: 1.25rem; }
+.disb-card__title { color: var(--text-primary); font-size: 1rem; font-weight: 600; margin: 0 0 1rem 0; }
+.disb-field { display: flex; flex-direction: column; gap: 0.3rem; margin-bottom: 1rem; }
+.disb-field label { font-size: 0.75rem; color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.05em; }
+.disb-disabled { opacity: 0.6; cursor: not-allowed; }
+.disb-summary { background: var(--bg-card); border: 1px solid var(--border); border-radius: 8px; padding: 1.5rem; }
+.disb-summary__row { display: flex; justify-content: space-between; padding: 0.5rem 0; font-size: 0.9rem; color: var(--text-secondary); border-bottom: 1px solid var(--border); }
+.disb-summary__row--net { font-size: 1.25rem; font-weight: 700; color: var(--green); border-bottom: none; padding-top: 1rem; }
+.disb-status { display: flex; align-items: center; margin-top: 1.5rem; padding-top: 1rem; border-top: 1px solid var(--border); }
 
 </style>

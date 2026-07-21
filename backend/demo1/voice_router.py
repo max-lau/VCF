@@ -11,7 +11,15 @@ from backend.demo1.auth import get_current_user
 
 log = logging.getLogger("paraiq.voice")
 router = APIRouter(prefix="/voice", tags=["voice"])
-openai_client    = openai.AsyncOpenAI(api_key=os.environ.get("OPENAI_API_KEY",""))
+openai_client = None
+try:
+    api_key = os.getenv("OPENAI_API_KEY")
+    if api_key:
+        openai_client = openai.AsyncOpenAI(api_key=api_key)
+    else:
+        print("⚠️  OPENAI_API_KEY not set — Voice features disabled")
+except Exception as e:
+    print(f"⚠️ OpenAI init failed: {e} — Voice features disabled")
 anthropic_client = get_client()  # use shared sync client singleton
 PARAIQ_BASE_URL  = os.environ.get("PARAIQ_BASE_URL","http://localhost:5003")
 

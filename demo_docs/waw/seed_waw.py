@@ -225,9 +225,9 @@ def main():
     print(f"Seeding firm '{TARGET_FIRM}' ({f['name']}) ...")
     if not args.dry_run:
         cur.execute(
-            "INSERT INTO firms (id, name, plan) VALUES (%s, %s, 'free') ON CONFLICT DO NOTHING",
-            (TARGET_FIRM, f["name"]),
-        )
+        "INSERT INTO firms (id, name) VALUES (%s, %s) ON CONFLICT DO NOTHING",
+        (TARGET_FIRM, f["name"]),
+    )
 
     # ── user ──────────────────────────────────────────────────────────────
     u = data["user"]

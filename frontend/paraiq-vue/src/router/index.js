@@ -147,36 +147,7 @@ const routes = [
         component: TimelineView,
         meta: { module: 'timeline' },
       },
-      {
-        path: 'case-wall',
-        name: 'case_wall',
-        component: CaseWallView,
-        meta: { module: 'matters' },
-      },
-      {
-        path: 'discovery',
-        name: 'discovery',
-        component: DiscoveryView,
-        meta: { module: 'discovery' },
-      },
-      {
-        path: 'depositions',
-        name: 'depositions',
-        component: DepositionsView,
-        meta: { module: 'depositions' },
-      },
-      {
-        path: 'motions',
-        name: 'motions',
-        component: MotionsView,
-        meta: { module: 'motions' },
-      },
-      {
-        path: 'contracts',
-        name: 'contracts',
-        component: ContractsView,
-        meta: { module: 'contracts' },
-      },
+      
       { path: 'email-inbox', name: 'email_inbox', component: EmailInboxView },
       {
         path: 'correspondence',
@@ -196,6 +167,11 @@ const routes = [
         component: ContactsView,
         meta: { module: 'contacts' },
       },
+      { 
+        path: '/vcf-deadlines', 
+        name: 'vcf-deadlines', 
+        component: () => import('../views/vcf/DeadlinesView.vue') 
+      },
 
       // ── AI & Analysis ─────────────────────────────────────────────
       {
@@ -210,12 +186,6 @@ const routes = [
         component: LegalBertView,
         meta: { module: 'legal_bert' },
       },
-      {
-        path: 'research',
-        name: 'legal_research',
-        component: LegalResearchView,
-        meta: { module: 'legal_research' },
-      },
       { path: 'risk',      name: 'risk',      component: RiskView,      meta: { module: 'risk' } },
       { path: 'intake',    name: 'intake',    component: IntakeView,    meta: { module: 'intake' } },
       { path: 'redaction', name: 'redaction', component: RedactionView, meta: { module: 'redaction' } },
@@ -223,10 +193,7 @@ const routes = [
       { path: 'scorer',    name: 'scorer',    component: ScorerView,    meta: { module: 'scorer' } },
       { path: 'analyzer',     name: 'analyzer',     component: AnalyzerView },
       { path: 'batch',        name: 'batch',        component: BatchView },
-      { path: 'citations',    name: 'citations',    component: CitationsView },
       { path: 'compare',      name: 'compare',      component: CompareView },
-      { path: 'credibility',  name: 'credibility',  component: CredibilityView },
-      { path: 'interrogation',name: 'interrogation',component: InterrogationView },
       { path: 'media',        name: 'media',        component: MediaView },
       { path: 'model',        name: 'model',        component: ModelView },
       { path: 'multilingual', name: 'multilingual', component: MultilingualView },

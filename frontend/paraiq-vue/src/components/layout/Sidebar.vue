@@ -5,7 +5,7 @@
     aria-label="Main navigation"
   >
     <div class="sidebar__brand">
-      <span class="sidebar__logo">ParaIQ</span>
+      <span class="sidebar__logo">ACP-VCF</span>
       <span class="sidebar__firm">{{ firmId }}</span>
     </div>
 
@@ -16,54 +16,46 @@
       <NavItem to="/portal" icon="users" label="Client Portal" />
 
       <NavGroup label="Case Work">
-        <NavItem v-if="g.matters"        to="/matters"        icon="briefcase"        label="Matters" />
-        <NavItem v-if="g.documents"      to="/documents"      icon="file-text"        label="Documents" />
-        <NavItem v-if="g.privilege_log"  to="/privilege-log"  icon="shield-lock"      label="Privilege Log" />
-        <NavItem v-if="g.timeline"       to="/timeline"       icon="timeline"         label="Timeline" />
-        <NavItem v-if="g.matters"        to="/case-wall"      icon="layout-board"     label="Case Wall" />
-        <NavItem v-if="g.discovery"      to="/discovery"      icon="search"           label="Discovery" />
-        <NavItem v-if="g.depositions"    to="/depositions"    icon="microphone"       label="Depositions" />
-        <NavItem v-if="g.motions"        to="/motions"        icon="file-certificate" label="Motions" />
-        <NavItem v-if="g.contracts"      to="/contracts"      icon="writing"          label="Contracts" />
-        <NavItem v-if="g.correspondence" to="/correspondence" icon="mail"             label="Correspondence" />
-        <NavItem                          to="/email-inbox"    icon="inbox"            label="Email Intake" />
-        <NavItem v-if="g.calendar"       to="/calendar"       icon="calendar"         label="Calendar" />
-        <NavItem v-if="g.contacts"       to="/contacts"       icon="address-book"     label="Contacts" />
+        <NavItem to="/matters"        icon="briefcase"        label="Matters" />
+        <NavItem to="/documents"      icon="file-text"        label="Documents" />
+        <NavItem to="/timeline"       icon="timeline"         label="Timeline" />
+        <NavItem to="/correspondence" icon="mail"             label="Correspondence" />
+        <NavItem to="/email-inbox"    icon="inbox"            label="Email Intake" />
+        <NavItem to="/calendar"       icon="calendar"         label="Calendar" />
+        <NavItem to="/contacts"       icon="address-book"     label="Contacts" />
+      </NavGroup>
+
+      <NavGroup label="VCF Workflow">
+        <NavItem to="/vcf-deadlines" icon="alarm-clock" label="Deadlines" />
       </NavGroup>
 
       <NavGroup label="AI & Analysis">
         <NavItem                          to="/intelligence" icon="brain"             label="Case Intelligence" />
-        <NavItem v-if="g.legal_bert"     to="/legal-bert"   icon="robot"             label="Legal-BERT" />
-        <NavItem v-if="g.legal_research" to="/research"     icon="book"              label="Research" />
-        <NavItem v-if="g.risk"           to="/risk"         icon="alert-triangle"    label="Risk Scoring" />
-        <NavItem v-if="g.credibility"    to="/credibility"  icon="scale"             label="Credibility" />
-        <NavItem v-if="g.scorer"         to="/scorer"       icon="chart-bar"         label="Summary Scorer" />
-        <NavItem v-if="g.insights"       to="/insights"     icon="bulb"              label="Insights" />
-        <NavItem v-if="g.reports"        to="/reports"      icon="report"            label="Reports" />
+        <NavItem                          to="/scorer"       icon="chart-bar"         label="Summary Scorer" />
+        <NavItem                          to="/insights"     icon="bulb"              label="Insights" />
+        <NavItem                          to="/reports"      icon="report"            label="Reports" />
         <NavItem                          to="/morning-brief" icon="sun"               label="Morning Brief" />
-        <NavItem v-if="g.exports"        to="/exports"      icon="download"          label="Exports" />
-        <NavItem v-if="g.ai_config"      to="/ai-config"    icon="settings"          label="AI Config"
+        <NavItem                          to="/exports"      icon="download"          label="Exports" />
+        <NavItem                          to="/ai-config"    icon="settings"          label="AI Config"
           badge="Admin" badge-variant="gold" />
       </NavGroup>
 
       <NavGroup label="NLP Tools">
-        <NavItem v-if="g.analyzer"      to="/analyzer"      icon="microscope"        label="Analyzer" />
-        <NavItem v-if="g.batch"         to="/batch"         icon="stack-2"           label="Batch Analyzer" />
-        <NavItem v-if="g.citations"     to="/citations"     icon="quote"             label="Citations" />
-        <NavItem v-if="g.compare"       to="/compare"       icon="arrows-diff"       label="Compare" />
-        <NavItem v-if="g.interrogation" to="/interrogation" icon="message-question"  label="Interrogation" />
-        <NavItem v-if="g.multilingual"  to="/multilingual"  icon="world"             label="Multilingual" />
+        <NavItem                          to="/analyzer"      icon="microscope"        label="Analyzer" />
+        <NavItem                          to="/batch"         icon="stack-2"           label="Batch Analyzer" />
+        <NavItem                          to="/compare"       icon="arrows-diff"       label="Compare" />
+        <NavItem                          to="/multilingual"  icon="world"             label="Multilingual" />
       </NavGroup>
 
       <NavGroup label="Document Processing">
-        <NavItem v-if="g.intake"    to="/intake"    icon="scan"        label="OCR Intake" />
-        <NavItem v-if="g.redaction" to="/redaction" icon="eraser"      label="Redaction" />
-        <NavItem v-if="g.media"     to="/media"     icon="player-play" label="Media" />
-        <NavItem v-if="g.review"    to="/review"    icon="eye"         label="Review Queue" />
-        <NavItem v-if="g.model"     to="/model"     icon="cpu"         label="Fine-Tuned Model" />
+        <NavItem                          to="/intake"    icon="scan"        label="OCR Intake" />
+        <NavItem                          to="/redaction" icon="eraser"      label="Redaction" />
+        <NavItem                          to="/media"     icon="player-play" label="Media" />
+        <NavItem                          to="/review"    icon="eye"         label="Review Queue" />
+        <NavItem                          to="/model"     icon="cpu"         label="Fine-Tuned Model" />
       </NavGroup>
 
-      <NavGroup v-if="g.client_portal" label="Client Portal">
+      <NavGroup label="Client Portal">
         <NavItem to="/portal" icon="door-enter" label="Portal View" />
       </NavGroup>
 
@@ -84,12 +76,11 @@
         <NavItem v-if="g.billing"      to="/admin/billing" icon="credit-card" label="Billing" />
       </NavGroup>
 
-
       <NavGroup v-if="!isFirmAdmin && g.billing" label="Account">
         <NavItem to="/admin/billing" icon="credit-card" label="SaaS Billing" />
       </NavGroup>
 
-      <NavGroup v-if="role === 'paraiq_super'" label="Super Admin">
+      <NavGroup v-if="role === 'acpvcf_super'" label="Super Admin">
         <NavItem to="/super-admin/monitor" icon="activity" label="System Monitor" />
       </NavGroup>
     </div>
@@ -118,7 +109,7 @@ const route = useRoute()
 const firmId = auth.firmName || auth.firmId
 
 const ROLE_LABELS = {
-  paraiq_super:    'Super Admin',
+  acpvcf_super:    'Super Admin',
   firm_admin:      'Firm Admin',
   senior_attorney: 'Sr. Attorney',
   associate:       'Associate',
