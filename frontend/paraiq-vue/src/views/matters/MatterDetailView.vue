@@ -2,9 +2,7 @@
 import { ref, computed, onMounted, watch, onUnmounted} from "vue"
 import { useRoute, useRouter } from 'vue-router'
 import axios from 'axios'
-import DiscoveryUpload from '@/components/DiscoveryUpload.vue'
 import CaseKanban from '@/components/CaseKanban.vue'
-import DraftingAssistant from '@/components/DraftingAssistant.vue'
 
 const route  = useRoute()
 const router = useRouter()
@@ -17,19 +15,10 @@ const firmId  = () => localStorage.getItem('paraiq_firm_id') || 'default'
 const matter      = ref(null)
 const docs        = ref([])
 const notes       = ref([])
-const discoveryQ  = ref([])
 const loading     = ref(true)
-const loadingDisc = ref(false)
 const activeTab   = ref('documents')
-const showUpload     = ref(false)
 const contacts       = ref([])
 const correspondence = ref([])
-const contracts      = ref([])
-const motions        = ref([])
-const calendarEvents = ref([])
-const binderItems    = ref([])
-const binderLoading  = ref(false)
-const binderFilter   = ref('')
 const loadingMod     = ref(false)
 const timeline       = ref([])
 const intelligence   = ref({ signals: [] })
@@ -40,18 +29,29 @@ const modForm        = ref({})
 const newNote     = ref('')
 const savingNote  = ref(false)
 
+// VCF-specific state
+const deadlines      = ref([])
+const stageHistory   = ref([])
+const checklist      = ref([])
+const communications = ref([])
+const accountPrep    = ref(null)
+const loadingVcf     = ref(false)
+const stageSelect    = ref('')
+
 const TABS = [
-  { key: 'kanban', label: 'Workflow', icon: '⚖️' },
-  { key: 'disbursements', label: 'Disbursements', icon: '💵' },
-  { key: 'drafting', label: 'Drafting', icon: '✍️' },
-  { key: 'documents',    label: 'Documents',    icon: '📄' },
-  { key: 'notes',        label: 'Notes',        icon: '📝' },
-  { key: 'intelligence', label: 'Intelligence', icon: '🧠' },
+  { key: 'overview',       label: 'Overview',       icon: '📋' },
+  { key: 'documents',      label: 'Documents',      icon: '📄' },
+  { key: 'notes',          label: 'Notes',          icon: '📝' },
+  { key: 'intelligence',   label: 'Intelligence',   icon: '🧠' },
   { key: 'timeline',       label: 'Timeline',       icon: '📅' },
   { key: 'contacts',       label: 'Contacts',       icon: '👤' },
-  { key: 'correspondence', label: 'Comms Tracker',  icon: '✉️'  },
-  { key: 'calendar',       label: 'Deadlines',      icon: '🗓'  },
-  { key: 'binder',         label: 'Binder',         icon: '🗂️'  },
+  { key: 'correspondence', label: 'Correspondence', icon: '✉️' },
+  { key: 'deadlines',      label: 'Deadlines',      icon: '⏰' },
+  { key: 'communications', label: 'Communications', icon: '💬' },
+  { key: 'disbursements',  label: 'Disbursements',  icon: '💵' },
+  { key: 'account-prep',   label: 'VCF Account',    icon: '🔐' },
+  { key: 'stage-history',  label: 'Stage History',  icon: '📈' },
+  { key: 'kanban',         label: 'Workflow',       icon: '⚖️' },
 ]
 
 const PIPELINE_COLORS = {
@@ -80,48 +80,20 @@ async function fetchMatter() {
   }
 }
 
-async function fetchDiscovery() {
-  if (!matter.value?.case_number) return
-  loadingDisc.value = true
-  try {
-    const { data } = await axios.get(
-      `/discovery/queue?case_number=${encodeURIComponent(matter.value.case_number)}&limit=200`,
-      { headers: authHdr() }
-    )
-    discoveryQ.value = data.files || []
-  } catch { discoveryQ.value = [] }
-  finally { loadingDisc.value = false }
-}
-
-const MOD_KEYS = ['contacts','correspondence','contracts','motions','calendar']
+const MOD_KEYS = ['contacts','correspondence']
 
 function switchTab(key) {
   activeTab.value = key
   modModal.value  = false
-  if (key === 'discovery'    && !discoveryQ.value.length)          fetchDiscovery()
-  if (key === 'timeline'     && !timeline.value.length)            fetchTimeline()
-  if (key === 'intelligence' && !intelligence.value.signals?.length) fetchIntelligence()
-  if (key === 'binder')                                            fetchBinder()
-  if (key === 'disbursements')                                     fetchDisbursement()
+  if (key === 'timeline'      && !timeline.value.length)       fetchTimeline()
+  if (key === 'intelligence'  && !intelligence.value.signals?.length) fetchIntelligence()
+  if (key === 'disbursements' && !disbursement.value)          fetchDisbursement()
+  if (key === 'deadlines'     && !deadlines.value.length)      fetchDeadlines()
+  if (key === 'communications' && !communications.value.length) fetchCommunications()
+  if (key === 'stage-history' && !stageHistory.value.length)   fetchStageHistory()
+  if (key === 'account-prep'  && !accountPrep.value)           fetchAccountPrep()
   if (MOD_KEYS.includes(key)) fetchModule(key)
 }
-
-async function fetchBinder() {
-  binderLoading.value = true
-  try {
-    const { data } = await axios.get(`/cases/${caseId.value}/binder`, { headers: authHdr() })
-    binderItems.value = data.items || []
-  } catch { binderItems.value = [] }
-  finally { binderLoading.value = false }
-}
-function binderTypeLabel(type) {
-  return { email: '📧 Email', upload: '📄 Upload', ai_draft: '🤖 AI Draft', research: '🔬 Research' }[type] || type
-}
-const filteredBinderItems = computed(() =>
-  binderFilter.value
-    ? binderItems.value.filter(i => i.binder_type === binderFilter.value)
-    : binderItems.value
-)
 
 async function fetchModule(key) {
   loadingMod.value = true
@@ -129,16 +101,10 @@ async function fetchModule(key) {
     const id = caseId.value
     const h  = { headers: authHdr() }
     let data = []
-    if (key === 'contacts')       { const r = await axios.get(`/contacts/matter/${id}`, h);      data = Array.isArray(r.data) ? r.data : (r.data.contacts  || r.data.items || []) }
-    if (key === 'correspondence') { const r = await axios.get(`/correspondence/${id}`, h);        data = Array.isArray(r.data) ? r.data : (r.data.items      || r.data.correspondence || []) }
-    if (key === 'contracts')      { const r = await axios.get(`/contracts/?matter_id=${id}`, h);  data = Array.isArray(r.data) ? r.data : (r.data.contracts  || r.data.items || []) }
-    if (key === 'motions')        { const r = await axios.get(`/motions/?matter_id=${id}`, h);    data = Array.isArray(r.data) ? r.data : (r.data.motions    || r.data.items || []) }
-    if (key === 'calendar')       { const r = await axios.get(`/calendar/matter/${id}`, h);       data = Array.isArray(r.data) ? r.data : (r.data.events     || r.data.items || []) }
-    if (key === 'contacts')       contacts.value       = data
+    if (key === 'contacts')       { const r = await axios.get(`/contacts/matter/${id}`, h); data = Array.isArray(r.data) ? r.data : (r.data.contacts || r.data.items || []) }
+    if (key === 'correspondence') { const r = await axios.get(`/correspondence/${id}`, h);  data = Array.isArray(r.data) ? r.data : (r.data.items || r.data.correspondence || []) }
+    if (key === 'contacts')       contacts.value = data
     if (key === 'correspondence') correspondence.value = data
-    if (key === 'contracts')      contracts.value      = data
-    if (key === 'motions')        motions.value        = data
-    if (key === 'calendar')       calendarEvents.value = data
   } catch(e) { console.error('fetchModule', key, e) } finally { loadingMod.value = false }
 }
 
@@ -147,9 +113,6 @@ async function deleteModItem(key, id) {
   const urlMap = {
     contacts:       `/contacts/${id}`,
     correspondence: `/correspondence/${id}`,
-    contracts:      `/contracts/${id}`,
-    motions:        `/motions/${id}`,
-    calendar:       `/calendar/${id}`,
   }
   try { await axios.delete(urlMap[key], { headers: authHdr() }) } catch(e) { console.error(e) }
   fetchModule(key)
@@ -162,9 +125,6 @@ async function submitMod() {
   const urlMap = {
     contacts:       '/contacts/',
     correspondence: '/correspondence/',
-    contracts:      '/contracts/',
-    motions:        '/motions/',
-    calendar:       '/calendar/',
   }
   const payload = {
     ...modForm.value,
@@ -176,6 +136,54 @@ async function submitMod() {
     modModal.value = false
     fetchModule(key)
   } catch (e) { alert('Save failed: ' + (e?.response?.data?.detail || e.message)) }
+}
+
+// ── VCF-specific fetchers ────────────────────────────────────────────────────
+
+async function fetchDeadlines() {
+  loadingVcf.value = true
+  try {
+    const { data } = await axios.get(`/vcf/cases/${caseId.value}/deadlines`, { headers: authHdr() })
+    deadlines.value = data.deadlines || []
+  } catch { deadlines.value = [] }
+  finally { loadingVcf.value = false }
+}
+
+async function fetchCommunications() {
+  loadingVcf.value = true
+  try {
+    const { data } = await axios.get(`/cases/${caseId.value}/communications`, { headers: authHdr() })
+    communications.value = data.communications || []
+  } catch { communications.value = [] }
+  finally { loadingVcf.value = false }
+}
+
+async function fetchStageHistory() {
+  loadingVcf.value = true
+  try {
+    const { data } = await axios.get(`/vcf/cases/${caseId.value}/stages`, { headers: authHdr() })
+    stageHistory.value = data.history || []
+  } catch { stageHistory.value = [] }
+  finally { loadingVcf.value = false }
+}
+
+async function fetchAccountPrep() {
+  loadingVcf.value = true
+  try {
+    const { data } = await axios.get(`/vcf/prep?case_id=${caseId.value}`, { headers: authHdr() })
+    accountPrep.value = data.preps?.[0] || null
+  } catch { accountPrep.value = null }
+  finally { loadingVcf.value = false }
+}
+
+async function transitionStage(toStage) {
+  try {
+    await axios.post(`/vcf/cases/${caseId.value}/stage`, { to_stage: toStage }, { headers: authHdr() })
+    await fetchMatter()
+    if (activeTab.value === 'stage-history') await fetchStageHistory()
+  } catch (e) {
+    alert('Stage transition failed: ' + (e?.response?.data?.detail || e.message))
+  }
 }
 
 async function addNote() {
@@ -192,8 +200,6 @@ async function addNote() {
     notes.value = data.notes || []
   } catch {} finally { savingNote.value = false }
 }
-
-function onUpload() { fetchMatter(); if (activeTab.value === 'discovery') fetchDiscovery() }
 
 function riskColor(r)   { return { low:'#48bb78', medium:'#ecc94b', high:'#fc8181', unknown:'#718096' }[r] || '#718096' }
 function statusColor(s) { return { open:'#4a7cf7', closed:'#718096', pending:'#ecc94b' }[s] || '#718096' }
@@ -401,12 +407,9 @@ function _stopHeartbeat() {
 // Update activity type based on active tab
 watch(activeTab, (tab) => {
   const map = {
-    drafting:       'drafting',
     documents:      'reviewing',
-    discovery:      'research',
-    research:       'research',
     correspondence: 'correspondence',
-    binder:         'reviewing',
+    communications: 'correspondence',
   }
   _currentActivityType = map[tab] || 'viewing'
 })
@@ -530,7 +533,7 @@ function fmtMoney(v) {
   <div class="mdetail">
 
     <div class="breadcrumb">
-      <button class="breadcrumb__back" @click="router.push('/matters')">← Matters</button>
+      <button class="breadcrumb__back" @click="router.push('/matters')">← Claims</button>
       <span class="dim">/</span>
       <span class="dim sm">{{ matter?.client_name || '…' }}</span>
     </div>
@@ -559,7 +562,7 @@ function fmtMoney(v) {
         </div>
         <div class="case-header__actions">
           <button class="btn-secondary" @click="router.push('/intelligence')">🧠 AI Analysis</button>
-          <button class="btn-gold" @click="showUpload = true">↑ Upload</button>
+          <button class="btn-gold" @click="router.push('/intake')">↑ Upload</button>
         </div>
       </div>
 
@@ -589,19 +592,56 @@ function fmtMoney(v) {
           :class="['tab', { 'tab--active': activeTab === t.key }]"
           @click="switchTab(t.key)">
           {{ t.icon }} {{ t.label }}
-          <span v-if="t.key==='documents' && docs.length"    class="tab-count">{{ docs.length }}</span>
-          <span v-if="t.key==='notes'    && notes.length"    class="tab-count">{{ notes.length }}</span>
-          <span v-if="t.key==='discovery'       && discoveryQ.length"    class="tab-count">{{ discoveryQ.length }}</span>
-          <span v-if="t.key==='contacts'       && contacts.length"       class="tab-count">{{ contacts.length }}</span>
+          <span v-if="t.key==='documents' && docs.length" class="tab-count">{{ docs.length }}</span>
+          <span v-if="t.key==='notes' && notes.length" class="tab-count">{{ notes.length }}</span>
+          <span v-if="t.key==='contacts' && contacts.length" class="tab-count">{{ contacts.length }}</span>
           <span v-if="t.key==='correspondence' && correspondence.length" class="tab-count">{{ correspondence.length }}</span>
-          <span v-if="t.key==='contracts'      && contracts.length"      class="tab-count">{{ contracts.length }}</span>
-          <span v-if="t.key==='motions'        && motions.length"        class="tab-count">{{ motions.length }}</span>
-          <span v-if="t.key==='calendar'       && calendarEvents.length" class="tab-count">{{ calendarEvents.length }}</span>
-          <span v-if="t.key==='binder'         && binderItems.length"   class="tab-count">{{ binderItems.length }}</span>
+          <span v-if="t.key==='deadlines' && deadlines.length" class="tab-count">{{ deadlines.length }}</span>
+          <span v-if="t.key==='communications' && communications.length" class="tab-count">{{ communications.length }}</span>
         </button>
       </div>
+      <!-- Overview -->
+      <div v-if="activeTab === 'overview'" class="mod-pane">
+        <div class="overview-grid">
+          <div class="overview-card">
+            <h3 class="overview-card__title">Claim Status</h3>
+            <div class="overview-field"><label>Stage</label><span class="pill">{{ matter.claim_stage || '—' }}</span></div>
+            <div class="overview-field"><label>VCF Status</label><span class="pill">{{ matter.vcf_status || '—' }}</span></div>
+            <div class="overview-field"><label>Presence Proof</label><span class="pill">{{ matter.presence_proof_status || '—' }}</span></div>
+            <div class="overview-field"><label>Award Amount</label><span>{{ fmtMoney(matter.award_amount) }}</span></div>
+          </div>
+          <div class="overview-card">
+            <h3 class="overview-card__title">Client</h3>
+            <div class="overview-field"><label>Date of Birth</label><span>{{ matter.date_of_birth || '—' }}</span></div>
+            <div class="overview-field"><label>SSN Last 4</label><span>{{ matter.ssn_last4 || '—' }}</span></div>
+            <div class="overview-field"><label>Language</label><span>{{ matter.preferred_language || '—' }}</span></div>
+            <div class="overview-field"><label>WTC Health Program</label><span>{{ matter.wtc_health_program ? 'Yes' : 'No' }}</span></div>
+          </div>
+          <div class="overview-card">
+            <h3 class="overview-card__title">Exposure</h3>
+            <div class="overview-field"><label>Location</label><span>{{ matter.exposure_location || '—' }}</span></div>
+            <div class="overview-field"><label>Dates</label><span>{{ matter.presence_dates || '—' }}</span></div>
+          </div>
+        </div>
+        <div class="overview-actions">
+          <label>Transition stage:</label>
+          <select v-model="stageSelect" @change="transitionStage(stageSelect)">
+            <option value="">— Select —</option>
+            <option value="intake">Intake</option>
+            <option value="eligibility_review">Eligibility Review</option>
+            <option value="document_gathering">Document Gathering</option>
+            <option value="vcf_account_created">VCF Account Created</option>
+            <option value="claim_submitted">Claim Submitted</option>
+            <option value="under_review">Under Review</option>
+            <option value="award_determination">Award Determination</option>
+            <option value="disbursement">Disbursement</option>
+            <option value="closed">Closed</option>
+          </select>
+        </div>
+      </div>
+
       <!-- Kanban -->
-      <div v-if="activeTab === 'kanban'">
+      <div v-else-if="activeTab === 'kanban'">
         <CaseKanban :case-id="caseId" />
       </div>
 
@@ -684,9 +724,75 @@ function fmtMoney(v) {
         </div>
       </div>
 
-      <!-- Drafting -->
-      <div v-else-if="activeTab === 'drafting'">
-        <DraftingAssistant :case-id="caseId" />
+      <!-- VCF Deadlines -->
+      <div v-else-if="activeTab === 'deadlines'" class="mod-pane">
+        <div v-if="loadingVcf" class="state-msg">Loading deadlines…</div>
+        <div v-else-if="!deadlines.length" class="empty-tab"><div class="empty-tab__icon">⏰</div><div class="empty-tab__title">No deadlines yet</div></div>
+        <div v-else class="table-wrap">
+          <table class="piq-table">
+            <thead><tr><th>Type</th><th>Due Date</th><th>Status</th></tr></thead>
+            <tbody>
+              <tr v-for="d in deadlines" :key="d.id">
+                <td class="doc-name">{{ d.deadline_type }}</td>
+                <td class="dim nowrap">{{ fmtDate(d.due_date) }}</td>
+                <td><span class="status-chip" :class="'s-' + d.status">{{ d.status }}</span></td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+
+      <!-- Communications Log -->
+      <div v-else-if="activeTab === 'communications'" class="mod-pane">
+        <div v-if="loadingVcf" class="state-msg">Loading communications…</div>
+        <div v-else-if="!communications.length" class="empty-tab"><div class="empty-tab__icon">💬</div><div class="empty-tab__title">No communications logged yet</div></div>
+        <div v-else class="table-wrap">
+          <table class="piq-table">
+            <thead><tr><th>Date</th><th>Direction</th><th>Channel</th><th>Party</th><th>Subject</th></tr></thead>
+            <tbody>
+              <tr v-for="c in communications" :key="c.id">
+                <td class="dim nowrap">{{ fmtDate(c.sent_at) }}</td>
+                <td><span class="type-pill" :class="c.direction==='inbound'?'pill-in':'pill-out'">{{ c.direction }}</span></td>
+                <td class="dim">{{ c.channel }}</td>
+                <td class="dim">{{ c.party_type }}{{ c.party_name ? ' / ' + c.party_name : '' }}</td>
+                <td class="doc-name">{{ c.subject || '—' }}</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+
+      <!-- VCF Account Prep -->
+      <div v-else-if="activeTab === 'account-prep'" class="mod-pane">
+        <div v-if="loadingVcf" class="state-msg">Loading account prep…</div>
+        <div v-else-if="!accountPrep" class="empty-tab">
+          <div class="empty-tab__icon">🔐</div>
+          <div class="empty-tab__title">No VCF account prep sheet</div>
+          <router-link :to="'/vcf-account-prep?case_id=' + caseId" class="btn-gold sm">Create Prep Sheet</router-link>
+        </div>
+        <div v-else>
+          <p class="dim sm">Prep sheet created {{ fmtDate(accountPrep.created_at) }} — status: {{ accountPrep.status }}</p>
+        </div>
+      </div>
+
+      <!-- Stage History -->
+      <div v-else-if="activeTab === 'stage-history'" class="mod-pane">
+        <div v-if="loadingVcf" class="state-msg">Loading stage history…</div>
+        <div v-else-if="!stageHistory.length" class="empty-tab"><div class="empty-tab__icon">📈</div><div class="empty-tab__title">No stage transitions yet</div></div>
+        <div v-else class="table-wrap">
+          <table class="piq-table">
+            <thead><tr><th>Date</th><th>From</th><th>To</th><th>By</th><th>Note</th></tr></thead>
+            <tbody>
+              <tr v-for="h in stageHistory" :key="h.id">
+                <td class="dim nowrap">{{ fmtDate(h.created_at) }}</td>
+                <td>{{ h.from_stage || '—' }}</td>
+                <td>{{ h.to_stage }}</td>
+                <td class="dim">{{ h.changed_by }}</td>
+                <td class="doc-name">{{ h.note || '—' }}</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
       </div>
 
       <!-- Documents -->
@@ -694,12 +800,12 @@ function fmtMoney(v) {
         <div v-if="!docs.length" class="empty-tab">
           <div class="empty-tab__icon">📄</div>
           <div class="empty-tab__title">No documents yet</div>
-          <button class="btn-gold sm" @click="showUpload = true">Upload Documents</button>
+          <button class="btn-gold sm" @click="router.push('/intake')">Upload Documents</button>
         </div>
         <div v-else>
           <div class="tab-toolbar">
             <span class="dim sm">{{ docs.length }} document{{ docs.length !== 1 ? 's' : '' }}</span>
-            <button class="btn-gold sm" @click="showUpload = true">↑ Upload More</button>
+            <button class="btn-gold sm" @click="router.push('/intake')">↑ Upload More</button>
           </div>
           <div class="table-wrap">
             <table class="piq-table">
@@ -855,81 +961,6 @@ function fmtMoney(v) {
         </div>
       </div>
 
-      <!-- Calendar / Deadlines -->
-      <div v-else-if="activeTab === 'calendar'" class="mod-pane">
-        <div class="tab-toolbar">
-          <span class="dim sm">{{ calendarEvents.length }} event{{ calendarEvents.length !== 1 ? 's' : '' }}</span>
-          <button class="btn-gold sm" @click="openAdd({event_type:'deadline', due_date: new Date().toISOString().slice(0,10)})">+ Add Event</button>
-        </div>
-        <div v-if="loadingMod" class="state-msg">Loading…</div>
-        <div v-else-if="!calendarEvents.length" class="empty-tab"><div class="empty-tab__icon">🗓</div><div class="empty-tab__title">No events yet</div></div>
-        <div v-else class="table-wrap">
-          <table class="piq-table">
-            <thead><tr><th>Title</th><th>Type</th><th>Date</th><th>Location</th><th></th></tr></thead>
-            <tbody>
-              <tr v-for="e in calendarEvents" :key="e.id">
-                <td class="doc-name">{{ e.title }}</td>
-                <td><span class="type-pill">{{ e.event_type }}</span></td>
-                <td class="dim nowrap">{{ fmtDate(e.due_date) }}</td>
-                <td class="dim">{{ e.location || '—' }}</td>
-                <td><button class="del-btn" @click="deleteModItem('calendar', e.id)">✕</button></td>
-              </tr>
-            </tbody>
-          </table>
-        </div>
-      </div>
-
-      <!-- Binder -->
-      <div v-else-if="activeTab === 'binder'" class="mod-pane">
-        <div class="tab-toolbar">
-          <span class="dim sm">{{ binderItems.length }} item{{ binderItems.length !== 1 ? 's' : '' }}</span>
-          <select v-model="binderFilter" class="piq-input" style="width:140px;padding:4px 8px;">
-            <option value="">All types</option>
-            <option value="email">Emails</option>
-            <option value="upload">Uploads</option>
-            <option value="ai_draft">AI Drafts</option>
-            <option value="research">Research</option>
-          </select>
-        </div>
-        <div v-if="binderLoading" class="state-msg">Loading binder…</div>
-        <div v-else-if="!binderItems.length" class="empty-tab">
-          <div class="empty-tab__icon">🗂️</div>
-          <div class="empty-tab__title">No binder items yet</div>
-          <div class="empty-tab__sub">Emails, documents, drafts and research will appear here automatically.</div>
-        </div>
-        <div v-else class="table-wrap">
-          <table class="piq-table">
-            <thead>
-              <tr><th>Type</th><th>Title</th><th>Source</th><th>Date</th><th>Score</th><th>Sentiment</th></tr>
-            </thead>
-            <tbody>
-              <tr v-for="item in filteredBinderItems" :key="item.id + item.binder_type">
-                <td>
-                  <span :class="['type-pill', 'binder-type--' + item.binder_type]">
-                    {{ binderTypeLabel(item.binder_type) }}
-                  </span>
-                </td>
-                <td class="doc-name">
-                  <a v-if="item.source_url" :href="item.source_url" target="_blank" rel="noopener" class="binder-link">{{ item.title }} ↗</a>
-                  <span v-else>{{ item.title }}</span>
-                </td>
-                <td class="dim">{{ item.source || '—' }}</td>
-                <td class="dim nowrap">{{ item.date ? fmtDate(item.date) : '—' }}</td>
-                <td>
-                  <span v-if="item.email_score" :class="['score-pill', item.email_score >= 70 ? 'score-pill--high' : 'score-pill--mid']">
-                    {{ item.email_score }}
-                  </span>
-                  <span v-else class="dim">—</span>
-                </td>
-                <td>
-                  <span v-if="item.sentiment" :class="['sentiment-pill', 'sentiment--' + item.sentiment]">{{ item.sentiment }}</span>
-                  <span v-else class="dim">—</span>
-                </td>
-              </tr>
-            </tbody>
-          </table>
-        </div>
-      </div>
     </template>
 
     <!-- ── Add Modal (shared) ── -->
@@ -959,19 +990,6 @@ function fmtMoney(v) {
               <div class="field"><label class="field__label">Body</label><textarea v-model="modForm.body" class="note-input w100" rows="3"></textarea></div>
             </template>
 
-            <template v-else-if="activeTab==='calendar'">
-              <div class="field"><label class="field__label">Title *</label><input v-model="modForm.title" class="piq-input w100" placeholder="VCF Missing Info Response" /></div>
-              <div class="field"><label class="field__label">Type</label>
-                <select v-model="modForm.event_type" class="piq-input w100"><option>deadline</option><option>hearing</option><option>meeting</option></select>
-              </div>
-              <div class="field"><label class="field__label">Date</label>
-                <input type="date" class="piq-input w100"
-                  :value="modForm.due_date || ''"
-                  @change="e => modForm.due_date = e.target.value" />
-              </div>
-              <div class="field"><label class="field__label">Location</label><input v-model="modForm.location" class="piq-input w100" /></div>
-            </template>
-
           </div>
           <div class="mod-modal__footer">
             <button class="btn-secondary" @click="modModal=false">Cancel</button>
@@ -981,21 +999,22 @@ function fmtMoney(v) {
       </div>
     </Teleport>
 
-    <DiscoveryUpload
-      v-if="matter"
-      :show="showUpload"
-      :matter-id="matter.id"
-      :matter-name="matter.client_name"
-      :case-number="matter.case_number"
-      @close="showUpload = false"
-      @uploaded="onUpload"
-    />
-
   </div>
 </template>
 
 <style scoped>
 .mdetail { padding: 2rem; max-width: 1100px; }
+
+.overview-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); gap: 1rem; margin-bottom: 1.5rem; }
+.overview-card { background: var(--bg-card); border: 1px solid var(--border); border-radius: 10px; padding: 1rem 1.25rem; }
+.overview-card__title { color: var(--gold); font-size: 0.8rem; font-weight: 700; letter-spacing: 0.06em; margin: 0 0 0.75rem; text-transform: uppercase; }
+.overview-field { display: flex; justify-content: space-between; align-items: center; padding: 0.4rem 0; border-bottom: 1px solid var(--border); }
+.overview-field:last-child { border-bottom: none; }
+.overview-field label { color: var(--text-muted); font-size: 0.75rem; }
+.overview-field span { color: var(--text-primary); font-size: 0.9rem; font-weight: 500; }
+.overview-actions { display: flex; align-items: center; gap: 0.75rem; background: var(--bg-card); border: 1px solid var(--border); border-radius: 8px; padding: 1rem; }
+.overview-actions label { color: var(--text-muted); font-size: 0.8rem; }
+.overview-actions select { background: var(--input-bg); border: 1px solid var(--border); border-radius: 6px; color: var(--text-primary); padding: 0.4rem 0.6rem; }
 
 .breadcrumb { align-items: center; display: flex; gap: 0.5rem; margin-bottom: 1.5rem; }
 .breadcrumb__back { background: none; border: none; color: var(--gold); cursor: pointer; font-size: 0.85rem; padding: 0; }

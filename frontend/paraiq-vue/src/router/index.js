@@ -27,6 +27,7 @@ const ClientPortalAccess = () => import('@/views/portal/ClientPortalAccess.vue')
 const TimeCaptureView    = () => import('@/views/time/TimeCaptureView.vue')
 const ApprovalQueueView  = () => import('@/views/approvals/ApprovalQueueView.vue')
 const IntakeView         = () => import('@/views/intake/IntakeView.vue')
+const BatchIntakeView    = () => import('@/views/intake/BatchIntakeView.vue')
 const RedactionView      = () => import('@/views/redaction/RedactionView.vue')
 const ReviewView         = () => import('@/views/review/ReviewView.vue')
 const MultilingualView   = () => import('@/views/multilingual/MultilingualView.vue')
@@ -34,6 +35,7 @@ const InsightsView       = () => import('@/views/insights/InsightsView.vue')
 const SemanticSearchView = () => import('@/views/search/SemanticSearchView.vue')
 const EsignView          = () => import('@/views/esign/EsignView.vue')
 const ClientPortalManage = () => import('@/views/portal/ClientPortalManageView.vue')
+const CommunicationsView = () => import('@/views/communications/CommunicationsView.vue')
 const AuditLogView       = () => import('@/views/audit/AuditLogView.vue')
 const UsersView          = () => import('@/views/admin/UsersView.vue')
 const AdminView          = () => import('@/views/admin/AdminView.vue')
@@ -110,6 +112,11 @@ const routes = [
         meta: { module: 'correspondence' },
       },
       {
+        path: 'communications',
+        name: 'communications',
+        component: CommunicationsView,
+      },
+      {
         path: 'calendar',
         name: 'calendar',
         component: CalendarView,
@@ -144,7 +151,7 @@ const routes = [
       {
         path: 'batch-intake',
         name: 'batch_intake',
-        component: ModuleStub,
+        component: BatchIntakeView,
         meta: { module: 'intake' },
       },
       {
