@@ -57,6 +57,7 @@ from backend.demo1.vcf_disbursements import router as vcf_disbursements_router
 from backend.demo1.vcf_account import router as vcf_account_router, init_vcf_account_table
 from backend.demo1.vcf_workflow import router as vcf_workflow_router
 from backend.demo1.communications import router as communications_router
+from backend.demo1.vcf_reports import router as vcf_reports_router
 import os
 import json
 import logging
@@ -425,6 +426,7 @@ app.include_router(vcf_deadlines_router, tags=["VCF Deadlines"])
 app.include_router(vcf_account_router, prefix="/vcf", tags=["VCF Account Prep"])
 app.include_router(vcf_workflow_router, tags=["VCF Workflow"])
 app.include_router(communications_router)
+app.include_router(vcf_reports_router)
 
 # ── Phase 1: AI Infrastructure Endpoints ─────────────────────────────────────
 

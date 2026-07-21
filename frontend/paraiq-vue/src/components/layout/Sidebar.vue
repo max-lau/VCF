@@ -36,7 +36,7 @@
       <NavGroup label="AI & Analysis">
         <NavItem to="/intelligence" icon="brain"     label="Case Intelligence" />
         <NavItem to="/multilingual" icon="world"     label="Multilingual" />
-        <NavItem to="/reports"      icon="report"    label="Reports" />
+        <NavItem to="/vcf-reports" icon="report"    label="VCF Reports" />
         <NavItem to="/exports"      icon="download"  label="Exports" />
       </NavGroup>
 

@@ -1,8 +1,45 @@
 from fastapi import APIRouter, Request, HTTPException
 from backend.demo1.pg import get_conn
-from datetime import date, datetime
+from datetime import date, datetime, timedelta
 
 router = APIRouter()
+
+
+def _send_deadline_reminder(firm_id: str, deadline: dict, days_left: int):
+    """Placeholder for notification channel (email/Slack/in-app)."""
+    # TODO: wire to notifications_router / email / Slack once channel is chosen.
+    print(f"[VCF deadline reminder] {days_left} days left: {deadline['deadline_type']} "
+          f"for claim #{deadline['case_number']} ({deadline['client_name']})")
+
+
+@router.post("/vcf/deadlines/notify", tags=["VCF Deadlines"])
+async def notify_upcoming_deadlines(request: Request, days_ahead: int = 7):
+    """Send reminders for deadlines due within N days. Idempotent."""
+    firm_id = getattr(request.state, "firm_id", "default")
+    try:
+        with get_conn(firm_id) as conn:
+            rows = conn.execute("""
+                SELECT d.id, d.case_id, d.deadline_type, d.due_date,
+                       c.case_number, c.client_name
+                FROM vcf_deadlines d
+                JOIN cases c ON c.id = d.case_id
+                WHERE d.firm_id = %s
+                  AND d.status = 'pending'
+                  AND d.due_date BETWEEN CURRENT_DATE AND CURRENT_DATE + INTERVAL '%s days'
+                ORDER BY d.due_date ASC
+            """, (firm_id, days_ahead)).fetchall()
+
+        today = date.today()
+        notified = []
+        for d in rows:
+            days_left = (d["due_date"] - today).days
+            _send_deadline_reminder(firm_id, dict(d), days_left)
+            notified.append({"deadline_id": d["id"], "case_number": d["case_number"],
+                             "days_left": days_left})
+
+        return {"success": True, "notified": len(notified), "reminders": notified}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
 
 @router.get("/vcf/deadlines", tags=["VCF Deadlines"])
 async def get_upcoming_deadlines(request: Request, days_ahead: int = 30):

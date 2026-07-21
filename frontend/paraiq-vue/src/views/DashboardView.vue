@@ -44,44 +44,42 @@
           <div v-for="ev in upcomingDeadlines" :key="ev.id" class="deadline-item">
             <div class="deadline-dot" :class="urgencyClass(ev.due_date)"></div>
             <div class="deadline-body">
-              <div class="deadline-title">{{ ev.title }}</div>
+              <div class="deadline-title">{{ ev.client_name }} — {{ ev.deadline_type }}</div>
               <div class="deadline-meta">
-                <span class="deadline-type">{{ ev.event_type }}</span>
+                <span class="deadline-type">{{ ev.case_number }}</span>
                 <span class="deadline-date" :class="urgencyClass(ev.due_date)">
                   {{ fmtDeadlineDate(ev.due_date) }}
                 </span>
               </div>
             </div>
-            <span v-if="ev.is_court_date" class="court-badge">⚖ Court</span>
           </div>
         </div>
       </div>
 
-      <!-- Risk Heatmap -->
+      <!-- Stage Breakdown -->
       <div class="widget">
         <div class="widget__header">
-          <span class="widget__title">🔥 Risk Overview</span>
-          <RouterLink to="/matters" class="widget__link">View matters →</RouterLink>
+          <span class="widget__title">📊 Claims by Stage</span>
+          <RouterLink to="/matters" class="widget__link">View claims →</RouterLink>
         </div>
         <div v-if="statsLoading" class="widget__loading">Loading…</div>
         <div v-else class="risk-heatmap">
-          <div v-for="(count, level) in riskBreakdown" :key="level" class="risk-bar-row">
-            <span class="risk-label">{{ level }}</span>
+          <div v-for="(count, stage) in stageBreakdown" :key="stage" class="risk-bar-row">
+            <span class="risk-label">{{ stage.replace(/_/g, ' ') }}</span>
             <div class="risk-bar-track">
-              <div class="risk-bar-fill"
-                :class="`risk-bar--${level}`"
-                :style="{ width: riskPct(count) + '%' }">
-              </div>
+              <div class="risk-bar-fill" :style="{ width: stagePct(count) + '%' }"></div>
             </div>
             <span class="risk-count">{{ count }}</span>
           </div>
-          <div class="risk-total">{{ totalCases }} total cases</div>
-          <!-- Most active cases -->
-          <div class="widget__sub-title">Most Active</div>
-          <div v-for="c in mostActiveCases" :key="c.case_number" class="active-case">
-            <span class="active-case__num">{{ c.case_number }}</span>
-            <span class="active-case__name">{{ c.client_name }}</span>
-            <span class="active-case__docs">{{ c.doc_count }} docs</span>
+          <div class="risk-total">{{ totalClaims }} total claims</div>
+          <div class="widget__sub-title">Disbursements</div>
+          <div class="active-case">
+            <span class="active-case__name">Gross Awards</span>
+            <span class="active-case__docs">{{ fmtMoney(disbursementTotals.total_gross) }}</span>
+          </div>
+          <div class="active-case">
+            <span class="active-case__name">Net to Claimants</span>
+            <span class="active-case__docs">{{ fmtMoney(disbursementTotals.total_net) }}</span>
           </div>
         </div>
       </div>
@@ -219,52 +217,44 @@ const today = new Intl.DateTimeFormat('en-US', { weekday: 'long', month: 'long',
 
 // ── Stats ─────────────────────────────────────────────────────────────────
 const statsLoading   = ref(true)
-const riskBreakdown  = ref({})
-const totalCases     = ref(0)
-const mostActiveCases = ref([])
+const stageBreakdown = ref({})
+const totalClaims    = ref(0)
+const disbursementTotals = ref({ total_gross: 0, total_net: 0, total_fees: 0 })
 const stats = ref([
-  { label: 'Active Matters',  value: '—', sub: null },
-  { label: 'Depositions',     value: '—', sub: null },
-  { label: 'Motions',         value: '—', sub: null },
-  { label: 'Pending Reviews', value: '—', sub: null },
+  { label: 'Total Claims',    value: '—', sub: null },
+  { label: 'Overdue Deadlines', value: '—', sub: null },
+  { label: 'Intake (30d)',    value: '—', sub: null },
+  { label: 'Net Disbursed',   value: '—', sub: null },
 ])
 
 async function loadStats() {
   statsLoading.value = true
-  const [cases, deps, motions, queue] = await Promise.allSettled([
-    client.get('/cases/stats',       { _silent: true }),
-    client.get('/depositions/stats', { _silent: true }),
-    client.get('/motions/stats',     { _silent: true }),
-    client.get('/feedback/queue',    { _silent: true }),
-  ])
-  if (cases.status === 'fulfilled') {
-    const d = cases.value.data
-    stats.value[0].value = d.active ?? d.total ?? '—'
-    stats.value[0].sub   = d.total != null ? `${d.total} total` : null
-    riskBreakdown.value  = d.by_risk || {}
-    totalCases.value     = d.total || 0
-    mostActiveCases.value = d.most_active_cases || []
+  try {
+    const { data: d } = await client.get('/cases/stats', { _silent: true })
+    stats.value[0].value = d.total_claims ?? '—'
+    stats.value[0].sub   = Object.entries(d.by_stage || {}).map(([k, v]) => `${k}: ${v}`).join(' | ') || null
+    stats.value[1].value = d.deadlines_overdue ?? '—'
+    stats.value[1].sub   = d.deadlines_pending != null ? `${d.deadlines_pending} pending` : null
+    stats.value[2].value = d.recent_intake_30d ?? '—'
+    stats.value[3].value = fmtMoney(d.disbursement_totals?.total_net)
+    stats.value[3].sub   = `Gross: ${fmtMoney(d.disbursement_totals?.total_gross)}`
+    stageBreakdown.value = d.by_stage || {}
+    totalClaims.value    = d.total_claims || 0
+    disbursementTotals.value = d.disbursement_totals || { total_gross: 0, total_net: 0, total_fees: 0 }
+  } catch (e) {
+    console.error('loadStats failed', e)
+  } finally {
+    statsLoading.value = false
   }
-  if (deps.status === 'fulfilled') {
-    const d = deps.value.data
-    stats.value[1].value = d.total ?? d.count ?? '—'
-    stats.value[1].sub   = d.pending != null ? `${d.pending} pending` : null
-  }
-  if (motions.status === 'fulfilled') {
-    const d = motions.value.data
-    stats.value[2].value = d.total ?? d.count ?? '—'
-    stats.value[2].sub   = d.draft != null ? `${d.draft} drafts` : null
-  }
-  if (queue.status === 'fulfilled') {
-    const d = queue.value.data
-    stats.value[3].value = Array.isArray(d) ? d.length : (d.pending ?? d.count ?? d.total ?? '—')
-  }
-  statsLoading.value = false
 }
 
-function riskPct(count) {
-  if (!totalCases.value) return 0
-  return Math.round((count / totalCases.value) * 100)
+function fmtMoney(v) {
+  return new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD' }).format(v || 0)
+}
+
+function stagePct(count) {
+  if (!totalClaims.value) return 0
+  return Math.round((count / totalClaims.value) * 100)
 }
 
 // ── Upcoming Deadlines ────────────────────────────────────────────────────
@@ -274,8 +264,8 @@ const upcomingDeadlines = ref([])
 async function loadDeadlines() {
   deadlinesLoading.value = true
   try {
-    const { data } = await client.get('/calendar/upcoming?days_ahead=30', { _silent: true })
-    upcomingDeadlines.value = Array.isArray(data) ? data.slice(0, 8) : []
+    const { data } = await client.get('/vcf/deadlines?days_ahead=30', { _silent: true })
+    upcomingDeadlines.value = Array.isArray(data.deadlines) ? data.deadlines.slice(0, 8) : []
   } catch { upcomingDeadlines.value = [] }
   finally { deadlinesLoading.value = false }
 }

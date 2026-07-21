@@ -196,48 +196,71 @@ async def create_case(
 @router.get("/stats")
 async def case_stats(firm_id: str = Depends(get_current_firm_id)):
     with get_conn(firm_id) as conn:
+        # Total claims
+        total = conn.execute(
+            "SELECT COUNT(*) AS n FROM cases WHERE deleted = FALSE AND firm_id=%s",
+            (firm_id,)
+        ).fetchone()["n"]
+
+        # Claims by stage
         rows = conn.execute(
-            "SELECT status, COUNT(*) AS cnt FROM cases WHERE deleted = FALSE AND firm_id=%s GROUP BY status",
+            "SELECT claim_stage, COUNT(*) AS cnt FROM cases WHERE deleted = FALSE AND firm_id=%s GROUP BY claim_stage",
             (firm_id,)
         ).fetchall()
-        by_status = {r["status"]: r["cnt"] for r in rows}
+        by_stage = {r["claim_stage"]: r["cnt"] for r in rows}
+
+        # Claims by VCF status
         rows = conn.execute(
-            "SELECT risk_level, COUNT(*) AS cnt FROM cases WHERE deleted = FALSE AND firm_id=%s GROUP BY risk_level",
+            "SELECT vcf_status, COUNT(*) AS cnt FROM cases WHERE deleted = FALSE AND firm_id=%s GROUP BY vcf_status",
             (firm_id,)
         ).fetchall()
-        by_risk = {r["risk_level"]: r["cnt"] for r in rows}
+        by_vcf_status = {r["vcf_status"]: r["cnt"] for r in rows}
+
+        # Documents
         total_docs = conn.execute(
             "SELECT COUNT(*) AS n FROM case_documents WHERE firm_id=%s",
             (firm_id,)
         ).fetchone()["n"]
-        rows = conn.execute(
-            "SELECT source, COUNT(*) AS cnt FROM case_documents WHERE firm_id=%s GROUP BY source",
-            (firm_id,)
-        ).fetchall()
-        docs_by_source = {r["source"]: r["cnt"] for r in rows}
 
+        # Overdue / pending deadlines
         rows = conn.execute("""
-            SELECT c.case_number, c.client_name,
-                   COUNT(cd.id) AS doc_count
-            FROM cases c
-            LEFT JOIN case_documents cd ON cd.case_id = c.id
-            WHERE c.deleted = FALSE AND c.firm_id = %s
-            GROUP BY c.id, c.case_number, c.client_name
-            ORDER BY doc_count DESC LIMIT 5
+            SELECT status, COUNT(*) AS cnt
+            FROM vcf_deadlines
+            WHERE firm_id = %s AND due_date IS NOT NULL
+            GROUP BY status
         """, (firm_id,)).fetchall()
-        most_active = [row_to_dict(r) for r in rows]
+        deadlines_by_status = {r["status"]: r["cnt"] for r in rows}
+        overdue = conn.execute("""
+            SELECT COUNT(*) AS n FROM vcf_deadlines
+            WHERE firm_id = %s AND status = 'pending' AND due_date < CURRENT_DATE
+        """, (firm_id,)).fetchone()["n"]
 
-    total = sum(by_status.values())
-    active = by_status.get("open", 0)
+        # Recent intake volume (last 30 days)
+        recent_intake = conn.execute("""
+            SELECT COUNT(*) AS n FROM intake_scans
+            WHERE firm_id = %s AND created_at >= NOW() - INTERVAL '30 days'
+        """, (firm_id,)).fetchone()["n"]
+
+        # Disbursement totals
+        rows = conn.execute("""
+            SELECT
+                COALESCE(SUM(gross_award), 0) AS total_gross,
+                COALESCE(SUM(net_to_claimant), 0) AS total_net,
+                COALESCE(SUM(attorney_fee_amount), 0) AS total_fees
+            FROM vcf_disbursements
+            WHERE firm_id = %s
+        """, (firm_id,)).fetchall()
+        disbursement_totals = dict(rows[0]) if rows else {"total_gross": 0, "total_net": 0, "total_fees": 0}
+
     return {
-        "by_status":         by_status,
-        "total_cases":       total,
-        "total":             total,
-        "active":            active,
-        "by_risk":           by_risk,
-        "total_documents":   total_docs,
-        "docs_by_source":    docs_by_source,
-        "most_active_cases": most_active,
+        "total_claims":        total,
+        "by_stage":            by_stage,
+        "by_vcf_status":       by_vcf_status,
+        "total_documents":     total_docs,
+        "deadlines_pending":   deadlines_by_status.get("pending", 0),
+        "deadlines_overdue":   overdue,
+        "recent_intake_30d":   recent_intake,
+        "disbursement_totals": disbursement_totals,
     }
 
 

@@ -19,6 +19,7 @@ const CorrespondenceView = () => import('@/views/correspondence/CorrespondenceVi
 const CalendarView       = () => import('@/views/calendar/CalendarView.vue')
 const ContactsView       = () => import('@/views/contacts/ContactsView.vue')
 const ReportsView        = () => import('@/views/reports/ReportsView.vue')
+const VcfReportsView     = () => import('@/views/reports/VcfReportsView.vue')
 const ExportsView        = () => import('@/views/exports/ExportsView.vue')
 const AiConfigView       = () => import('@/views/ai-config/AiConfigView.vue')
 const SuperAdminMonitorView = () => import('@/views/monitor/SuperAdminMonitorView.vue')
@@ -188,6 +189,11 @@ const routes = [
         name: 'reports',
         component: ReportsView,
         meta: { module: 'reports' },
+      },
+      {
+        path: 'vcf-reports',
+        name: 'vcf_reports',
+        component: VcfReportsView,
       },
       {
         path: 'exports',
