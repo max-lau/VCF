@@ -53,6 +53,7 @@ import anthropic
 from backend.demo1.intelligence import get_deadline_radar
 from backend.demo1.vcf_deadlines import router as vcf_deadlines_router
 from backend.demo1.vcf_disbursements import router as vcf_disbursements_router
+from backend.demo1.vcf_account import router as vcf_account_router, init_vcf_account_table
 import os
 import json
 import logging
@@ -256,6 +257,7 @@ async def startup_event():
     init_redaction_table()
     init_transcription_table()
     init_messages_table()
+    init_vcf_account_table()
     init_enclave_tables()
     from backend.demo1.esignature import init_esign_tables
     init_esign_tables()
@@ -415,6 +417,7 @@ app.include_router(esign_router, prefix="/esign", tags=["e-signature"])
 app.include_router(time_tracker_router, prefix="/time-tracker", tags=["time-tracking"])
 app.include_router(workflows_router, tags=["workflows"])
 app.include_router(vcf_deadlines_router, tags=["VCF Deadlines"])
+app.include_router(vcf_account_router, prefix="/vcf", tags=["VCF Account Prep"])
 
 # ── Phase 1: AI Infrastructure Endpoints ─────────────────────────────────────
 

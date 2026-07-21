@@ -20,31 +20,40 @@ from backend.demo1.pg import get_conn
 logger = logging.getLogger(__name__)
 
 def init_communications_tables():
-    """Creates the communications log table if it doesn't exist."""
+    """Creates the communications log table if it doesn't exist (RLS-aware)."""
     try:
-        import os
-        from dotenv import load_dotenv
-        load_dotenv("/root/nlp-portfolio/.env")
-        import psycopg2
-        conn = psycopg2.connect(os.getenv("DATABASE_URL"))
-        conn.autocommit = True
-        cursor = conn.cursor()
-        cursor.execute("""
-            CREATE TABLE IF NOT EXISTS public.communications (
-                id BIGSERIAL PRIMARY KEY,
-                firm_id TEXT NOT NULL,
-                matter_id BIGINT,
-                comm_type TEXT NOT NULL, -- 'email' or 'sms'
-                direction TEXT NOT NULL, -- 'inbound' or 'outbound'
-                sender TEXT,
-                recipient TEXT,
-                body TEXT,
-                created_at TIMESTAMPTZ DEFAULT NOW()
-            );
-            ALTER TABLE public.communications ENABLE ROW LEVEL SECURITY;
-        """)
-        cursor.close()
-        conn.close()
+        from backend.demo1.pg import get_conn
+        with get_conn("waw_vcf") as conn:
+            conn.execute("""
+                CREATE TABLE IF NOT EXISTS communications (
+                    id BIGSERIAL PRIMARY KEY,
+                    firm_id TEXT NOT NULL,
+                    matter_id BIGINT,
+                    comm_type TEXT NOT NULL,
+                    direction TEXT NOT NULL,
+                    sender TEXT,
+                    recipient TEXT,
+                    body TEXT,
+                    created_at TIMESTAMPTZ DEFAULT NOW()
+                )
+            """)
+            conn.execute("ALTER TABLE communications ENABLE ROW LEVEL SECURITY")
+            conn.execute("""
+                DO $$
+                BEGIN
+                    IF NOT EXISTS (
+                        SELECT 1 FROM pg_policies
+                        WHERE schemaname = 'public' AND tablename = 'communications'
+                          AND policyname = 'communications_tenant_isolation'
+                    ) THEN
+                        CREATE POLICY communications_tenant_isolation ON communications
+                            USING (firm_id = current_setting('app.current_firm_id', true))
+                            WITH CHECK (firm_id = current_setting('app.current_firm_id', true));
+                    END IF;
+                END
+                $$
+            """)
+            conn.commit()
         print("[Comms] Communications table initialized ✓")
     except Exception as e:
         print(f"Error initializing comms tables: {e}")

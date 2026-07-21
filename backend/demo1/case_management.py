@@ -46,15 +46,22 @@ router = APIRouter()
 # ══════════════════════════════════════════════════════════════════════════════
 
 class CreateCaseBody(BaseModel):
-    case_number:   str
-    client_name:   str
-    matter_number: Optional[str] = ""
-    status:        Optional[str] = "open"
-    court:         Optional[str] = ""
-    judge:         Optional[str] = ""
-    filing_date:   Optional[str] = ""
-    description:   Optional[str] = ""
-    tags:          Optional[List[str]] = []
+    case_number:          str
+    client_name:          str
+    matter_number:        Optional[str] = ""
+    status:               Optional[str] = "open"
+    claim_stage:          Optional[str] = "intake"
+    vcf_status:           Optional[str] = "pending"
+    presence_proof_status: Optional[str] = "not_started"
+    date_of_birth:        Optional[str] = ""
+    ssn_last4:            Optional[str] = ""
+    preferred_language:   Optional[str] = ""
+    exposure_location:    Optional[str] = ""
+    presence_dates:       Optional[str] = ""
+    wtc_health_program:   Optional[bool] = False
+    award_amount:         Optional[float] = None
+    description:          Optional[str] = ""
+    tags:                 Optional[List[str]] = []
 
 class UpdateStatusBody(BaseModel):
     status: str
@@ -148,12 +155,19 @@ async def create_case(
             cur = conn.execute("""
                 INSERT INTO cases
                   (firm_id, case_number, client_name, matter_number, status,
-                   court, judge, filing_date, description)
-                VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s)
+                   claim_stage, vcf_status, presence_proof_status,
+                   date_of_birth, ssn_last4, preferred_language,
+                   exposure_location, presence_dates, wtc_health_program,
+                   award_amount, description)
+                VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)
                 RETURNING id
             """, (firm_id, body.case_number.strip(), body.client_name.strip(),
-                  body.matter_number, body.status, body.court,
-                  body.judge, body.filing_date or None, body.description))
+                  body.matter_number, body.status,
+                  body.claim_stage, body.vcf_status, body.presence_proof_status,
+                  body.date_of_birth or None, body.ssn_last4 or None,
+                  body.preferred_language or None, body.exposure_location or None,
+                  body.presence_dates or None, body.wtc_health_program,
+                  body.award_amount, body.description))
             case_id = cur.fetchone()["id"]
 
             for tag in body.tags:
@@ -407,14 +421,9 @@ async def add_document(
             "UPDATE cases SET risk_level = %s, updated_at = %s WHERE id = %s",
             (new_risk, ts_now(), case_id))
 
-    # Fire contradiction scan in background — non-blocking
-    if body.doc_text:
-        import threading as _th
-        _th.Thread(
-            target=run_case_contradiction_scan,
-            args=(case_id, new_doc_id),
-            daemon=True
-        ).start()
+    # Auto contradiction scan disabled for VCFClaimsIQ — contradictions are a
+    # litigation feature and are wasteful at 10k+ claim volume. The manual
+    # /cases/{id}/contradictions endpoints remain available if needed.
 
     return {"success": True, "case_id": case_id,
             "document_id": new_doc_id,

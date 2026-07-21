@@ -5,87 +5,76 @@
         <span class="back-icon">←</span> Back
       </button>
       <div class="header-text">
-        <h1>New Matter</h1>
-        <p class="subtitle">Create a new client matter</p>
+        <h1>New VCF Claim</h1>
+        <p class="subtitle">Create a new 9/11 Victim Compensation Fund claim</p>
       </div>
     </div>
 
-    <!-- ── POST-CREATION UPLOAD STEP ─────────────────────────────────── -->
-    <div v-if="createdMatter" class="success-card">
+    <!-- ── POST-CREATION SUCCESS STEP ─────────────────────────────────── -->
+    <div v-if="createdClaim" class="success-card">
       <div class="success-card__icon">✓</div>
       <div class="success-card__body">
-        <div class="success-card__title">Matter Created</div>
+        <div class="success-card__title">Claim Created</div>
         <div class="success-card__meta">
-          <span class="mono">{{ createdMatter.case_number }}</span>
+          <span class="mono">{{ createdClaim.case_number }}</span>
           <span class="dim">·</span>
-          <span>{{ createdMatter.client_name }}</span>
+          <span>{{ createdClaim.client_name }}</span>
         </div>
         <p class="success-card__sub">
-          Upload initial client documents now, or skip and add them later from the matter page.
+          You can now upload intake documents and track the claim through the VCF workflow.
         </p>
       </div>
       <div class="success-card__actions">
-        <button class="btn-upload-lg" @click="showUpload = true">
-          ↑ Upload Initial Documents
-        </button>
-        <button class="btn-secondary" @click="goToMatter">
-          Open Matter →
+        <button class="btn-secondary" @click="goToClaim">
+          Open Claim →
         </button>
       </div>
     </div>
 
-    <!-- ── CREATION FORM (hidden once matter is created) ─────────────── -->
+    <!-- ── CREATION FORM ─────────────────────────────────────────────── -->
     <div v-else class="form-container">
       <form @submit.prevent="submitCase">
 
-        <!-- BASIC INFO -->
+        <!-- CLAIM IDENTIFIERS -->
         <section class="form-section">
-          <h2 class="section-title">Matter Details</h2>
+          <h2 class="section-title">Claim Details</h2>
           <div class="field-grid">
-            <div class="field full-width">
-              <label>Matter Name <span class="required">*</span></label>
+            <div class="field">
+              <label>Claim Number <span class="required">*</span></label>
               <input
-                v-model="form.case_name"
+                v-model="form.case_number"
                 type="text"
-                placeholder="e.g. Smith v. Acme Corp — Wrongful Termination"
-                :class="{ 'error': errors.case_name }"
-                @input="clearError('case_name')"
+                placeholder="e.g. VCF-2026-00001"
+                :class="{ 'error': errors.case_number }"
+                @input="clearError('case_number')"
               />
-              <span v-if="errors.case_name" class="field-error">{{ errors.case_name }}</span>
+              <span v-if="errors.case_number" class="field-error">{{ errors.case_number }}</span>
             </div>
 
             <div class="field">
-              <label>Case / Matter Number</label>
-              <input v-model="form.case_number" type="text" placeholder="2025-CV-00123" />
-            </div>
-
-            <div class="field">
-              <label>Case Type <span class="required">*</span></label>
-              <select v-model="form.case_type" :class="{ 'error': errors.case_type }" @change="clearError('case_type')">
-                <option value="">— Select type —</option>
-                <option v-for="t in caseTypes" :key="t.value" :value="t.value">{{ t.label }}</option>
-              </select>
-              <span v-if="errors.case_type" class="field-error">{{ errors.case_type }}</span>
-            </div>
-
-            <div class="field">
-              <label>Status</label>
-              <select v-model="form.status">
-                <option value="active">Active</option>
-                <option value="pending">Pending</option>
-                <option value="closed">Closed</option>
-                <option value="on_hold">On Hold</option>
+              <label>Claim Stage</label>
+              <select v-model="form.claim_stage">
+                <option v-for="s in claimStages" :key="s" :value="s">{{ formatLabel(s) }}</option>
               </select>
             </div>
 
             <div class="field">
-              <label>Jurisdiction</label>
-              <input v-model="form.jurisdiction" type="text" placeholder="e.g. SDNY, California Superior Court" />
+              <label>VCF Status</label>
+              <select v-model="form.vcf_status">
+                <option v-for="s in vcfStatuses" :key="s" :value="s">{{ formatLabel(s) }}</option>
+              </select>
             </div>
 
             <div class="field">
-              <label>Date Filed</label>
-              <input v-model="form.date_filed" type="date" />
+              <label>Presence Proof Status</label>
+              <select v-model="form.presence_proof_status">
+                <option v-for="s in presenceStatuses" :key="s" :value="s">{{ formatLabel(s) }}</option>
+              </select>
+            </div>
+
+            <div class="field">
+              <label>Award Amount ($)</label>
+              <input v-model="form.award_amount" type="number" min="0" step="0.01" placeholder="0.00" />
             </div>
           </div>
         </section>
@@ -99,7 +88,7 @@
               <input
                 v-model="form.client_name"
                 type="text"
-                placeholder="Full legal name or entity"
+                placeholder="Full legal name"
                 :class="{ 'error': errors.client_name }"
                 @input="clearError('client_name')"
               />
@@ -107,57 +96,56 @@
             </div>
 
             <div class="field">
-              <label>Opposing Party</label>
-              <input v-model="form.opposing_party" type="text" placeholder="Defendant / Respondent name" />
+              <label>Date of Birth</label>
+              <input v-model="form.date_of_birth" type="date" />
             </div>
 
             <div class="field">
-              <label>Client Email</label>
-              <input v-model="form.client_email" type="email" placeholder="client@example.com" />
+              <label>SSN Last 4</label>
+              <input v-model="form.ssn_last4" type="text" maxlength="4" placeholder="0000" />
             </div>
 
             <div class="field">
-              <label>Client Phone</label>
-              <input v-model="form.client_phone" type="tel" placeholder="+1 (212) 555-0100" />
+              <label>Preferred Language</label>
+              <input v-model="form.preferred_language" type="text" placeholder="e.g. English, Cantonese" />
             </div>
           </div>
         </section>
 
-        <!-- ATTORNEY ASSIGNMENT -->
+        <!-- EXPOSURE & ELIGIBILITY -->
         <section class="form-section">
-          <h2 class="section-title">Assignment</h2>
+          <h2 class="section-title">Exposure & Eligibility</h2>
           <div class="field-grid">
             <div class="field">
-              <label>Lead Attorney</label>
-              <input v-model="form.lead_attorney" type="text" placeholder="Attorney name" />
+              <label>Exposure Location</label>
+              <input v-model="form.exposure_location" type="text" placeholder="e.g. Lower Manhattan, Fresh Kills" />
             </div>
 
             <div class="field">
-              <label>Billing Rate ($/hr)</label>
-              <input v-model="form.billing_rate" type="number" min="0" step="25" placeholder="350" />
+              <label>Presence Dates</label>
+              <input v-model="form.presence_dates" type="text" placeholder="e.g. 09/11/2001 - 05/30/2002" />
             </div>
 
             <div class="field">
-              <label>Retainer Amount ($)</label>
-              <input v-model="form.retainer_amount" type="number" min="0" step="100" placeholder="5000" />
-            </div>
-
-            <div class="field">
-              <label>Statute of Limitations</label>
-              <input v-model="form.sol_date" type="date" />
+              <label>WTC Health Program Enrolled?</label>
+              <select v-model="form.wtc_health_program">
+                <option :value="true">Yes</option>
+                <option :value="false">No</option>
+                <option :value="null">Unknown</option>
+              </select>
             </div>
           </div>
         </section>
 
-        <!-- DESCRIPTION -->
+        <!-- NOTES -->
         <section class="form-section">
-          <h2 class="section-title">Case Summary</h2>
+          <h2 class="section-title">Notes</h2>
           <div class="field full-width">
-            <label>Description / Notes</label>
+            <label>Description / Initial Notes</label>
             <textarea
               v-model="form.description"
               rows="5"
-              placeholder="Brief summary of the matter, key facts, and initial legal theories..."
+              placeholder="Initial facts, conditions, special circumstances..."
             ></textarea>
             <span class="char-count">{{ form.description.length }} characters</span>
           </div>
@@ -168,7 +156,7 @@
           <button type="button" class="btn-secondary" @click="$router.back()">Cancel</button>
           <button type="submit" class="btn-primary" :disabled="submitting">
             <span v-if="submitting" class="spinner"></span>
-            <span v-else>Create Matter</span>
+            <span v-else>Create Claim</span>
           </button>
         </div>
 
@@ -180,67 +168,54 @@
       </form>
     </div>
 
-    <!-- Discovery Upload — opens after matter creation, pre-scoped -->
-    <DiscoveryUpload
-      v-if="createdMatter"
-      :show="showUpload"
-      :matter-id="createdMatter.id"
-      :matter-name="createdMatter.client_name"
-      :case-number="createdMatter.case_number"
-      @close="showUpload = false"
-      @uploaded="onUploaded"
-    />
-
   </div>
 </template>
 
 <script setup>
 import { ref, reactive } from 'vue'
 import { useRouter } from 'vue-router'
-import DiscoveryUpload from '@/components/DiscoveryUpload.vue'
 
 const router     = useRouter()
 const submitting = ref(false)
 const apiError   = ref('')
 
-// ── Post-creation state ────────────────────────────────────────────────────
-const createdMatter  = ref(null)   // set after successful POST
-const showUpload     = ref(false)
-const uploadDone     = ref(false)
+const createdClaim = ref(null)
 
-function goToMatter() {
-  router.push('/matters/' + createdMatter.value.id)
+function goToClaim() {
+  router.push('/matters/' + createdClaim.value.id)
 }
 
-function onUploaded() {
-  uploadDone.value = true
-  showUpload.value = false
-  // Give user a moment to see the success state then navigate
-  setTimeout(goToMatter, 1200)
-}
-
-// ── Case types ─────────────────────────────────────────────────────────────
-const caseTypes = [
-  { value: 'employment',       label: 'Employment Law' },
-  { value: 'civil_litigation', label: 'Civil Litigation' },
-  { value: 'contract_dispute', label: 'Contract Dispute' },
-  { value: 'personal_injury',  label: 'Personal Injury / Tort' },
-  { value: 'corporate',        label: 'Corporate / Business' },
-  { value: 'real_estate',      label: 'Real Estate' },
-  { value: 'family_law',       label: 'Family Law' },
-  { value: 'criminal_defense', label: 'Criminal Defense' },
-  { value: 'immigration',      label: 'Immigration' },
-  { value: 'IP',               label: 'Intellectual Property' },
-  { value: 'bankruptcy',       label: 'Bankruptcy' },
-  { value: 'regulatory',       label: 'Regulatory / Compliance' },
-  { value: 'other',            label: 'Other' },
+const claimStages = [
+  'intake', 'eligibility_review', 'document_gathering', 'vcf_account_created',
+  'claim_submitted', 'under_review', 'award_determination', 'disbursement', 'closed'
 ]
 
+const vcfStatuses = [
+  'pending', 'eligible', 'missing_information', 'denied', 'appealed', 'award_issued', 'paid'
+]
+
+const presenceStatuses = [
+  'not_started', 'in_progress', 'sufficient', 'insufficient', 'pending_verification'
+]
+
+function formatLabel(key) {
+  return key.replace(/_/g, ' ').replace(/\b\w/g, l => l.toUpperCase())
+}
+
 const form = reactive({
-  case_name: '', case_number: '', case_type: '', status: 'active',
-  jurisdiction: '', date_filed: '', client_name: '', client_email: '',
-  client_phone: '', opposing_party: '', lead_attorney: '',
-  billing_rate: '', retainer_amount: '', sol_date: '', description: '',
+  case_number: '',
+  client_name: '',
+  claim_stage: 'intake',
+  vcf_status: 'pending',
+  presence_proof_status: 'not_started',
+  date_of_birth: '',
+  ssn_last4: '',
+  preferred_language: '',
+  exposure_location: '',
+  presence_dates: '',
+  wtc_health_program: false,
+  award_amount: '',
+  description: '',
 })
 
 const errors = reactive({})
@@ -248,9 +223,11 @@ function clearError(field) { delete errors[field] }
 
 function validate() {
   let valid = true
-  if (!form.case_name.trim())   { errors.case_name   = 'Matter name is required';  valid = false }
-  if (!form.case_type)          { errors.case_type   = 'Case type is required';    valid = false }
-  if (!form.client_name.trim()) { errors.client_name = 'Client name is required';  valid = false }
+  if (!form.case_number.trim()) { errors.case_number = 'Claim number is required'; valid = false }
+  if (!form.client_name.trim()) { errors.client_name = 'Client name is required'; valid = false }
+  if (form.ssn_last4 && !/^\d{0,4}$/.test(form.ssn_last4)) {
+    errors.ssn_last4 = 'SSN last 4 must be up to 4 digits'; valid = false
+  }
   return valid
 }
 
@@ -262,29 +239,20 @@ async function submitCase() {
   const token = localStorage.getItem('paraiq_token')
 
   try {
-    const caseNum = form.case_number.trim() ||
-      `${new Date().getFullYear()}-CV-${Math.floor(Math.random()*90000+10000)}`
-
-    const extras = []
-    if (form.case_type)       extras.push(`Type: ${form.case_type}`)
-    if (form.opposing_party)  extras.push(`Opposing Party: ${form.opposing_party.trim()}`)
-    if (form.lead_attorney)   extras.push(`Lead Attorney: ${form.lead_attorney.trim()}`)
-    if (form.billing_rate)    extras.push(`Billing Rate: $${form.billing_rate}/hr`)
-    if (form.retainer_amount) extras.push(`Retainer: $${form.retainer_amount}`)
-    if (form.sol_date)        extras.push(`SOL: ${form.sol_date}`)
-    if (form.client_email)    extras.push(`Email: ${form.client_email.trim()}`)
-    if (form.client_phone)    extras.push(`Phone: ${form.client_phone.trim()}`)
-    const fullDesc = [extras.join(' | '), form.description.trim()].filter(Boolean).join('\n')
-
     const payload = {
-      case_number:   caseNum,
+      case_number:   form.case_number.trim(),
       client_name:   form.client_name.trim(),
-      matter_number: form.case_name.trim(),
-      status:        form.status === 'active' ? 'open' : form.status,
-      court:         form.jurisdiction.trim(),
-      filing_date:   form.date_filed || '',
-      description:   fullDesc,
-      tags:          form.case_type ? [form.case_type] : [],
+      claim_stage:   form.claim_stage,
+      vcf_status:    form.vcf_status,
+      presence_proof_status: form.presence_proof_status,
+      date_of_birth: form.date_of_birth || '',
+      ssn_last4:     form.ssn_last4 || '',
+      preferred_language: form.preferred_language || '',
+      exposure_location:  form.exposure_location || '',
+      presence_dates:     form.presence_dates || '',
+      wtc_health_program: form.wtc_health_program,
+      award_amount:       form.award_amount ? parseFloat(form.award_amount) : null,
+      description:        form.description.trim(),
     }
 
     const res = await fetch('/api/cases/', {
@@ -302,15 +270,14 @@ async function submitCase() {
     }
 
     const created = await res.json()
-    // Show upload step instead of immediately navigating
-    createdMatter.value = {
-      id:           created.id,
-      client_name:  form.client_name.trim(),
-      case_number:  caseNum,
+    createdClaim.value = {
+      id:          created.case_id,
+      client_name: form.client_name.trim(),
+      case_number: form.case_number.trim(),
     }
 
   } catch (e) {
-    apiError.value = e.message || 'Failed to create matter. Please try again.'
+    apiError.value = e.message || 'Failed to create claim. Please try again.'
   } finally {
     submitting.value = false
   }
@@ -324,14 +291,12 @@ async function submitCase() {
   padding: 24px 20px 60px;
 }
 
-/* Page header */
 .page-header { display: flex; align-items: center; gap: 16px; margin-bottom: 32px; }
 .back-btn { display: flex; align-items: center; gap: 6px; background: transparent; border: 1px solid var(--border-color, #2a2a3a); color: var(--text-muted, #888); padding: 8px 14px; border-radius: 6px; cursor: pointer; font-size: 13px; transition: all 0.15s; white-space: nowrap; }
 .back-btn:hover { background: var(--surface-hover, #1a1a2e); color: var(--text-primary, #e0e0e0); }
 .header-text h1 { font-size: 24px; font-weight: 700; color: var(--text-primary, #e0e0e0); margin: 0 0 4px; }
 .subtitle { font-size: 13px; color: var(--text-muted, #888); margin: 0; }
 
-/* Success / upload step */
 .success-card {
   background: var(--surface, #111122);
   border: 1px solid rgba(201,168,76,0.4);
@@ -350,21 +315,6 @@ async function submitCase() {
 .success-card__sub   { color: var(--text-muted); font-size: 0.875rem; max-width: 420px; line-height: 1.6; margin: 0; }
 .success-card__actions { display: flex; gap: 0.75rem; flex-wrap: wrap; justify-content: center; margin-top: 0.5rem; }
 
-.btn-upload-lg {
-  background: var(--gold, #c9a84c);
-  border: none;
-  border-radius: 8px;
-  color: #0a0a14;
-  cursor: pointer;
-  font-size: 0.9rem;
-  font-weight: 700;
-  padding: 0.7rem 1.75rem;
-  transition: opacity 0.15s, box-shadow 0.15s;
-  white-space: nowrap;
-}
-.btn-upload-lg:hover { opacity: 0.88; box-shadow: 0 4px 16px rgba(201,168,76,0.35); }
-
-/* Form */
 .form-container { background: var(--surface, #111122); border: 1px solid var(--border-color, #2a2a3a); border-radius: 12px; overflow: hidden; }
 .form-section { padding: 28px 32px; border-bottom: 1px solid var(--border-color, #1e1e30); }
 .form-section:last-of-type { border-bottom: none; }
