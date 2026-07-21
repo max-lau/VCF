@@ -8,7 +8,7 @@
     <!-- Guide link -->
     <a href="/tutorial.html" target="_blank" class="dashboard__guide">
       <i class="ti ti-book-2" aria-hidden="true"></i>
-      New to ParaIQ? Read the user guide
+      New to VCFClaimsIQ? Read the user guide
       <i class="ti ti-arrow-right" style="font-size:11px" aria-hidden="true"></i>
     </a>
 

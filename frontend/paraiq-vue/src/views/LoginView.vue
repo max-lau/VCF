@@ -3,8 +3,8 @@
     <div class="login__panel">
       <!-- Brand -->
       <div class="login__brand">
-        <span class="login__logo">ParaIQ</span>
-        <p class="login__tagline">Legal Intelligence Platform</p>
+        <span class="login__logo">VCFClaimsIQ</span>
+        <p class="login__tagline">9/11 Victim Compensation Fund Claims</p>
       </div>
 
       <!-- Form -->

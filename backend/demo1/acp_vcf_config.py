@@ -4,7 +4,7 @@ ACP-VCF Configuration
 Specialized for WAW Law Firm - 9/11 Victim Compensation Fund (VCF) Claims
 """
 
-APP_NAME = "ACP-VCF"
+APP_NAME = "VCFClaimsIQ"
 FIRM_NAME = "WAW Law Firm - 9/11 VCF Claims"
 FIRM_ID = "waw_vcf"                    # Fixed single-tenant ID
 

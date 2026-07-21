@@ -13,7 +13,8 @@ export const useAuthStore = defineStore('auth', () => {
   const isAuthenticated = computed(() => !!token.value)
   const firmId          = computed(() => user.value?.firm_id || 'default')
   const FIRM_NAMES = {
-    'default':       'ParaIQ',
+    'default':       'VCFClaimsIQ',
+    'waw_vcf':       'WAW Law Firm - VCF',
     'firm_abc':      'Thornton & Associates',
     'meridian_legal':'Meridian Legal Group',
   }

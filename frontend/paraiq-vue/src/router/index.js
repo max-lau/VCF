@@ -9,64 +9,41 @@ const EmailInboxView  = () => import('@/views/email/EmailInboxView.vue')
 const DashboardView   = () => import('@/views/DashboardView.vue')
 const ModuleStub      = () => import('@/views/ModuleStub.vue')
 
-// ── Module views (stubbed — replace with real components as you build) ─
+// ── Core VCFClaimsIQ views ─────────────────────────────────────────────
 const MattersView      = () => import('@/views/matters/MattersView.vue')
 const MatterDetailView = () => import('@/views/matters/MatterDetailView.vue')
-const CreateCaseView  = () => import('@/views/matters/CreateCase.vue')
-const PrivilegeView   = () => import('@/views/privilege/PrivilegeLogView.vue')
-const DocumentsView   = () => import('@/views/documents/DocumentsView.vue')
-const DiscoveryView   = () => import('@/views/discovery/DiscoveryView.vue')
+const CreateCaseView   = () => import('@/views/matters/CreateCase.vue')
+const DocumentsView    = () => import('@/views/documents/DocumentsView.vue')
 const IntelligenceView = () => import('@/views/intelligence/CaseIntelligenceFeedView.vue')
-const TimelineView     = () => import('@/views/timeline/TimelineView.vue')
-const CaseWallView     = () => import('@/views/casewall/CaseWallView.vue')
-const DepositionsView  = () => import('@/views/depositions/DepositionsView.vue')
-const MotionsView      = () => import('@/views/motions/MotionsView.vue')
-const ContractsView    = () => import('@/views/contracts/ContractsView.vue')
 const CorrespondenceView = () => import('@/views/correspondence/CorrespondenceView.vue')
 const CalendarView       = () => import('@/views/calendar/CalendarView.vue')
 const ContactsView       = () => import('@/views/contacts/ContactsView.vue')
 const ReportsView        = () => import('@/views/reports/ReportsView.vue')
 const ExportsView        = () => import('@/views/exports/ExportsView.vue')
-const LegalBertView      = () => import('@/views/legal-bert/LegalBertView.vue')
 const AiConfigView       = () => import('@/views/ai-config/AiConfigView.vue')
 const SuperAdminMonitorView = () => import('@/views/monitor/SuperAdminMonitorView.vue')
 const ClientPortalView   = () => import('@/views/portal/ClientPortalView.vue')
-const VoiceShortcutsView  = () => import('@/views/voice/VoiceShortcutsView.vue')
-const MorningBriefView    = () => import('@/views/brief/MorningBriefView.vue')
-const TimeCaptureView     = () => import('@/views/time/TimeCaptureView.vue')
-const ApprovalQueueView   = () => import('@/views/approvals/ApprovalQueueView.vue')
-const ClientPortalAccess  = () => import('@/views/portal/ClientPortalAccess.vue')
-const LegalResearchView  = () => import('@/views/research/LegalResearchView.vue')
-const RiskView           = () => import('@/views/risk/RiskView.vue')
+const ClientPortalAccess = () => import('@/views/portal/ClientPortalAccess.vue')
+const TimeCaptureView    = () => import('@/views/time/TimeCaptureView.vue')
+const ApprovalQueueView  = () => import('@/views/approvals/ApprovalQueueView.vue')
 const IntakeView         = () => import('@/views/intake/IntakeView.vue')
 const RedactionView      = () => import('@/views/redaction/RedactionView.vue')
 const ReviewView         = () => import('@/views/review/ReviewView.vue')
-const ScorerView         = () => import('@/views/scorer/ScorerView.vue')
-const AnalyzerView     = () => import('@/views/analyzer/AnalyzerView.vue')
-const BatchView        = () => import('@/views/batch/BatchView.vue')
-const CitationsView    = () => import('@/views/citations/CitationsView.vue')
-const CompareView      = () => import('@/views/compare/CompareView.vue')
-const CredibilityView  = () => import('@/views/credibility/CredibilityView.vue')
-const InterrogationView= () => import('@/views/interrogation/InterrogationView.vue')
-const MediaView        = () => import('@/views/media/MediaView.vue')
-const ModelView        = () => import('@/views/model/ModelView.vue')
-const MultilingualView = () => import('@/views/multilingual/MultilingualView.vue')
-const InsightsView     = () => import('@/views/insights/InsightsView.vue')
+const MultilingualView   = () => import('@/views/multilingual/MultilingualView.vue')
+const InsightsView       = () => import('@/views/insights/InsightsView.vue')
 const SemanticSearchView = () => import('@/views/search/SemanticSearchView.vue')
 const EsignView          = () => import('@/views/esign/EsignView.vue')
-const ClientPortalManage  = () => import('@/views/portal/ClientPortalManageView.vue')
+const ClientPortalManage = () => import('@/views/portal/ClientPortalManageView.vue')
 const AuditLogView       = () => import('@/views/audit/AuditLogView.vue')
-const EnclaveView        = () => import('@/views/enclave/EnclaveManagementView.vue')
-const UsersView       = () => import('@/views/admin/UsersView.vue')
-const AdminView       = () => import('@/views/admin/AdminView.vue')
-const BillingView     = () => import('@/views/admin/BillingView.vue')
-const ClientBillingView = () => import('@/views/admin/BillingView.vue')
+const UsersView          = () => import('@/views/admin/UsersView.vue')
+const AdminView          = () => import('@/views/admin/AdminView.vue')
+const BillingView        = () => import('@/views/admin/BillingView.vue')
 
 const routes = [
   {
     path: '/workflows',
     name: 'workflows',
-    component: () => import('../views/workflows/WorkflowsView.vue'),
+    component: ModuleStub,
     meta: { requiresAuth: true }
   },
   {
@@ -100,18 +77,8 @@ const routes = [
         name: 'semantic_search',
         component: SemanticSearchView,
       },
-      {
-        path: 'esign',
-        name: 'esign',
-        component: EsignView,
-      },
-      {
-        path: 'portal',
-        name: 'client_portal_manage',
-        component: ClientPortalManage,
-      },
 
-      // ── Case Work ─────────────────────────────────────────────────
+      // ── Claim Work ────────────────────────────────────────────────
       {
         path: 'matters/new',
         name: 'create_matter',
@@ -135,19 +102,6 @@ const routes = [
         component: DocumentsView,
         meta: { module: 'documents' },
       },
-      {
-        path: 'privilege-log',
-        name: 'privilege_log',
-        component: PrivilegeView,
-        meta: { module: 'privilege_log' },
-      },
-      {
-        path: 'timeline',
-        name: 'timeline',
-        component: TimelineView,
-        meta: { module: 'timeline' },
-      },
-      
       { path: 'email-inbox', name: 'email_inbox', component: EmailInboxView },
       {
         path: 'correspondence',
@@ -167,10 +121,42 @@ const routes = [
         component: ContactsView,
         meta: { module: 'contacts' },
       },
-      { 
-        path: '/vcf-deadlines', 
-        name: 'vcf-deadlines', 
-        component: () => import('../views/vcf/DeadlinesView.vue') 
+
+      // ── VCF Workflow ──────────────────────────────────────────────
+      {
+        path: 'vcf-deadlines',
+        name: 'vcf-deadlines',
+        component: () => import('@/views/vcf/DeadlinesView.vue'),
+      },
+      {
+        path: 'vcf-account-prep',
+        name: 'vcf_account_prep',
+        component: () => import('@/views/vcf/VcfAccountPrep.vue'),
+      },
+
+      // ── Documents & Intake ────────────────────────────────────────
+      {
+        path: 'intake',
+        name: 'intake',
+        component: IntakeView,
+        meta: { module: 'intake' },
+      },
+      {
+        path: 'batch-intake',
+        name: 'batch_intake',
+        component: ModuleStub,
+        meta: { module: 'intake' },
+      },
+      {
+        path: 'redaction',
+        name: 'redaction',
+        component: RedactionView,
+        meta: { module: 'redaction' },
+      },
+      {
+        path: 'esign',
+        name: 'esign',
+        component: EsignView,
       },
 
       // ── AI & Analysis ─────────────────────────────────────────────
@@ -181,28 +167,20 @@ const routes = [
         meta: { module: 'legal_bert' },
       },
       {
-        path: 'legal-bert',
-        name: 'legal_bert',
-        component: LegalBertView,
-        meta: { module: 'legal_bert' },
+        path: 'multilingual',
+        name: 'multilingual',
+        component: MultilingualView,
       },
-      { path: 'risk',      name: 'risk',      component: RiskView,      meta: { module: 'risk' } },
-      { path: 'intake',    name: 'intake',    component: IntakeView,    meta: { module: 'intake' } },
-      { path: 'redaction', name: 'redaction', component: RedactionView, meta: { module: 'redaction' } },
-      { path: 'review',    name: 'review',    component: ReviewView,    meta: { module: 'review' } },
-      { path: 'scorer',    name: 'scorer',    component: ScorerView,    meta: { module: 'scorer' } },
-      { path: 'analyzer',     name: 'analyzer',     component: AnalyzerView },
-      { path: 'batch',        name: 'batch',        component: BatchView },
-      { path: 'compare',      name: 'compare',      component: CompareView },
-      { path: 'media',        name: 'media',        component: MediaView },
-      { path: 'model',        name: 'model',        component: ModelView },
-      { path: 'multilingual', name: 'multilingual', component: MultilingualView },
-      { path: 'insights',     name: 'insights',     component: InsightsView },
       {
-        path: 'ai-config',
-        name: 'ai_config',
-        component: AiConfigView,
-        meta: { module: 'ai_config' },
+        path: 'insights',
+        name: 'insights',
+        component: InsightsView,
+      },
+      {
+        path: 'reports',
+        name: 'reports',
+        component: ReportsView,
+        meta: { module: 'reports' },
       },
       {
         path: 'exports',
@@ -211,47 +189,33 @@ const routes = [
         meta: { module: 'exports' },
       },
       {
-        path: 'reports',
-        name: 'reports',
-        component: ReportsView,
-        meta: { module: 'reports' },
+        path: 'ai-config',
+        name: 'ai_config',
+        component: AiConfigView,
+        meta: { module: 'ai_config' },
       },
 
       // ── Client Portal ─────────────────────────────────────────────
       {
         path: 'portal',
-        name: 'client_portal',
-        component: ClientPortalView,
-        meta: { module: 'client_portal' },
+        name: 'client_portal_manage',
+        component: ClientPortalManage,
       },
 
+      // ── Workflow ──────────────────────────────────────────────────
       {
-        path: 'voice-shortcuts',
-        name: 'voice_shortcuts',
-        component: VoiceShortcutsView,
-      },
-      {
-        path: 'morning-brief',
-        name: 'morning_brief',
-        component: MorningBriefView,
+        path: 'approvals',
+        name: 'approval_queue',
+        component: ApprovalQueueView,
       },
       {
         path: 'time-capture',
         name: 'time_capture',
         component: TimeCaptureView,
       },
-      {
-        path: 'client-billing',
-        name: 'client_billing',
-        component: ClientBillingView,
-      },
-      {
-        path: 'approvals',
-        name: 'approval_queue',
-        component: ApprovalQueueView,
-      },
+
       // ── Firm Admin ────────────────────────────────────────────────
-        { path: 'admin', component: AdminView },
+      { path: 'admin', component: AdminView },
       {
         path: 'admin/users',
         name: 'users_roles',
@@ -265,12 +229,6 @@ const routes = [
         meta: { module: 'audit_log' },
       },
       {
-        path: 'admin/enclave',
-        name: 'enclave_mgmt',
-        component: EnclaveView,
-        meta: { module: 'enclave_mgmt' },
-      },
-      {
         path: 'admin/billing',
         name: 'billing',
         component: BillingView,
@@ -280,7 +238,6 @@ const routes = [
         path: 'super-admin/monitor',
         name: 'super_monitor',
         component: SuperAdminMonitorView,
-        meta: {},
       },
     ],
   },
@@ -310,7 +267,6 @@ router.beforeEach(async (to) => {
   // Module-gated route: check read permission
   if (to.meta.module) {
     if (!perms.can(to.meta.module, 'read')) {
-      // Redirect to dashboard with a forbidden flag
       return { name: 'dashboard', query: { forbidden: to.meta.module } }
     }
   }

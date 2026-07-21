@@ -66,7 +66,7 @@ const PAGE_TITLES = {
   enclave_mgmt:   'Enclave Management',
   billing:        'Billing',
 }
-const pageTitle = computed(() => PAGE_TITLES[route.name] || 'ParaIQ')
+const pageTitle = computed(() => PAGE_TITLES[route.name] || 'VCFClaimsIQ')
 
 const ROLE_BADGES = {
   paraiq_super: { label: 'Super Admin', cls: 'piq-badge--red'  },

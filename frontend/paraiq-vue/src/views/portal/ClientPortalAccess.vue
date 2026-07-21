@@ -3,7 +3,7 @@
     <!-- Portal Header -->
     <header class="bg-blue-900 text-white shadow-md">
       <div class="container mx-auto px-6 py-4 flex justify-between items-center">
-        <h1 class="text-xl font-bold">ParaIQ Client Portal</h1>
+        <h1 class="text-xl font-bold">VCFClaimsIQ Client Portal</h1>
         <div v-if="portalData.access" class="text-sm text-blue-200">
           Welcome, {{ portalData.access.client_name }}
         </div>

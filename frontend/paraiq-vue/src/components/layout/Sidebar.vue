@@ -5,20 +5,16 @@
     aria-label="Main navigation"
   >
     <div class="sidebar__brand">
-      <span class="sidebar__logo">ACP-VCF</span>
+      <span class="sidebar__logo">VCFClaimsIQ</span>
       <span class="sidebar__firm">{{ firmId }}</span>
     </div>
 
     <div class="sidebar__scroll">
       <NavItem to="/dashboard" icon="layout-dashboard" label="Dashboard" />
-      <NavItem to="/search" icon="search" label="Semantic Search" />
-      <NavItem to="/esign" icon="pen-tool" label="E-Signatures" />
-      <NavItem to="/portal" icon="users" label="Client Portal" />
 
-      <NavGroup label="Case Work">
-        <NavItem to="/matters"        icon="briefcase"        label="Matters" />
+      <NavGroup label="Claim Work">
+        <NavItem to="/matters"        icon="briefcase"        label="Claims" />
         <NavItem to="/documents"      icon="file-text"        label="Documents" />
-        <NavItem to="/timeline"       icon="timeline"         label="Timeline" />
         <NavItem to="/correspondence" icon="mail"             label="Correspondence" />
         <NavItem to="/email-inbox"    icon="inbox"            label="Email Intake" />
         <NavItem to="/calendar"       icon="calendar"         label="Calendar" />
@@ -27,67 +23,47 @@
 
       <NavGroup label="VCF Workflow">
         <NavItem to="/vcf-deadlines" icon="alarm-clock" label="Deadlines" />
+        <NavItem to="/vcf-account-prep" icon="user-check" label="VCF Account Prep" />
+      </NavGroup>
+
+      <NavGroup label="Documents & Intake">
+        <NavItem to="/intake"    icon="scan"        label="OCR Intake" />
+        <NavItem to="/batch-intake" icon="stack-2" label="Batch Intake" />
+        <NavItem to="/redaction" icon="eraser"      label="Redaction" />
+        <NavItem to="/esign"     icon="pen-tool"    label="E-Signatures" />
       </NavGroup>
 
       <NavGroup label="AI & Analysis">
-        <NavItem                          to="/intelligence" icon="brain"             label="Case Intelligence" />
-        <NavItem                          to="/scorer"       icon="chart-bar"         label="Summary Scorer" />
-        <NavItem                          to="/insights"     icon="bulb"              label="Insights" />
-        <NavItem                          to="/reports"      icon="report"            label="Reports" />
-        <NavItem                          to="/morning-brief" icon="sun"               label="Morning Brief" />
-        <NavItem                          to="/exports"      icon="download"          label="Exports" />
-        <NavItem                          to="/ai-config"    icon="settings"          label="AI Config"
-          badge="Admin" badge-variant="gold" />
-      </NavGroup>
-
-      <NavGroup label="NLP Tools">
-        <NavItem                          to="/analyzer"      icon="microscope"        label="Analyzer" />
-        <NavItem                          to="/batch"         icon="stack-2"           label="Batch Analyzer" />
-        <NavItem                          to="/compare"       icon="arrows-diff"       label="Compare" />
-        <NavItem                          to="/multilingual"  icon="world"             label="Multilingual" />
-      </NavGroup>
-
-      <NavGroup label="Document Processing">
-        <NavItem                          to="/intake"    icon="scan"        label="OCR Intake" />
-        <NavItem                          to="/redaction" icon="eraser"      label="Redaction" />
-        <NavItem                          to="/media"     icon="player-play" label="Media" />
-        <NavItem                          to="/review"    icon="eye"         label="Review Queue" />
-        <NavItem                          to="/model"     icon="cpu"         label="Fine-Tuned Model" />
+        <NavItem to="/intelligence" icon="brain"     label="Case Intelligence" />
+        <NavItem to="/multilingual" icon="world"     label="Multilingual" />
+        <NavItem to="/reports"      icon="report"    label="Reports" />
+        <NavItem to="/exports"      icon="download"  label="Exports" />
       </NavGroup>
 
       <NavGroup label="Client Portal">
-        <NavItem to="/portal" icon="door-enter" label="Portal View" />
+        <NavItem to="/portal" icon="users" label="Client Portal" />
       </NavGroup>
 
       <NavGroup label="Workflow">
         <NavItem to="/approvals"      icon="checks"      label="Approval Queue" />
         <NavItem to="/time-capture"   icon="clock"       label="Time Capture" />
-        <NavItem to="/client-billing" icon="credit-card" label="Client Billing" />
-      </NavGroup>
-
-      <NavGroup label="Voice">
-        <NavItem to="/voice-shortcuts" icon="microphone-2" label="Voice Shortcuts" />
       </NavGroup>
 
       <NavGroup v-if="isFirmAdmin" label="Firm Admin">
         <NavItem v-if="g.users_roles"  to="/admin"         icon="users"       label="Users & Roles" />
         <NavItem v-if="g.audit_log"    to="/admin/audit"   icon="list-check"  label="Audit Log" />
-        <NavItem v-if="g.enclave_mgmt" to="/admin/enclave" icon="server"      label="Enclaves" />
         <NavItem v-if="g.billing"      to="/admin/billing" icon="credit-card" label="Billing" />
-      </NavGroup>
-
-      <NavGroup v-if="!isFirmAdmin && g.billing" label="Account">
-        <NavItem to="/admin/billing" icon="credit-card" label="SaaS Billing" />
       </NavGroup>
 
       <NavGroup v-if="role === 'acpvcf_super'" label="Super Admin">
         <NavItem to="/super-admin/monitor" icon="activity" label="System Monitor" />
+        <NavItem to="/ai-config" icon="settings" label="AI Config" />
       </NavGroup>
     </div>
 
     <div class="sidebar__footer">
       <span class="role-chip" :class="`role-chip--${roleTier}`">{{ roleLabel }}</span>
-      <span v-if="isScoped" class="scoped-indicator">assigned matters only</span>
+      <span v-if="isScoped" class="scoped-indicator">assigned claims only</span>
     </div>
   </nav>
 </template>
