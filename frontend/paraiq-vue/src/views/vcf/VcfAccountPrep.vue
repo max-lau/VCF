@@ -154,12 +154,14 @@ const VCF_URL =
 
 /* NOTE: swap this for your existing API helper (axios/fetch wrapper with JWT). */
 async function api(path, opts = {}) {
-  const token = localStorage.getItem('token') || localStorage.getItem('jwt') || ''
+  const token = localStorage.getItem('paraiq_token') || localStorage.getItem('token') || localStorage.getItem('jwt') || ''
+  const apiKey = localStorage.getItem('paraiq_api_key') || ''
   const res = await fetch(path, {
     ...opts,
     headers: {
       'Content-Type': 'application/json',
       Authorization: `Bearer ${token}`,
+      ...(apiKey ? { 'X-API-Key': apiKey } : {}),
       ...(opts.headers || {}),
     },
   })
@@ -180,7 +182,7 @@ const copied = reactive(new Set())
 
 const client = reactive({
   first_name: '', last_name: '', email: '', phone: '',
-  date_of_birth: '', address: '', preferred_language: '', notes: '',
+  date_of_birth: '', address: '', ssn_last4: '', preferred_language: '', notes: '',
 })
 const clientFields = [
   { key: 'first_name', label: 'First name (English)' },
@@ -189,6 +191,7 @@ const clientFields = [
   { key: 'phone', label: 'Phone', ph: '000-000-0000' },
   { key: 'date_of_birth', label: 'Date of birth', ph: 'YYYY-MM-DD' },
   { key: 'address', label: 'Address' },
+  { key: 'ssn_last4', label: 'SSN last 4', ph: '••••' },
   { key: 'preferred_language', label: 'Preferred language' },
   { key: 'notes', label: 'Notes' },
 ]
