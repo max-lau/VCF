@@ -180,12 +180,12 @@ async def create_communication(
             row = conn.execute(
                 """
                 INSERT INTO communications
-                  (firm_id, case_id, direction, channel, party_type, party_name,
+                  (firm_id, case_id, comm_type, direction, channel, party_type, party_name,
                    sender, recipient, subject, body, sent_at, created_by)
-                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
                 RETURNING id, created_at
                 """,
-                (firm_id, body.case_id, body.direction, body.channel, body.party_type,
+                (firm_id, body.case_id, body.channel, body.direction, body.channel, body.party_type,
                  body.party_name or "", body.sender or "", body.recipient or "",
                  body.subject or "", body.body or "", sent_at, user_id),
             ).fetchone()
