@@ -213,13 +213,17 @@ async function extract() {
       body: JSON.stringify({ text: rawText.value }),
     })
     const c = r.client || {}
-    for (const k of Object.keys(client)) if (c[k]) client[k] = c[k]
+    console.log('[VcfAccountPrep] extract response:', r)
+    for (const k of Object.keys(client)) {
+      client[k] = c[k] ?? ''
+    }
     const warn = []
     if (c.missing_fields?.length) warn.push(`missing: ${c.missing_fields.join(', ')}`)
     if (c.ocr_uncertain?.length) warn.push(`uncertain OCR: ${c.ocr_uncertain.join(', ')}`)
     extractWarnings.value = warn
     mode.value = 'manual' // show populated fields for review
   } catch (e) {
+    console.error('[VcfAccountPrep] extract failed:', e)
     extractWarnings.value = [String(e.message || e)]
   } finally { busy.value = '' }
 }
@@ -241,13 +245,17 @@ async function useScan(id) {
   try {
     const r = await api(`/vcf/from-scan/${id}`, { method: 'POST' })
     const c = r.client || {}
-    for (const k of Object.keys(client)) if (c[k]) client[k] = c[k]
+    console.log('[VcfAccountPrep] from-scan response:', r)
+    for (const k of Object.keys(client)) {
+      client[k] = c[k] ?? ''
+    }
     const warn = [...(r.warnings || [])]
     if (c.missing_fields?.length) warn.push(`missing: ${c.missing_fields.join(', ')}`)
     if (c.ocr_uncertain?.length) warn.push(`uncertain OCR: ${c.ocr_uncertain.join(', ')}`)
     extractWarnings.value = warn
     mode.value = 'manual' // show populated fields for review
   } catch (e) {
+    console.error('[VcfAccountPrep] from-scan failed:', e)
     extractWarnings.value = [String(e.message || e)]
   } finally { busy.value = '' }
 }
