@@ -25,4 +25,4 @@ VCF_CATEGORIES = [
     "Other Correspondence"
 ]
 
-print(f"✅ {APP_NAME} configuration loaded for {FIRM_NAME}")
+print(f"[ACP-VCF] {APP_NAME} configuration loaded for {FIRM_NAME}")

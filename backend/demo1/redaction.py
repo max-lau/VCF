@@ -32,7 +32,7 @@ STORAGE_DIR.mkdir(parents=True, exist_ok=True)
 
 def init_redaction_table():
     """No-op — table exists in Supabase Postgres."""
-    print("[Redaction] DB table initialized ✓")
+    print("[Redaction] DB table initialized [OK]")
 
 
 def _require_auth(request: Request):

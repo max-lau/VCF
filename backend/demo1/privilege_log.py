@@ -17,7 +17,7 @@ router = APIRouter(prefix="/privilege", tags=["Privilege Log"])
 
 def init_privilege_table():
     """No-op — table exists in Supabase Postgres."""
-    print("[Privilege] DB table initialized ✓")
+    print("[Privilege] DB table initialized [OK]")
 
 
 # ── Models ────────────────────────────────────────────────────────────────────

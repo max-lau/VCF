@@ -50,6 +50,9 @@ async def system_health():
         )
     except ImportError:
         result["error"] = "psutil unavailable"
+    except Exception as e:
+        logger.warning(f"[Monitor] psutil health check failed: {e}")
+        result["psutil_error"] = str(e)
 
     try:
         raw   = subprocess.check_output(["pm2", "jlist"], timeout=5).decode()
@@ -66,7 +69,7 @@ async def system_health():
             }
             for p in procs
         ]
-    except (subprocess.SubprocessError, json.JSONDecodeError, KeyError) as e:
+    except (subprocess.SubprocessError, json.JSONDecodeError, KeyError, FileNotFoundError, OSError) as e:
         logger.warning(f"[Monitor] pm2 status check failed: {e}")
         result["pm2_error"] = "pm2 status check failed"
 

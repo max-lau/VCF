@@ -37,7 +37,7 @@ def _require_auth(request: Request):
 
 def init_audit_table():
     """No-op — table exists in Supabase Postgres."""
-    print("[AuditTrail] Table initialized ✓")
+    print("[AuditTrail] Table initialized [OK]")
 
 
 def log_request(method, endpoint, status_code, response_time_ms,

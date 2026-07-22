@@ -97,7 +97,7 @@ def init_communications_tables():
                 $$
             """)
             conn.commit()
-        print("[Comms] Communications table initialized ✓")
+        print("[Comms] Communications table initialized [OK]")
     except Exception as e:
         print(f"Error initializing comms tables: {e}")
 

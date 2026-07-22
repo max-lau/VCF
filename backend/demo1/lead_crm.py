@@ -47,7 +47,7 @@ def init_crm_tables():
         """)
         cursor.close()
         conn.close()
-        print("[CRM] Leads table initialized ✓")
+        print("[CRM] Leads table initialized [OK]")
     except Exception as e:
         print(f"Error initializing CRM tables: {e}")
 

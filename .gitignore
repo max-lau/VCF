@@ -85,3 +85,4 @@ uvicorn.log
 *.log
 mlflow-artifacts/
 logs/
+structure.txt

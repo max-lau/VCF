@@ -31,16 +31,16 @@ router = APIRouter()
 # ── Annotation Types ─────────────────────────────────────────────────────────
 
 ANNOTATION_TYPES = {
-    "person":       { "label": "Person",       "color": "#4a9eff", "icon": "👤" },
-    "organization": { "label": "Organization", "color": "#b377ff", "icon": "🏢" },
-    "date":         { "label": "Date",         "color": "#ffb74d", "icon": "📅" },
-    "deadline":     { "label": "Deadline",     "color": "#ff7070", "icon": "⏰" },
-    "money":        { "label": "Money",        "color": "#c9a84c", "icon": "💰" },
-    "citation":     { "label": "Citation",     "color": "#ff7070", "icon": "⚖" },
-    "jurisdiction": { "label": "Jurisdiction", "color": "#4caf79", "icon": "🏛" },
-    "pii":          { "label": "PII",          "color": "#e03131", "icon": "🔒" },
-    "privileged":   { "label": "Privileged",   "color": "#9f7aea", "icon": "🛡" },
-    "obligation":   { "label": "Obligation",   "color": "#48bb78", "icon": "📝" },
+    "person":       { "label": "Person",       "color": "#4a9eff", "icon": "P" },
+    "organization": { "label": "Organization", "color": "#b377ff", "icon": "O" },
+    "date":         { "label": "Date",         "color": "#ffb74d", "icon": "D" },
+    "deadline":     { "label": "Deadline",     "color": "#ff7070", "icon": "DL" },
+    "money":        { "label": "Money",        "color": "#c9a84c", "icon": "$" },
+    "citation":     { "label": "Citation",     "color": "#ff7070", "icon": "C" },
+    "jurisdiction": { "label": "Jurisdiction", "color": "#4caf79", "icon": "J" },
+    "pii":          { "label": "PII",          "color": "#e03131", "icon": "!" },
+    "privileged":   { "label": "Privileged",   "color": "#9f7aea", "icon": "Prv" },
+    "obligation":   { "label": "Obligation",   "color": "#48bb78", "icon": "Ob" },
 }
 
 

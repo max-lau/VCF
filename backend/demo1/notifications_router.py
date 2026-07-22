@@ -203,7 +203,7 @@ def generate_notifications(firm_id: str):
                         """INSERT INTO notifications (firm_id, type, title, body, link)
                            VALUES (%s, 'hermes', %s, %s, %s)""",
                         (firm_id,
-                         f"🤖 Hermes moved: {m['card_title'][:50]}",
+                         f"[Hermes] Moved: {m['card_title'][:50]}",
                          f"Card moved to {to_col}. Reason: {m['hermes_reason'] or 'status change detected'}. card {m['card_id']}",
                          f"/matters/{m['case_id']}")
                     )

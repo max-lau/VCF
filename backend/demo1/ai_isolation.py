@@ -309,8 +309,8 @@ def init_isolation_tables():
                 CREATE INDEX IF NOT EXISTS idx_ai_token_firm_date
                 ON ai_token_usage (firm_id, date DESC)
             """)
-        logger.info("[AIIsolation] Tables initialized ✓")
-        print("[AIIsolation] Tables initialized ✓")
+        logger.info("[AIIsolation] Tables initialized [OK]")
+        print("[AIIsolation] Tables initialized [OK]")
     except Exception as e:
         logger.warning(f"[AIIsolation] Table init deferred (non-fatal): {e}")
         print(f"[AIIsolation] Table init deferred: {e}")

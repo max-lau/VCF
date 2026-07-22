@@ -127,7 +127,13 @@ def auth_headers(auth_token):
 
 @pytest.fixture(scope='session')
 def super_user(client):
-    """Register a super-admin test user for monitor/admin endpoints."""
+    """Register a super-admin test user for monitor/admin endpoints.
+
+    The public /auth/register endpoint only allows roles ('user','admin'),
+    so we register as admin and then promote the row to paraiq_super directly
+    in the DB. This keeps production auth restrictions intact while giving
+    tests access to cross-tenant monitor endpoints.
+    """
     try:
         import backend.demo1.pg as _pg
         _pg.init_pool()
@@ -144,14 +150,27 @@ def super_user(client):
         'username': SUPER_USERNAME,
         'password': SUPER_PASSWORD,
         'email':    SUPER_EMAIL,
-        'role':     'paraiq_super',
+        'role':     'admin',
     })
     assert r.status_code in (200, 201), f'Super register failed: {r.text}'
     data = r.json()
+    uid = data.get('user_id')
+
+    # Promote to paraiq_super; public register endpoint cannot assign this role.
+    try:
+        import backend.demo1.pg as _pg
+        _pg.init_pool()
+        from backend.demo1.pg import get_conn as _get_conn
+        with _get_conn('waw_vcf') as _conn:
+            _conn.execute(
+                "UPDATE users SET role='paraiq_super' WHERE id=%s",
+                (uid,),
+            )
+    except Exception as e:
+        print(f'[conftest] super-user promotion warning: {e}')
 
     yield data
 
-    uid = data.get('user_id')
     try:
         import backend.demo1.pg as _pg
         _pg.init_pool()

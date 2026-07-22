@@ -137,7 +137,7 @@ def generate_ical_feed(firm_id: str) -> str:
         uid = f"paraiq-{ev['id']}@paraiq.legal"
         summary = ev.get("title", "ParaIQ Event")
         if ev.get("is_court_date"):
-            summary = f"⚖ {summary}"
+            summary = f"[Court] {summary}"
         if ev.get("event_type"):
             summary = f"[{ev['event_type'].upper()}] {summary}"
 

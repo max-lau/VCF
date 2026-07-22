@@ -558,11 +558,11 @@ class _AllModelsFailedError(Exception):
 def init_model_router():
     """Called at startup."""
     logger.info(
-        f"[ModelRouter] Initialized — "
+        f"[ModelRouter] Initialized - "
         f"{len(_MODELS)} models, {len(_DEFAULT_ROUTING)} task routes, "
         f"circuit breaker threshold={_CIRCUIT_BREAKER_THRESHOLD}"
     )
     print(
-        f"[ModelRouter] Initialized — "
-        f"{len(_MODELS)} models, {len(_DEFAULT_ROUTING)} task routes ✓"
+        f"[ModelRouter] Initialized - "
+        f"{len(_MODELS)} models, {len(_DEFAULT_ROUTING)} task routes [OK]"
     )

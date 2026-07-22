@@ -17,9 +17,9 @@ try:
     if api_key:
         openai_client = openai.AsyncOpenAI(api_key=api_key)
     else:
-        print("⚠️  OPENAI_API_KEY not set — Voice features disabled")
+        print("[Voice] OPENAI_API_KEY not set - Voice features disabled")
 except Exception as e:
-    print(f"⚠️ OpenAI init failed: {e} — Voice features disabled")
+    print(f"[Voice] OpenAI init failed: {e} - Voice features disabled")
 anthropic_client = get_client()  # use shared sync client singleton
 PARAIQ_BASE_URL  = os.environ.get("PARAIQ_BASE_URL","http://localhost:5003")
 

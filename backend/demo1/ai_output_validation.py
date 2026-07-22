@@ -139,7 +139,7 @@ def init_validation_tables():
         """)
         cursor.close()
         conn.close()
-        print("[AI Output Validation] Table initialized ✓")
+        print("[AI Output Validation] Table initialized [OK]")
     except Exception as e:
         print(f"Error initializing output validation table: {e}")
 

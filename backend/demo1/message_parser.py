@@ -17,7 +17,7 @@ MSG_DIR.mkdir(parents=True, exist_ok=True)
 
 def init_messages_table():
     """No-op — table exists in Supabase Postgres."""
-    print("[Messages] Parsed messages table initialized ✓")
+    print("[Messages] Parsed messages table initialized [OK]")
 
 
 # ── Feature 18: EML / mbox parser ────────────────────────────────────────────

@@ -221,7 +221,7 @@ async def force_waw_tenant(request: Request, call_next):
         response = await call_next(request)
         return response
     except Exception as exc:
-        print("❌❌❌ UNCAUGHT ERROR IN MIDDLEWARE ❌❌❌")
+        print("[Middleware] UNCAUGHT ERROR")
         import traceback
         traceback.print_exc()
         return JSONResponse(

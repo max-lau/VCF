@@ -414,8 +414,8 @@ def init_guard_table():
                 CREATE INDEX IF NOT EXISTS idx_pgl_blocked
                 ON prompt_guard_log (firm_id, blocked) WHERE blocked = TRUE
             """)
-        logger.info("[PromptGuard] Table initialized ✓")
-        print("[PromptGuard] Table initialized ✓")
+        logger.info("[PromptGuard] Table initialized [OK]")
+        print("[PromptGuard] Table initialized [OK]")
     except Exception as e:
         logger.warning(f"[PromptGuard] Table init deferred (non-fatal): {e}")
         print(f"[PromptGuard] Table init deferred: {e}")

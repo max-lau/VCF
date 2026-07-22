@@ -92,7 +92,7 @@ class AddNoteBody(BaseModel):
 
 def init_case_db():
     """No-op — tables exist in Supabase Postgres."""
-    print("[CaseDB] Tables initialized ✓")
+    print("[CaseDB] Tables initialized [OK]")
 
 
 # ══════════════════════════════════════════════════════════════════════════════

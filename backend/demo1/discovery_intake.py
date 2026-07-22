@@ -23,7 +23,7 @@ UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
 
 def init_discovery_table():
     """No-op — table exists in Supabase Postgres."""
-    print("[Discovery] DB table initialized ✓")
+    print("[Discovery] DB table initialized [OK]")
 
 
 def _require_auth(request: Request):

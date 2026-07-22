@@ -5,6 +5,7 @@ Run with the backend server on http://127.0.0.1:5003:
     venv/Scripts/python -m pytest tests/test_vcf_smoke.py -v
 """
 import os
+import time
 import pytest
 import requests
 from dotenv import load_dotenv
@@ -14,6 +15,9 @@ load_dotenv(os.path.join(_HERE, "..", ".env"))
 
 BASE    = "http://127.0.0.1:5003"
 API_KEY = os.environ.get("PARAIQ_API_KEY", "")
+
+# Unique per test-run so repeated smoke runs do not collide on case_number.
+CASE_NUMBER = f"VCF-SMOKE-{int(time.time())}"
 
 
 def _headers(token):
@@ -49,7 +53,7 @@ def admin_token():
 def case_id(admin_token):
     """Create a VCF claim and return its id."""
     r = requests.post(f"{BASE}/cases/", headers=_headers(admin_token), json={
-        "case_number": "VCF-SMOKE-001",
+        "case_number": CASE_NUMBER,
         "client_name": "Smoke Test Client",
         "client_email": "smoke@test.internal",
         "claim_stage": "intake",
@@ -67,7 +71,7 @@ class TestVCFClaimLifecycle:
         r = requests.get(f"{BASE}/cases/{case_id}", headers=_headers(admin_token))
         assert r.status_code == 200
         data = r.json()
-        assert data["case_number"] == "VCF-SMOKE-001"
+        assert data["case_number"] == CASE_NUMBER
         assert data["client_name"] == "Smoke Test Client"
         assert data["firm_id"] == "waw_vcf"
 

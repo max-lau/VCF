@@ -255,7 +255,7 @@ def train(
                 MODEL_DIR.mkdir(parents=True, exist_ok=True)
                 model.save_pretrained(str(MODEL_DIR))
                 tokenizer.save_pretrained(str(MODEL_DIR))
-                log.info(f"[PyTorchTrainer] ✓ New best checkpoint saved (acc={best_acc:.3f})")
+                log.info(f"[PyTorchTrainer] New best checkpoint saved (acc={best_acc:.3f})")
 
         elapsed = round(time.time() - t_start, 1)
 

@@ -70,7 +70,7 @@ def init_intake_jobs_table():
                 $$
             """)
             conn.commit()
-        print("[IntakeJobs] Table initialized ✓")
+        print("[IntakeJobs] Table initialized [OK]")
     except Exception as e:
         print(f"[IntakeJobs] init failed: {e}")
 

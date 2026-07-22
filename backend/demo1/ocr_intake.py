@@ -53,7 +53,7 @@ INTAKE_MAX_PDF_PAGES = int(os.getenv("INTAKE_MAX_PDF_PAGES", "5"))
 
 def init_intake_table():
     """No-op — table exists in Supabase Postgres."""
-    print("[Intake] OCR table initialized ✓")
+    print("[Intake] OCR table initialized [OK]")
 
 
 # ── Claude Vision OCR ──────────────────────────────────────────────────────────

@@ -22,7 +22,7 @@ VIDEO_EXTS = {".mp4", ".mov", ".avi", ".mkv", ".wmv", ".webm"}
 
 def init_transcription_table():
     """No-op — table exists in Supabase Postgres."""
-    print("[Media] Transcription table initialized ✓")
+    print("[Media] Transcription table initialized [OK]")
 
 
 def get_client():

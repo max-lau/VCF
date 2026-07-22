@@ -103,7 +103,7 @@ def init_auth_table():
                     expires_at  TIMESTAMPTZ
                 )
             """)
-        print("[Auth] Users + token_blocklist tables initialized ✓")
+        print("[Auth] Users + token_blocklist tables initialized [OK]")
     except (psycopg2.Error, OSError) as e:
         logger.warning(f"[Auth] Table init skipped (non-fatal): {e}")
 

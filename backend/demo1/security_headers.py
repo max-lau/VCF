@@ -92,5 +92,5 @@ class SecurityHeadersMiddleware(BaseHTTPMiddleware):
 
 def init_security_headers():
     """Called at startup to confirm middleware is wired."""
-    logger.info("[SecurityHeaders] Middleware initialized ✓")
-    print("[SecurityHeaders] Middleware initialized ✓")
+    logger.info("[SecurityHeaders] Middleware initialized [OK]")
+    print("[SecurityHeaders] Middleware initialized [OK]")
