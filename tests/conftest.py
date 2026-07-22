@@ -21,10 +21,13 @@ load_dotenv(os.path.join(_ROOT, '.env'))
 # ── Constants ─────────────────────────────────────────────────────────────────
 BASE          = "http://127.0.0.1:5003"
 DB_PATH       = 'backend/demo1/analyses.db'
-TEST_USERNAME = '_pytest_user_'
-TEST_PASSWORD = 'TestPass123!'
-TEST_EMAIL    = '_pytest@test.internal'
-API_KEY       = os.getenv('PARAIQ_API_KEY', '')
+TEST_USERNAME        = '_pytest_user_'
+TEST_PASSWORD        = 'TestPass123!'
+TEST_EMAIL           = '_pytest@test.internal'
+SUPER_USERNAME       = '_pytest_super_'
+SUPER_PASSWORD       = 'SuperPass123!'
+SUPER_EMAIL          = '_pytest_super@test.internal'
+API_KEY              = os.getenv('PARAIQ_API_KEY', '')
 
 
 # ── Live-server HTTP client (drop-in replacement for TestClient) ──────────────
@@ -82,7 +85,6 @@ def test_user(client):
         'password': TEST_PASSWORD,
         'email':    TEST_EMAIL,
         'role':     'user',
-        'firm_id':  'default',
     })
     assert r.status_code in (200, 201), f'Register failed: {r.text}'
     data = r.json()
@@ -119,6 +121,65 @@ def auth_headers(auth_token):
     """Full headers: Bearer JWT + API key."""
     return {
         'Authorization': f'Bearer {auth_token}',
+        'X-API-Key':     API_KEY,
+    }
+
+
+@pytest.fixture(scope='session')
+def super_user(client):
+    """Register a super-admin test user for monitor/admin endpoints."""
+    try:
+        import backend.demo1.pg as _pg
+        _pg.init_pool()
+        from backend.demo1.pg import get_conn as _get_conn
+        with _get_conn('waw_vcf') as _conn:
+            old = _conn.execute('SELECT id FROM users WHERE username=%s', (SUPER_USERNAME,)).fetchone()
+            if old:
+                _conn.execute('DELETE FROM role_assignments WHERE user_id=%s', (old['id'],))
+                _conn.execute('DELETE FROM users WHERE id=%s', (old['id'],))
+    except Exception as e:
+        print(f'[conftest] super-user pre-cleanup warning: {e}')
+
+    r = client.post('/auth/register', json={
+        'username': SUPER_USERNAME,
+        'password': SUPER_PASSWORD,
+        'email':    SUPER_EMAIL,
+        'role':     'paraiq_super',
+    })
+    assert r.status_code in (200, 201), f'Super register failed: {r.text}'
+    data = r.json()
+
+    yield data
+
+    uid = data.get('user_id')
+    try:
+        import backend.demo1.pg as _pg
+        _pg.init_pool()
+        from backend.demo1.pg import get_conn as _get_conn
+        with _get_conn('waw_vcf') as _conn:
+            if uid:
+                _conn.execute('DELETE FROM role_assignments WHERE user_id=%s', (uid,))
+            _conn.execute('DELETE FROM users WHERE username=%s', (SUPER_USERNAME,))
+    except Exception as e:
+        print(f'[conftest] super-user teardown warning: {e}')
+
+
+@pytest.fixture(scope='session')
+def super_token(client, super_user):
+    """Return a valid JWT for the super-admin test user."""
+    r = client.post('/auth/login', json={
+        'username': SUPER_USERNAME,
+        'password': SUPER_PASSWORD,
+    })
+    assert r.status_code == 200, f'Super login failed: {r.text}'
+    return r.json()['token']
+
+
+@pytest.fixture(scope='session')
+def super_auth_headers(super_token):
+    """Full headers for super-admin."""
+    return {
+        'Authorization': f'Bearer {super_token}',
         'X-API-Key':     API_KEY,
     }
 

@@ -4,12 +4,17 @@ Catches NameErrors, import bugs, and broken Claude wiring that
 py_compile and tenant isolation tests would miss.
 
 Run: cd /root/nlp-portfolio && .venv/bin/python3 -m pytest tests/test_ai_smoke.py -v
+
+NOTE: Skipped for VCFClaimsIQ — /analyze was removed and /timeline depends on
+external Anthropic API. These are litigation-specific smoke tests.
 """
 import os
 import time
 import pytest
 import requests
 from dotenv import load_dotenv
+
+pytestmark = pytest.mark.skip(reason="Legacy ParaIQ AI smoke tests — not applicable to VCFClaimsIQ")
 
 _HERE = os.path.dirname(os.path.abspath(__file__))
 load_dotenv(os.path.join(_HERE, "..", ".env"))

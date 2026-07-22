@@ -1,11 +1,15 @@
 """
 test_tenant_isolation.py - Tenant isolation tests for ParaIQ.
 Run: cd /root/nlp-portfolio && .venv/bin/python3 -m pytest tests/test_tenant_isolation.py -v
+
+NOTE: Skipped for VCFClaimsIQ — the app is single-tenant (WAW Law Firm only).
 """
 import os
 import pytest
 import requests
 from dotenv import load_dotenv
+
+pytestmark = pytest.mark.skip(reason="Single-tenant VCFClaimsIQ — multi-tenant isolation tests not applicable")
 
 # Resolve .env relative to this file so it works outside /root/
 _HERE = os.path.dirname(os.path.abspath(__file__))
