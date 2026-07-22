@@ -75,10 +75,12 @@ def init_communications_tables():
                     subject TEXT,
                     body TEXT,
                     sent_at TIMESTAMPTZ DEFAULT NOW(),
+                    created_by TEXT,
                     created_at TIMESTAMPTZ DEFAULT NOW()
                 )
             """)
             conn.execute("ALTER TABLE communications ENABLE ROW LEVEL SECURITY")
+            conn.execute("ALTER TABLE communications ADD COLUMN IF NOT EXISTS created_by TEXT")
             conn.execute("""
                 DO $$
                 BEGIN
@@ -193,7 +195,7 @@ async def create_communication(
         raise
     except Exception as e:
         logger.error(f"[communications] create failed: {e}")
-        raise HTTPException(500, "Failed to log communication")
+        raise HTTPException(500, f"Failed to log communication: {e}")
 
 
 @router.get("/communications")
