@@ -214,9 +214,17 @@ async function extract() {
     })
     const c = r.client || {}
     console.log('[VcfAccountPrep] extract response:', r)
-    for (const k of Object.keys(client)) {
-      client[k] = c[k] ?? ''
-    }
+    Object.assign(client, {
+      first_name: c.first_name ?? '',
+      last_name: c.last_name ?? '',
+      email: c.email ?? '',
+      phone: c.phone ?? '',
+      date_of_birth: c.date_of_birth ?? '',
+      address: c.address ?? '',
+      ssn_last4: c.ssn_last4 ?? '',
+      preferred_language: c.preferred_language ?? '',
+      notes: c.notes ?? '',
+    })
     const warn = []
     if (c.missing_fields?.length) warn.push(`missing: ${c.missing_fields.join(', ')}`)
     if (c.ocr_uncertain?.length) warn.push(`uncertain OCR: ${c.ocr_uncertain.join(', ')}`)
@@ -225,6 +233,7 @@ async function extract() {
   } catch (e) {
     console.error('[VcfAccountPrep] extract failed:', e)
     extractWarnings.value = [String(e.message || e)]
+    alert(`Could not extract: ${e.message || e}`)
   } finally { busy.value = '' }
 }
 
@@ -246,9 +255,17 @@ async function useScan(id) {
     const r = await api(`/vcf/from-scan/${id}`, { method: 'POST' })
     const c = r.client || {}
     console.log('[VcfAccountPrep] from-scan response:', r)
-    for (const k of Object.keys(client)) {
-      client[k] = c[k] ?? ''
-    }
+    Object.assign(client, {
+      first_name: c.first_name ?? '',
+      last_name: c.last_name ?? '',
+      email: c.email ?? '',
+      phone: c.phone ?? '',
+      date_of_birth: c.date_of_birth ?? '',
+      address: c.address ?? '',
+      ssn_last4: c.ssn_last4 ?? '',
+      preferred_language: c.preferred_language ?? '',
+      notes: c.notes ?? '',
+    })
     const warn = [...(r.warnings || [])]
     if (c.missing_fields?.length) warn.push(`missing: ${c.missing_fields.join(', ')}`)
     if (c.ocr_uncertain?.length) warn.push(`uncertain OCR: ${c.ocr_uncertain.join(', ')}`)
@@ -257,6 +274,7 @@ async function useScan(id) {
   } catch (e) {
     console.error('[VcfAccountPrep] from-scan failed:', e)
     extractWarnings.value = [String(e.message || e)]
+    alert(`Could not load scan: ${e.message || e}`)
   } finally { busy.value = '' }
 }
 
