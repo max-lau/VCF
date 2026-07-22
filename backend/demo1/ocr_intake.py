@@ -548,7 +548,9 @@ async def extract_intake_form(
     lang: str = Form(default="eng"),
     engine: str = Form(default="auto")
 ):
-    """Upload handwritten intake form → extract structured fields."""
+    """Upload handwritten intake form → extract structured fields and persist scan."""
+    import uuid
+
     firm_id = getattr(request.state, "firm_id", "default")
     contents = await file.read()
     pages, mime_type = _prep_upload(contents, file.content_type)
@@ -556,15 +558,54 @@ async def extract_intake_form(
     ocr_result = extract_text(pages, lang=lang, engine=engine,
                               mime_type=mime_type, firm_id=firm_id)
     text = clean_ocr_text(ocr_result["text"])
+    form_fields = ocr_result.get("form_fields") or extract_form_fields(text)
+
+    # ── Upload to Supabase Storage (same as /intake/scan) ────────────────────────
+    file_url = None
+    supabase_url = os.getenv("SUPABASE_URL")
+    supabase_key = os.getenv("SUPABASE_SERVICE_KEY")
+    if supabase_url and supabase_key:
+        try:
+            from supabase import create_client
+            supabase = create_client(supabase_url, supabase_key)
+            file_ext = file.filename.split('.')[-1] if '.' in file.filename else 'pdf'
+            storage_path = f"{firm_id}/intake/{uuid.uuid4()}.{file_ext}"
+            supabase.storage.from_("vcf-documents").upload(
+                path=storage_path,
+                file=contents,
+                file_options={"content-type": file.content_type or "application/octet-stream"}
+            )
+            file_url = storage_path
+        except Exception as e:
+            logger.warning(f"[Intake/form] Supabase Storage upload failed: {e}")
+    else:
+        logger.warning("[Intake/form] SUPABASE_URL or SUPABASE_SERVICE_KEY not set. Skipping file upload.")
+
+    # ── Save to Database, including form_fields for instant /vcf/from-scan reuse ─
+    with get_conn(firm_id) as conn:
+        row = conn.execute(
+            """INSERT INTO intake_scans
+               (firm_id, filename, raw_text, word_count, confidence, ocr_engine,
+                file_url, form_fields, created_at)
+               VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s)
+               RETURNING id""",
+            (firm_id, file.filename, text, ocr_result["word_count"],
+             ocr_result["confidence"], ocr_result["engine"],
+             file_url, json.dumps(form_fields),
+             datetime.now(timezone.utc).isoformat())
+        ).fetchone()
+        conn.commit()
+        scan_id = row["id"] if row else None
 
     return {
         "success":      True,
+        "scan_id":      scan_id,
         "filename":     file.filename,
         "raw_text":     text,
         "text_english": ocr_result.get("text_english", ""),
         "confidence":   ocr_result["confidence"],
         "engine":       ocr_result["engine"],
-        "form_fields":  ocr_result.get("form_fields") or extract_form_fields(text),
+        "form_fields":  form_fields,
     }
 
 
