@@ -164,10 +164,21 @@ class APIKeyMiddleware(BaseHTTPMiddleware):
         # Always allow OPTIONS (CORS preflight)
         if request.method == "OPTIONS":
             return await call_next(request)
-        # Allow exempt paths
+        # Production frontend is built with baseURL '/api' (mirrors nginx rewrite).
+        # Strip the prefix here so all auth/path checks and routing see root paths.
         path = request.url.path
+        if path.startswith("/api/"):
+            path = path[4:]
+            request.scope["path"] = path
+        # Allow exempt paths, static assets, and browser navigation (SPA HTML loads)
         ext = os.path.splitext(path)[1].lower()
-        if path in EXEMPT_PATHS or any(path.startswith(p) for p in EXEMPT_PREFIXES) or ext in STATIC_EXTS:
+        accepts_html = request.method == "GET" and "text/html" in request.headers.get("Accept", "")
+        if (
+            path in EXEMPT_PATHS
+            or any(path.startswith(p) for p in EXEMPT_PREFIXES)
+            or ext in STATIC_EXTS
+            or accepts_html
+        ):
             return await call_next(request)
                 # Check key OR valid Bearer JWT
         key = request.headers.get("X-API-Key", "")
@@ -1062,9 +1073,8 @@ async def dashboard_deadlines():
     return get_deadline_radar()
 
 # Note: In dev, Vite serves the frontend on port 5173 and proxies API calls.
-# This mount is for production builds (frontend/paraiq-vue/dist).
-# Comment this out for local dev:
-# app.mount("/", StaticFiles(directory="frontend/paraiq-vue/dist", html=True), name="frontend")
+# The production static-files mount is at the bottom of this file so API
+# routes are registered first and take precedence over the SPA catch-all.
 
 
 
@@ -1341,3 +1351,12 @@ async def api_get_comms(request: Request, matter_id: int):
     firm_id = getattr(request.state, "firm_id", "default")
     comms = get_matter_communications(firm_id=firm_id, matter_id=matter_id)
     return {"success": True, "count": len(comms), "communications": comms}
+
+
+# ── Production static frontend (must be last so API routes win) ───────────────
+import os as _os
+_frontend_dist = _os.path.normpath(
+    _os.path.join(_os.path.dirname(__file__), "..", "..", "frontend", "dist-vue")
+)
+if _os.path.isdir(_frontend_dist):
+    app.mount("/", StaticFiles(directory=_frontend_dist, html=True), name="frontend")
