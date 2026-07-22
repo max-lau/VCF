@@ -28,6 +28,7 @@ from pydantic import BaseModel
 from typing import Optional
 import jwt
 from backend.demo1.pg import get_conn
+from backend.demo1.acp_vcf_config import FIRM_ID
 
 logger = logging.getLogger(__name__)
 
@@ -204,7 +205,7 @@ def build_permissions_for_user(user_id: int, firm_id: str = "default") -> dict:
 
 # ── JWT helpers ────────────────────────────────────────────────────────────────
 
-def create_token(user_id: int, username: str, role: str, firm_id: str = "default") -> str:
+def create_token(user_id: int, username: str, role: str, firm_id: str = FIRM_ID) -> str:
     expire = datetime.now(timezone.utc) + timedelta(hours=EXPIRE_HOURS)
     if role == "guest_trial":
         firm_id = f"trial_{user_id}"
@@ -222,16 +223,13 @@ def create_token(user_id: int, username: str, role: str, firm_id: str = "default
 
 def get_current_firm_id(credentials: HTTPAuthorizationCredentials = Depends(bearer)) -> str:
     """
-    FastAPI dependency — extracts firm_id from JWT.
-    Inject into any endpoint that must be tenant-scoped:
-
-        @router.get("/cases/search")
-        def search(firm_id: str = Depends(get_current_firm_id)): ...
+    FastAPI dependency — returns the fixed single-tenant firm_id for VCFClaimsIQ.
+    JWT firm_id is ignored to prevent cross-tenant data leakage.
     """
     if not credentials:
         raise HTTPException(401, "Authentication required")
-    payload = decode_token(credentials.credentials)
-    return payload.get("firm_id", "default")
+    # VCFClaimsIQ is single-tenant: always use the configured firm.
+    return FIRM_ID
 
 
 def decode_token(token: str) -> dict:
@@ -323,7 +321,7 @@ def register(body: RegisterBody):
         raise HTTPException(400, "Invalid email address")
 
     hashed  = hash_password(body.password)
-    firm_id = body.firm_id or "default"
+    firm_id = FIRM_ID  # single-tenant VCFClaimsIQ
 
     with get_conn(firm_id) as conn:  # register — tenant-scoped
         existing = conn.execute(
@@ -345,7 +343,7 @@ def register(body: RegisterBody):
         ))
         user_id = cur.fetchone()["id"]
 
-    token = create_token(user_id, body.username, "user", firm_id)
+    token = create_token(user_id, body.username, "user", FIRM_ID)
 
     return {
         "success":          True,
@@ -379,13 +377,11 @@ def login(body: LoginBody, request: Request):
         )
 
     user      = dict(user)
-    firm_id   = user["firm_id"] if user["firm_id"] else "default"
+    # VCFClaimsIQ is single-tenant; ignore user.firm_id in the database.
+    firm_id   = FIRM_ID
+    if user["role"] == "guest_trial":
+        firm_id = f"trial_{user['id']}"
     token     = create_token(user["id"], user["username"], user["role"], firm_id)
-    if user["role"] == "guest_trial":
-        firm_id = f"trial_{user['id']}"
-    # For guest_trial users, create_token overrides firm_id to trial_{user_id}
-    if user["role"] == "guest_trial":
-        firm_id = f"trial_{user['id']}"
     perms     = build_permissions_for_user(user["id"], firm_id)
 
     return {

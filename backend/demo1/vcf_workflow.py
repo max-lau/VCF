@@ -12,11 +12,12 @@ import logging
 from datetime import date, datetime, timedelta
 from typing import List, Optional
 
-from fastapi import APIRouter, HTTPException, Request
+from fastapi import APIRouter, HTTPException, Request, Depends
 from pydantic import BaseModel, Field
 
 from backend.demo1.pg import get_conn
-from backend.demo1.acp_vcf_config import VCF_DEADLINES
+from backend.demo1.auth import get_current_firm_id, get_current_user
+from backend.demo1.acp_vcf_config import FIRM_ID, VCF_DEADLINES
 
 logger = logging.getLogger(__name__)
 router = APIRouter(tags=["VCF Workflow"])
@@ -136,10 +137,14 @@ def _record_stage_history(conn, firm_id: str, case_id: int, from_stage: Optional
 # ── Endpoints ─────────────────────────────────────────────────────────────────
 
 @router.post("/vcf/cases/{case_id}/stage")
-async def transition_stage(case_id: int, body: StageTransitionBody, request: Request):
+async def transition_stage(
+    case_id: int,
+    body: StageTransitionBody,
+    firm_id: str = Depends(get_current_firm_id),
+    current_user: dict = Depends(get_current_user),
+):
     """Transition a claim to a new stage, seed checklist, and create deadlines."""
-    firm_id = getattr(request.state, "firm_id", "waw_vcf")
-    user_id = str(getattr(request.state, "user_id", "") or "system")
+    user_id = current_user.get("username") or str(current_user.get("id", "system"))
 
     if body.to_stage not in CLAIM_STAGES:
         raise HTTPException(400, f"Invalid stage. Must be one of: {', '.join(CLAIM_STAGES)}")
@@ -174,8 +179,7 @@ async def transition_stage(case_id: int, body: StageTransitionBody, request: Req
 
 
 @router.get("/vcf/cases/{case_id}/stages")
-async def list_stage_history(case_id: int, request: Request):
-    firm_id = getattr(request.state, "firm_id", "waw_vcf")
+async def list_stage_history(case_id: int, firm_id: str = Depends(get_current_firm_id)):
     with get_conn(firm_id) as conn:
         rows = conn.execute(
             """
@@ -190,8 +194,7 @@ async def list_stage_history(case_id: int, request: Request):
 
 
 @router.get("/vcf/cases/{case_id}/checklist")
-async def get_checklist(case_id: int, request: Request, stage: Optional[str] = None):
-    firm_id = getattr(request.state, "firm_id", "waw_vcf")
+async def get_checklist(case_id: int, stage: Optional[str] = None, firm_id: str = Depends(get_current_firm_id)):
     with get_conn(firm_id) as conn:
         # If stage not provided, use current claim stage.
         if stage is None:
@@ -219,8 +222,12 @@ async def get_checklist(case_id: int, request: Request, stage: Optional[str] = N
 
 
 @router.post("/vcf/cases/{case_id}/checklist/{item_id}")
-async def update_checklist_item(case_id: int, item_id: int, body: ChecklistItemUpdate, request: Request):
-    firm_id = getattr(request.state, "firm_id", "waw_vcf")
+async def update_checklist_item(
+    case_id: int,
+    item_id: int,
+    body: ChecklistItemUpdate,
+    firm_id: str = Depends(get_current_firm_id),
+):
     if body.status not in {"pending", "complete", "not_applicable"}:
         raise HTTPException(400, "status must be pending, complete, or not_applicable")
 

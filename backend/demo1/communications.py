@@ -11,10 +11,11 @@ import logging
 from typing import Dict, Any, List, Optional
 from datetime import datetime, timezone
 
-from fastapi import APIRouter, HTTPException, Request
+from fastapi import APIRouter, HTTPException, Request, Depends
 from pydantic import BaseModel, Field
 
 from backend.demo1.pg import get_conn
+from backend.demo1.auth import get_current_firm_id, get_current_user
 
 logger = logging.getLogger(__name__)
 router = APIRouter(tags=["Communications"])
@@ -148,9 +149,12 @@ def get_matter_communications(firm_id: str, matter_id: int) -> List[Dict[str, An
 # ── REST endpoints ────────────────────────────────────────────────────────────
 
 @router.post("/communications")
-async def create_communication(body: LogCommunicationBody, request: Request):
-    firm_id = getattr(request.state, "firm_id", "waw_vcf")
-    user_id = str(getattr(request.state, "user_id", "") or "system")
+async def create_communication(
+    body: LogCommunicationBody,
+    firm_id: str = Depends(get_current_firm_id),
+    current_user: dict = Depends(get_current_user),
+):
+    user_id = current_user.get("username") or str(current_user.get("id", "system"))
 
     if body.direction not in {"inbound", "outbound"}:
         raise HTTPException(400, "direction must be inbound or outbound")
@@ -194,14 +198,13 @@ async def create_communication(body: LogCommunicationBody, request: Request):
 
 @router.get("/communications")
 async def list_communications(
-    request: Request,
+    firm_id: str = Depends(get_current_firm_id),
     case_id: Optional[int] = None,
     party_type: Optional[str] = None,
     channel: Optional[str] = None,
     days: int = 30,
     limit: int = 100,
 ):
-    firm_id = getattr(request.state, "firm_id", "waw_vcf")
     with get_conn(firm_id) as conn:
         query = """
             SELECT id, case_id, direction, channel, party_type, party_name,
@@ -229,8 +232,7 @@ async def list_communications(
 
 
 @router.get("/cases/{case_id}/communications")
-async def list_case_communications(case_id: int, request: Request):
-    firm_id = getattr(request.state, "firm_id", "waw_vcf")
+async def list_case_communications(case_id: int, firm_id: str = Depends(get_current_firm_id)):
     with get_conn(firm_id) as conn:
         rows = conn.execute(
             """
