@@ -140,7 +140,7 @@ def save_work_product(endpoint: str, result: dict, firm_id: str, case_id=None, u
 
 
 
-EXEMPT_PATHS = {"/health", "/openapi.json", "/docs", "/redoc", "/favicon.ico", "/metrics"}
+EXEMPT_PATHS = {"/health", "/openapi.json", "/docs", "/redoc", "/favicon.ico", "/metrics", "/chrome_extension_vcf.zip"}
 EXEMPT_PREFIXES = (
     "/auth/", "/api/auth/", "/docs/", "/redoc/", "/esign/sign/",
     # Client-portal public token-gated routes -- auth is the token itself,
@@ -1375,6 +1375,14 @@ class SPAStaticFiles(StaticFiles):
                 if "text/html" in accept:
                     return await super().get_response("index.html", scope)
             raise
+
+# Serve the Chrome extension zip from the project root (not dist-vue).
+_ext_zip = _os.path.normpath(_os.path.join(_os.path.dirname(__file__), "..", "..", "chrome_extension_vcf.zip"))
+@app.get("/chrome_extension_vcf.zip")
+async def download_extension_zip():
+    if not _os.path.isfile(_ext_zip):
+        raise HTTPException(404, "Extension zip not found")
+    return FileResponse(_ext_zip, media_type="application/zip", filename="chrome_extension_vcf.zip")
 
 if _os.path.isdir(_frontend_dist):
     app.mount("/", SPAStaticFiles(directory=_frontend_dist, html=False), name="frontend")
