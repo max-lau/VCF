@@ -55,15 +55,16 @@
         <p v-else-if="!scans.length" class="scans__empty">
           No intake scans yet. Upload a questionnaire in OCR Intake first.
         </p>
-        <div v-for="s in scans" :key="s.id" class="scans__row">
+        <div v-for="s in scans" :key="s.id" class="scans__row scans__row--clickable"
+             :data-scan-id="s.id"
+             onclick="window.debugUseScan && window.debugUseScan(Number(this.dataset.scanId)); return false;"
+             @click="() => handleUseScan(s.id)">
           <span class="scans__id">#{{ s.id }}</span>
           <span class="scans__file">{{ s.filename }}</span>
           <span class="scans__meta">{{ s.ocr_engine }} · {{ s.confidence }}%</span>
-          <button type="button" class="crow__btn scans__use" :disabled="busy"
+          <button type="button" class="crow__btn scans__use"
                   :data-scan-id="s.id"
-                  :onclick="`window.debugUseScan(${s.id}); return false;`"
-                  @click="() => handleUseScan(s.id)"
-                  @mousedown="() => onUseMouseDown(s.id)">
+                  onclick="event.stopPropagation(); window.debugUseScan && window.debugUseScan(Number(this.dataset.scanId)); return false;">
             {{ busy === 'scan' + s.id ? 'extracting…' : 'use' }}
           </button>
         </div>
@@ -430,11 +431,15 @@ async function markCreated() {
 .scans { margin-bottom: 12px; }
 .scans__empty { font-size: 12px; color: var(--text-tertiary); }
 .scans__row { display: grid; grid-template-columns: 48px 1fr auto auto; align-items: center;
-  gap: 10px; padding: 6px 0; border-bottom: 1px solid var(--border-dim); font-size: 13px; }
+  gap: 10px; padding: 8px 10px; border-bottom: 1px solid var(--border-dim); font-size: 13px;
+  user-select: none; }
+.scans__row--clickable { cursor: pointer; }
+.scans__row--clickable:hover { background: rgba(255,255,255,.04); }
 .scans__id { color: var(--gold); font-size: 11px; }
 .scans__file { color: var(--text-primary, #eee); overflow-wrap: anywhere; }
 .scans__meta { color: var(--text-tertiary); font-size: 11px; }
-.scans__use { pointer-events: auto; position: relative; z-index: 1; }
+.scans__use { pointer-events: auto; position: relative; z-index: 1; background: var(--bg-void); }
+.scans__use:hover { border-color: var(--gold); color: var(--gold); }
 
 .sheet__footer { display: flex; align-items: center; gap: 14px; margin-top: 18px; }
 .status { font-size: 12px; color: var(--text-secondary); }
