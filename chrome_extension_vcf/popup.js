@@ -2,7 +2,7 @@ const $ = (id) => document.getElementById(id);
 
 // Load saved settings
 chrome.storage.local.get(["baseUrl", "token"]).then((d) => {
-  $("baseUrl").value = d.baseUrl || "http://localhost:8000";
+  $("baseUrl").value = d.baseUrl || "http://localhost:5003";
   $("token").value = d.token || "";
 });
 

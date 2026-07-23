@@ -74,7 +74,12 @@
     .row .lbl { font-size: 10px; color: #7a7a88; text-transform: uppercase;
       letter-spacing: .06em; grid-column: 1 / -1; }
     .row .val { font-size: 13px; background: #14141c; border-radius: 6px;
-      padding: 5px 9px; overflow-wrap: anywhere; font-family: ui-monospace, monospace; }
+      padding: 5px 9px; overflow-wrap: anywhere; font-family: ui-monospace, monospace;
+      cursor: grab; border: 1px solid transparent; }
+    .row .val:active { cursor: grabbing; }
+    .row .val.dragging { opacity: .55; border-color: #d4af37; }
+    .acp-vcf-drop-target { outline: 2px dashed #d4af37 !important; outline-offset: 2px !important;
+      background: rgba(212,175,55,.08) !important; }
     .row .q { font-size: 12px; color: #e8e8ee; grid-column: 1 / -1; }
     .copy { background: none; border: 1px solid #2a2a36; color: #9a9aa6;
       border-radius: 100px; padding: 3px 12px; font-size: 11px; cursor: pointer; white-space: nowrap; }
@@ -108,6 +113,24 @@
     if (panel.classList.contains("open") && !prep) loadList();
   });
   $("#close").addEventListener("click", () => panel.classList.remove("open"));
+
+  // Highlight VCF.gov input fields when a prep value is dragged over them.
+  const DROP_SEL = "input[type='text'], input[type='email'], input[type='password'], textarea, select";
+  document.addEventListener("dragover", (e) => {
+    const t = e.target.closest(DROP_SEL);
+    if (!t) return;
+    e.preventDefault();
+    e.dataTransfer.dropEffect = "copy";
+    t.classList.add("acp-vcf-drop-target");
+  });
+  document.addEventListener("dragleave", (e) => {
+    const t = e.target.closest(DROP_SEL);
+    if (t) t.classList.remove("acp-vcf-drop-target");
+  });
+  document.addEventListener("drop", (e) => {
+    const t = e.target.closest(DROP_SEL);
+    if (t) t.classList.remove("acp-vcf-drop-target");
+  });
 
   function setBody(html) { $("#body").innerHTML = html; }
   function esc(s) {
@@ -148,7 +171,7 @@
     return `
       <div class="row">
         <span class="lbl">${esc(label)}${hint ? ` <span class="chip">${esc(hint)}</span>` : ""}</span>
-        <span class="val">${esc(value || "—")}</span>
+        <span class="val" draggable="true" data-val="${esc(value || "")}" ${value ? "" : "disabled"}>${esc(value || "—")}</span>
         <button class="copy" data-key="${esc(key)}" data-val="${esc(value || "")}"
           ${value ? "" : "disabled"}>copy</button>
       </div>`;
@@ -177,7 +200,7 @@
         <div class="row">
           <span class="q">Q${i + 1}. ${esc(q.question || "— select with client —")}
             ${q.synthesized ? `<span class="chip">synthesized</span>` : ""}</span>
-          <span class="val">${esc(q.answer || "—")}</span>
+          <span class="val" draggable="true" data-val="${esc(q.answer || "")}" ${q.answer ? "" : "disabled"}>${esc(q.answer || "—")}</span>
           <button class="copy" data-key="sq${i}" data-val="${esc(q.answer || "")}"
             ${q.answer ? "" : "disabled"}>copy</button>
         </div>`).join("")}
@@ -203,6 +226,17 @@
         btn.classList.add("done"); btn.textContent = "✓";
         updateProgress();
       }));
+
+    // Drag-and-drop: drag a value from the panel and drop it onto a VCF field.
+    root.querySelectorAll(".val[draggable='true']").forEach((el) => {
+      el.addEventListener("dragstart", (e) => {
+        const val = el.getAttribute("data-val") || el.textContent;
+        e.dataTransfer.setData("text/plain", val);
+        e.dataTransfer.effectAllowed = "copy";
+        el.classList.add("dragging");
+      });
+      el.addEventListener("dragend", () => el.classList.remove("dragging"));
+    });
 
     $("#back").addEventListener("click", (e) => { e.preventDefault(); prep = null; loadList(); });
     $("#done").addEventListener("click", async () => {

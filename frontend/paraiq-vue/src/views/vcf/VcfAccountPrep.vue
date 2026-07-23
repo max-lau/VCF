@@ -4,19 +4,23 @@
       <div>
         <h1 class="vcf__title">VCF Account Creation</h1>
         <p class="vcf__sub">
-          Prepare a copy-paste-ready registration sheet, open the VCF portal in a
-          side-by-side window, and fill the form by hand — VCF requires human entry.
+          Generate a prep sheet, then use the ACP-VCF Chrome extension on the
+          VCF.gov registration page to drag-and-drop each field — VCF requires
+          human entry, but the extension keeps the prep panel inside the portal.
         </p>
       </div>
       <button class="btn btn--gold" @click="openVcfWindow">
-        Open VCF portal (left half)
+        Open VCF portal
       </button>
     </header>
 
     <p class="vcf__note">
-      VCF supports only <strong>Chrome or Edge</strong>. The portal opens in a
-      separate window on the left; keep this prep sheet on the right
-      (Win + →&nbsp;snaps this window right).
+      VCF.gov blocks embedding for security, so the portal cannot live inside this
+      page. The fastest workflow is the
+      <strong>ACP-VCF Chrome extension</strong>: it adds a prep panel directly on
+      claims.vcf.gov where you can drag values into each field.
+      <a href="/chrome_extension_vcf.zip" download>Download extension zip</a> →
+      unzip → load chrome_extension_vcf as an unpacked extension in Chrome/Edge.
     </p>
 
     <!-- STEP 1 · Intake source -->

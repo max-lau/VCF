@@ -15,7 +15,7 @@
 async function getSettings() {
   const d = await chrome.storage.local.get(["baseUrl", "token"]);
   return {
-    baseUrl: (d.baseUrl || "http://localhost:8000").replace(/\/+$/, ""),
+    baseUrl: (d.baseUrl || "http://localhost:5003").replace(/\/+$/, ""),
     token: d.token || "",
   };
 }
