@@ -61,6 +61,7 @@
           <span class="scans__meta">{{ s.ocr_engine }} · {{ s.confidence }}%</span>
           <button type="button" class="crow__btn scans__use" :disabled="busy"
                   :data-scan-id="s.id"
+                  :onclick="`window.debugUseScan(${s.id}); return false;`"
                   @click="() => handleUseScan(s.id)"
                   @mousedown="() => onUseMouseDown(s.id)">
             {{ busy === 'scan' + s.id ? 'extracting…' : 'use' }}
