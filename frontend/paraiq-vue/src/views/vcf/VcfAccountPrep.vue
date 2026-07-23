@@ -59,7 +59,7 @@
           <span class="scans__id">#{{ s.id }}</span>
           <span class="scans__file">{{ s.filename }}</span>
           <span class="scans__meta">{{ s.ocr_engine }} · {{ s.confidence }}%</span>
-          <button class="crow__btn" :disabled="busy" @click="console.log('[VcfAccountPrep] inline use click', s.id); useScan(s.id)">
+          <button class="crow__btn" :disabled="busy" @click="useScan(s.id)">
             {{ busy === 'scan' + s.id ? 'extracting…' : 'use' }}
           </button>
         </div>
