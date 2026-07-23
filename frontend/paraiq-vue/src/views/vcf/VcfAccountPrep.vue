@@ -59,7 +59,7 @@
           <span class="scans__id">#{{ s.id }}</span>
           <span class="scans__file">{{ s.filename }}</span>
           <span class="scans__meta">{{ s.ocr_engine }} · {{ s.confidence }}%</span>
-          <button class="crow__btn" :disabled="busy" @click="useScan(s.id)">
+          <button type="button" class="crow__btn scans__use" :disabled="busy" @click="() => handleUseScan(s.id)">
             {{ busy === 'scan' + s.id ? 'extracting…' : 'use' }}
           </button>
         </div>
@@ -249,6 +249,11 @@ async function loadScans() {
   } finally { busy.value = '' }
 }
 
+function handleUseScan(id) {
+  console.log('[VcfAccountPrep] handleUseScan', id)
+  useScan(id)
+}
+
 async function useScan(id) {
   console.log('[VcfAccountPrep] useScan clicked, id=', id)
   busy.value = 'scan' + id
@@ -415,6 +420,7 @@ async function markCreated() {
 .scans__id { color: var(--gold); font-size: 11px; }
 .scans__file { color: var(--text-primary, #eee); overflow-wrap: anywhere; }
 .scans__meta { color: var(--text-tertiary); font-size: 11px; }
+.scans__use { pointer-events: auto; position: relative; z-index: 1; }
 
 .sheet__footer { display: flex; align-items: center; gap: 14px; margin-top: 18px; }
 .status { font-size: 12px; color: var(--text-secondary); }
