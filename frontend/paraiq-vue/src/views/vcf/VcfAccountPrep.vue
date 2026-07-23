@@ -129,7 +129,7 @@
 </template>
 
 <script setup>
-import { computed, h, ref } from 'vue'
+import { computed, h, reactive, ref } from 'vue'
 
 /* Inline copy-row component (kept local; promote to components/ if reused) */
 const CopyRow = {
