@@ -5,8 +5,9 @@
         <h1 class="vcf__title">VCF Account Creation</h1>
         <p class="vcf__sub">
           Generate a prep sheet, then use the ACP-VCF Chrome extension on the
-          VCF.gov registration page to drag-and-drop each field — VCF requires
-          human entry, but the extension keeps the prep panel inside the portal.
+          VCF.gov registration page to copy each field and paste it by hand —
+          VCF requires human entry, but the extension keeps the prep panel
+          inside the portal.
         </p>
       </div>
       <button class="btn btn--gold" @click="openVcfWindow">
@@ -18,7 +19,8 @@
       VCF.gov blocks embedding for security, so the portal cannot live inside this
       page. The fastest workflow is the
       <strong>ACP-VCF Chrome extension</strong>: it adds a prep panel directly on
-      claims.vcf.gov where you can drag values into each field.
+      claims.vcf.gov with one-click copy buttons, so the paralegal pastes each
+      value by hand without switching tabs.
       <a href="/chrome_extension_vcf.zip" download>Download extension zip</a> →
       unzip → load chrome_extension_vcf as an unpacked extension in Chrome/Edge.
     </p>
