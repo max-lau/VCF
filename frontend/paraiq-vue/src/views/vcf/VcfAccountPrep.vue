@@ -59,7 +59,7 @@
           <span class="scans__id">#{{ s.id }}</span>
           <span class="scans__file">{{ s.filename }}</span>
           <span class="scans__meta">{{ s.ocr_engine }} · {{ s.confidence }}%</span>
-          <button class="crow__btn" :disabled="busy" @click="useScan(s.id)">
+          <button class="crow__btn" :disabled="busy" @click="console.log('[VcfAccountPrep] inline use click', s.id); useScan(s.id)">
             {{ busy === 'scan' + s.id ? 'extracting…' : 'use' }}
           </button>
         </div>
@@ -72,7 +72,7 @@
       <div class="grid">
         <label v-for="f in clientFields" :key="f.key" class="field">
           <span class="field__label">{{ f.label }}</span>
-          <input v-model="client[f.key]" class="field__input" :placeholder="f.ph || ''" />
+          <input v-model="client.value[f.key]" class="field__input" :placeholder="f.ph || ''" />
         </label>
       </div>
     </section>
@@ -129,7 +129,7 @@
 </template>
 
 <script setup>
-import { computed, h, reactive, ref } from 'vue'
+import { computed, h, ref } from 'vue'
 
 /* Inline copy-row component (kept local; promote to components/ if reused) */
 const CopyRow = {
@@ -180,7 +180,7 @@ const prepId = ref(null)
 const status = ref('')
 const copied = reactive(new Set())
 
-const client = reactive({
+const client = ref({
   first_name: '', last_name: '', email: '', phone: '',
   date_of_birth: '', address: '', ssn_last4: '', preferred_language: '', notes: '',
 })
@@ -205,6 +205,7 @@ function openVcfWindow() {
 }
 
 async function extract() {
+  console.log('[VcfAccountPrep] extract clicked')
   busy.value = 'extract'
   extractWarnings.value = []
   try {
@@ -214,7 +215,7 @@ async function extract() {
     })
     const c = r.client || {}
     console.log('[VcfAccountPrep] extract response:', r)
-    Object.assign(client, {
+    client.value = {
       first_name: c.first_name ?? '',
       last_name: c.last_name ?? '',
       email: c.email ?? '',
@@ -224,7 +225,7 @@ async function extract() {
       ssn_last4: c.ssn_last4 ?? '',
       preferred_language: c.preferred_language ?? '',
       notes: c.notes ?? '',
-    })
+    }
     const warn = []
     if (c.missing_fields?.length) warn.push(`missing: ${c.missing_fields.join(', ')}`)
     if (c.ocr_uncertain?.length) warn.push(`uncertain OCR: ${c.ocr_uncertain.join(', ')}`)
@@ -249,13 +250,16 @@ async function loadScans() {
 }
 
 async function useScan(id) {
+  console.log('[VcfAccountPrep] useScan clicked, id=', id)
   busy.value = 'scan' + id
   extractWarnings.value = []
   try {
+    console.log('[VcfAccountPrep] calling /vcf/from-scan/' + id)
     const r = await api(`/vcf/from-scan/${id}`, { method: 'POST' })
     const c = r.client || {}
     console.log('[VcfAccountPrep] from-scan response:', r)
-    Object.assign(client, {
+    console.log('[VcfAccountPrep] client before assign:', JSON.parse(JSON.stringify(client.value)))
+    client.value = {
       first_name: c.first_name ?? '',
       last_name: c.last_name ?? '',
       email: c.email ?? '',
@@ -265,7 +269,8 @@ async function useScan(id) {
       ssn_last4: c.ssn_last4 ?? '',
       preferred_language: c.preferred_language ?? '',
       notes: c.notes ?? '',
-    })
+    }
+    console.log('[VcfAccountPrep] client after assign:', JSON.parse(JSON.stringify(client.value)))
     const warn = [...(r.warnings || [])]
     if (c.missing_fields?.length) warn.push(`missing: ${c.missing_fields.join(', ')}`)
     if (c.ocr_uncertain?.length) warn.push(`uncertain OCR: ${c.ocr_uncertain.join(', ')}`)
@@ -284,7 +289,7 @@ async function generate() {
   try {
     const r = await api('/vcf/prep', {
       method: 'POST',
-      body: JSON.stringify({ client: { ...client }, demo_mode: demoMode.value }),
+      body: JSON.stringify({ client: { ...client.value }, demo_mode: demoMode.value }),
     })
     prepId.value = r.prep_id
     status.value = 'ready'
