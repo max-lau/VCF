@@ -14,6 +14,7 @@ const MattersView      = () => import('@/views/matters/MattersView.vue')
 const MatterDetailView = () => import('@/views/matters/MatterDetailView.vue')
 const CreateCaseView   = () => import('@/views/matters/CreateCase.vue')
 const DocumentsView    = () => import('@/views/documents/DocumentsView.vue')
+const DocumentInboxView = () => import('@/views/documents/DocumentInboxView.vue')
 const IntelligenceView = () => import('@/views/intelligence/CaseIntelligenceFeedView.vue')
 const CorrespondenceView = () => import('@/views/correspondence/CorrespondenceView.vue')
 const CalendarView       = () => import('@/views/calendar/CalendarView.vue')
@@ -103,6 +104,12 @@ const routes = [
         path: 'documents',
         name: 'documents',
         component: DocumentsView,
+        meta: { module: 'documents' },
+      },
+      {
+        path: 'document-inbox',
+        name: 'document_inbox',
+        component: DocumentInboxView,
         meta: { module: 'documents' },
       },
       { path: 'email-inbox', name: 'email_inbox', component: EmailInboxView },

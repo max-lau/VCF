@@ -410,7 +410,7 @@ async def get_case(
 
     # JSONB columns already parsed — convert any stray strings just in case
     for d in docs:
-        for f in ["events_json", "entities_json"]:
+        for f in ["events_json", "entities_json", "identity_signals"]:
             if isinstance(d.get(f), str):
                 try: d[f] = json.loads(d[f])
                 except (json.JSONDecodeError, TypeError) as e:
@@ -519,7 +519,7 @@ async def list_documents(
 
     docs = [row_to_dict(r) for r in rows]
     for d in docs:
-        for f in ["events_json", "entities_json"]:
+        for f in ["events_json", "entities_json", "identity_signals"]:
             if isinstance(d.get(f), str):
                 try: d[f] = json.loads(d[f])
                 except (json.JSONDecodeError, TypeError) as e:

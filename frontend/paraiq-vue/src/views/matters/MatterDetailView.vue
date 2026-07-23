@@ -814,7 +814,7 @@ function fmtMoney(v) {
           <div class="table-wrap">
             <table class="piq-table">
               <thead>
-                <tr><th>Filename</th><th>Type</th><th>Size</th><th>Uploaded</th><th>Status</th></tr>
+                <tr><th>Filename</th><th>Type</th><th>Source</th><th>Uploaded</th><th></th></tr>
               </thead>
               <tbody>
                 <tr v-for="d in docs" :key="d.id">
@@ -822,12 +822,11 @@ function fmtMoney(v) {
                     <span>{{ d.document_name || d.original_filename || d.filename }}</span>
                   </td>
                   <td><span class="type-pill">{{ d.doc_type || d.document_type || '—' }}</span></td>
-                  <td class="dim">{{ fmtSize(d.file_size) }}</td>
+                  <td class="dim">{{ d.source || '—' }}</td>
                   <td class="dim nowrap">{{ fmtDate(d.upload_date || d.created_at) }}</td>
                   <td>
-                    <span class="status-chip" :class="'s-'+(d.status||'processed')">
-                      {{ d.status || 'processed' }}
-                    </span>
+                    <a v-if="d.file_url" :href="`/intake/file/${d.file_url}?token=${token()}`" target="_blank" class="binder-link">View</a>
+                    <span v-else class="dim">—</span>
                   </td>
                 </tr>
               </tbody>
@@ -864,7 +863,7 @@ function fmtMoney(v) {
                   <td class="dim">{{ s.confidence ? s.confidence + '%' : '—' }}</td>
                   <td class="dim nowrap">{{ fmtDate(s.created_at) }}</td>
                   <td>
-                    <a v-if="s.file_url" :href="s.file_url" target="_blank" class="binder-link">View</a>
+                    <a v-if="s.file_url" :href="`/intake/file/${s.file_url}?token=${token()}`" target="_blank" class="binder-link">View</a>
                   </td>
                 </tr>
               </tbody>

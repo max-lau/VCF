@@ -28,6 +28,7 @@
 
       <NavGroup label="Documents & Intake">
         <NavItem to="/intake"    icon="scan"        label="OCR Intake" />
+        <NavItem to="/document-inbox" icon="inbox"  label="Document Inbox" />
         <NavItem to="/batch-intake" icon="stack-2" label="Batch Intake" />
         <NavItem to="/redaction" icon="eraser"      label="Redaction" />
         <NavItem to="/esign"     icon="pen-tool"    label="E-Signatures" />
