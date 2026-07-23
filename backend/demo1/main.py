@@ -1355,8 +1355,26 @@ async def api_get_comms(request: Request, matter_id: int):
 
 # ── Production static frontend (must be last so API routes win) ───────────────
 import os as _os
+from starlette.requests import Request
+from starlette.responses import FileResponse
+from starlette.exceptions import HTTPException as _StarletteHTTPException
+
 _frontend_dist = _os.path.normpath(
     _os.path.join(_os.path.dirname(__file__), "..", "..", "frontend", "dist-vue")
 )
+
+class SPAStaticFiles(StaticFiles):
+    """Serve static assets; fall back to index.html for HTML-navigated SPA routes."""
+    async def get_response(self, path: str, scope):
+        try:
+            return await super().get_response(path, scope)
+        except _StarletteHTTPException as exc:
+            if exc.status_code == 404 and scope["method"] in ("GET", "HEAD"):
+                request = Request(scope)
+                accept = request.headers.get("accept", "")
+                if "text/html" in accept:
+                    return await super().get_response("index.html", scope)
+            raise
+
 if _os.path.isdir(_frontend_dist):
-    app.mount("/", StaticFiles(directory=_frontend_dist, html=True), name="frontend")
+    app.mount("/", SPAStaticFiles(directory=_frontend_dist, html=False), name="frontend")
