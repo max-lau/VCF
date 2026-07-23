@@ -15,6 +15,7 @@ const firmId  = () => localStorage.getItem('paraiq_firm_id') || 'default'
 const matter      = ref(null)
 const docs        = ref([])
 const notes       = ref([])
+const intakeScans = ref([])
 const loading     = ref(true)
 const activeTab   = ref('documents')
 const contacts       = ref([])
@@ -41,6 +42,7 @@ const stageSelect    = ref('')
 const TABS = [
   { key: 'overview',       label: 'Overview',       icon: '📋' },
   { key: 'documents',      label: 'Documents',      icon: '📄' },
+  { key: 'intake-scans',   label: 'Intake Scans',   icon: '🔍' },
   { key: 'notes',          label: 'Notes',          icon: '📝' },
   { key: 'intelligence',   label: 'Intelligence',   icon: '🧠' },
   { key: 'timeline',       label: 'Timeline',       icon: '📅' },
@@ -73,6 +75,7 @@ async function fetchMatter() {
     matter.value = cRes.data
     docs.value   = dRes.data.documents || dRes.data.docs || []
     notes.value  = nRes.data.notes || []
+    intakeScans.value = cRes.data.intake_scans || []
   } catch {
     matter.value = null
   } finally {
@@ -593,6 +596,7 @@ function fmtMoney(v) {
           @click="switchTab(t.key)">
           {{ t.icon }} {{ t.label }}
           <span v-if="t.key==='documents' && docs.length" class="tab-count">{{ docs.length }}</span>
+          <span v-if="t.key==='intake-scans' && intakeScans.length" class="tab-count">{{ intakeScans.length }}</span>
           <span v-if="t.key==='notes' && notes.length" class="tab-count">{{ notes.length }}</span>
           <span v-if="t.key==='contacts' && contacts.length" class="tab-count">{{ contacts.length }}</span>
           <span v-if="t.key==='correspondence' && correspondence.length" class="tab-count">{{ correspondence.length }}</span>
@@ -824,6 +828,43 @@ function fmtMoney(v) {
                     <span class="status-chip" :class="'s-'+(d.status||'processed')">
                       {{ d.status || 'processed' }}
                     </span>
+                  </td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
+      </div>
+
+      <!-- Intake Scans -->
+      <div v-else-if="activeTab === 'intake-scans'">
+        <div v-if="!intakeScans.length" class="empty-tab">
+          <div class="empty-tab__icon">🔍</div>
+          <div class="empty-tab__title">No intake scans yet</div>
+          <button class="btn-gold sm" @click="router.push('/intake')">Scan Documents</button>
+        </div>
+        <div v-else>
+          <div class="tab-toolbar">
+            <span class="dim sm">{{ intakeScans.length }} scan{{ intakeScans.length !== 1 ? 's' : '' }}</span>
+            <button class="btn-gold sm" @click="router.push('/intake')">+ Scan More</button>
+          </div>
+          <div class="table-wrap">
+            <table class="piq-table">
+              <thead>
+                <tr><th>Filename</th><th>Type</th><th>Engine</th><th>Words</th><th>Confidence</th><th>Scanned</th><th></th></tr>
+              </thead>
+              <tbody>
+                <tr v-for="s in intakeScans" :key="s.id">
+                  <td class="doc-name">{{ s.filename || 'Scan #' + s.id }}</td>
+                  <td>
+                    <span class="type-pill">{{ (s.form_fields && s.form_fields.doc_type) || s.status || 'scan' }}</span>
+                  </td>
+                  <td class="dim">{{ s.ocr_engine || '—' }}</td>
+                  <td class="dim">{{ s.word_count || '—' }}</td>
+                  <td class="dim">{{ s.confidence ? s.confidence + '%' : '—' }}</td>
+                  <td class="dim nowrap">{{ fmtDate(s.created_at) }}</td>
+                  <td>
+                    <a v-if="s.file_url" :href="s.file_url" target="_blank" class="binder-link">View</a>
                   </td>
                 </tr>
               </tbody>

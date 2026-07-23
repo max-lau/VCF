@@ -56,6 +56,116 @@ def init_intake_table():
     print("[Intake] OCR table initialized [OK]")
 
 
+# ═══════════════════════════════════════════════════════════════════════════════
+# CASE LINKING HELPERS
+# ═══════════════════════════════════════════════════════════════════════════════
+
+def _normalize_name(name: str | None) -> str:
+    if not name:
+        return ""
+    return " ".join(name.split())
+
+
+def find_case_by_identity(firm_id: str, client_name: str, date_of_birth: str | None) -> int | None:
+    """Return an existing case_id when name + DOB match exactly (case-insensitive)."""
+    name = _normalize_name(client_name)
+    if not name:
+        return None
+    with get_conn(firm_id) as conn:
+        # Primary match: name + DOB
+        if date_of_birth:
+            row = conn.execute(
+                """SELECT id FROM cases
+                   WHERE firm_id = %s AND deleted = FALSE
+                     AND LOWER(client_name) = LOWER(%s)
+                     AND date_of_birth = %s
+                   ORDER BY id ASC LIMIT 1""",
+                (firm_id, name, date_of_birth)
+            ).fetchone()
+            if row:
+                return row["id"]
+        # Fallback: name only if unique
+        rows = conn.execute(
+            """SELECT id FROM cases
+               WHERE firm_id = %s AND deleted = FALSE
+                 AND LOWER(client_name) = LOWER(%s)
+               ORDER BY id ASC""",
+            (firm_id, name)
+        ).fetchall()
+        if len(rows) == 1:
+            return rows[0]["id"]
+    return None
+
+
+def auto_create_case_from_intake(firm_id: str, form_fields: dict) -> dict:
+    """Create a new VCF case from extracted intake form fields.
+
+    Returns {case_id, case_number, created}.
+    """
+    from backend.demo1.case_management import generate_case_number
+    name = _normalize_name(form_fields.get("client_name")) or "Unknown Client"
+    dob = form_fields.get("date_of_birth") or None
+    with get_conn(firm_id) as conn:
+        case_number = generate_case_number(firm_id, conn)
+        cur = conn.execute(
+            """INSERT INTO cases
+               (firm_id, case_number, client_name, status, claim_stage, vcf_status,
+                presence_proof_status, date_of_birth, ssn_last4, preferred_language,
+                exposure_location, presence_dates, wtc_health_program, description)
+               VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)
+               RETURNING id""",
+            (firm_id, case_number, name, "open", "intake", "pending",
+             "not_started", dob,
+             form_fields.get("ssn_last4") or None,
+             form_fields.get("preferred_language") or None,
+             form_fields.get("exposure_location") or None,
+             form_fields.get("presence_dates") or None,
+             bool(form_fields.get("wtc_health_program")),
+             "Auto-created from OCR intake scan")
+        )
+        case_id = cur.fetchone()["id"]
+        conn.execute(
+            "INSERT INTO case_notes (firm_id, case_id, note) VALUES (%s,%s,%s)",
+            (firm_id, case_id, f"Case auto-created from intake scan: {case_number} for {name}")
+        )
+    return {"case_id": case_id, "case_number": case_number, "created": True}
+
+
+def resolve_case_for_intake(firm_id: str, form_fields: dict, provided_case_id: int | None) -> dict:
+    """Resolve which case a scan belongs to.
+
+    If provided_case_id is given, validate it and return it.
+    Otherwise match by identity or auto-create a new case.
+    Returns {case_id, case_number, created, matched}.
+    """
+    if provided_case_id:
+        with get_conn(firm_id) as conn:
+            row = conn.execute(
+                "SELECT id, case_number FROM cases WHERE id = %s AND firm_id = %s AND deleted = FALSE",
+                (provided_case_id, firm_id)
+            ).fetchone()
+        if row:
+            return {"case_id": row["id"], "case_number": row["case_number"],
+                    "created": False, "matched": False}
+        # Invalid provided case_id; fall through to auto-resolve rather than fail.
+
+    existing = find_case_by_identity(
+        firm_id,
+        form_fields.get("client_name"),
+        form_fields.get("date_of_birth")
+    )
+    if existing:
+        with get_conn(firm_id) as conn:
+            row = conn.execute(
+                "SELECT case_number FROM cases WHERE id = %s", (existing,)
+            ).fetchone()
+        return {"case_id": existing,
+                "case_number": row["case_number"] if row else None,
+                "created": False, "matched": True}
+
+    return auto_create_case_from_intake(firm_id, form_fields)
+
+
 # ── Claude Vision OCR ──────────────────────────────────────────────────────────
 
 _VCF_VISION_PROMPT = """You are processing documents for a 9/11 Victim Compensation Fund (VCF) claim at a law firm. The document may be handwritten, in Chinese, English, or mixed.
@@ -374,11 +484,12 @@ async def scan_document(
     file: UploadFile = File(...),
     lang: str = Form(default="eng"),
     engine: str = Form(default="auto"),
+    case_id: Optional[int] = Form(default=None),
     firm_id: Optional[str] = Form(default=None)
 ):
-    """Upload image/PDF → upload to Supabase Storage → extract text via OCR."""
+    """Upload image/PDF → OCR → link to case → upload to Supabase Storage."""
     import uuid
-    
+
     is_jwt_auth = request.headers.get("Authorization", "").startswith("Bearer ")
     if is_jwt_auth:
         firm_id = getattr(request.state, "firm_id", "default")
@@ -391,58 +502,66 @@ async def scan_document(
             raise HTTPException(status_code=400, detail="Unknown firm_id")
 
     contents = await file.read()
-    
-    # ── Upload to Supabase Storage ───────────────────────────────────────
+
+    # ── Run OCR first so we can resolve the case by identity ─────────────
+    pages, mime_type = _prep_upload(contents, file.content_type)
+    result = extract_text(pages, lang=lang, engine=engine,
+                          mime_type=mime_type, firm_id=firm_id)
+    result["text"] = clean_ocr_text(result["text"])
+    form_fields = result.get("form_fields") or extract_form_fields(result["text"])
+
+    # ── Resolve or create case ───────────────────────────────────────────
+    case_info = resolve_case_for_intake(firm_id, form_fields, case_id)
+    resolved_case_id = case_info["case_id"]
+
+    # ── Upload to Supabase Storage with case-aware path ──────────────────
     file_url = None
     supabase_url = os.getenv("SUPABASE_URL")
     supabase_key = os.getenv("SUPABASE_SERVICE_KEY")
-    
+
     if supabase_url and supabase_key:
         try:
             from supabase import create_client
             supabase = create_client(supabase_url, supabase_key)
-            
-            # Create a unique file path
             file_ext = file.filename.split('.')[-1] if '.' in file.filename else 'pdf'
-            storage_path = f"{firm_id}/intake/{uuid.uuid4()}.{file_ext}"
-            
-            # Upload the file
+            storage_path = f"{firm_id}/cases/{resolved_case_id}/intake/{uuid.uuid4()}.{file_ext}" \
+                if resolved_case_id else f"{firm_id}/intake/{uuid.uuid4()}.{file_ext}"
             supabase.storage.from_("vcf-documents").upload(
                 path=storage_path,
                 file=contents,
                 file_options={"content-type": file.content_type or "application/octet-stream"}
             )
-            # Get the URL path (we will generate signed URLs later when viewing)
             file_url = storage_path
         except Exception as e:
             logger.warning(f"[Intake] Supabase Storage upload failed: {e}")
     else:
         logger.warning("[Intake] SUPABASE_URL or SUPABASE_SERVICE_KEY not set in .env. Skipping file upload.")
 
-    # ── Run OCR ──────────────────────────────────────────────────────────
-    pages, mime_type = _prep_upload(contents, file.content_type)
-
-    result = extract_text(pages, lang=lang, engine=engine,
-                          mime_type=mime_type, firm_id=firm_id)
-    result["text"] = clean_ocr_text(result["text"])
-    form_fields = result.get("form_fields") or extract_form_fields(result["text"])
-
     # ── Save to Database ─────────────────────────────────────────────────
     with get_conn(firm_id) as conn:
         conn.execute(
             """INSERT INTO intake_scans
-               (firm_id, filename, raw_text, word_count, confidence, ocr_engine,
+               (firm_id, case_id, filename, raw_text, word_count, confidence, ocr_engine,
                 file_url, form_fields, created_at)
-               VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s)""",
-            (firm_id, file.filename, result["text"], result["word_count"],
+               VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)""",
+            (firm_id, resolved_case_id, file.filename, result["text"], result["word_count"],
              result["confidence"], result["engine"], file_url,
              json.dumps(form_fields),
              datetime.now(timezone.utc).isoformat())
         )
         conn.commit()
 
-    return {"success": True, "filename": file.filename, "file_url": file_url,
-            "form_fields": form_fields, **result}
+    return {
+        "success": True,
+        "filename": file.filename,
+        "file_url": file_url,
+        "case_id": resolved_case_id,
+        "case_number": case_info.get("case_number"),
+        "case_created": case_info.get("created", False),
+        "case_matched": case_info.get("matched", False),
+        "form_fields": form_fields,
+        **result
+    }
 
 @router.get("/intake/file/{file_path:path}")
 async def download_intake_file(file_path: str, request: Request):
@@ -483,9 +602,11 @@ async def analyze_document(
     file: UploadFile = File(...),
     lang: str = Form(default="eng"),
     context: str = Form(default="general"),
-    engine: str = Form(default="auto")
+    engine: str = Form(default="auto"),
+    case_id: Optional[int] = Form(default=None)
 ):
-    """Upload image/PDF → OCR → full NLP pipeline."""
+    """Upload image/PDF → OCR → full NLP pipeline → link to case."""
+    import uuid
     firm_id = getattr(request.state, "firm_id", "default")
     contents = await file.read()
     pages, mime_type = _prep_upload(contents, file.content_type)
@@ -503,8 +624,6 @@ async def analyze_document(
 
     import spacy
     nlp = spacy.load("en_core_web_sm")
-    # spaCy en model gives little on Chinese text; run it on the English
-    # translation when available.
     ner_source = ocr_result.get("text_english") or text
     entities = [{"text": e.text, "type": e.label_} for e in nlp(ner_source[:5000]).ents]
 
@@ -513,19 +632,46 @@ async def analyze_document(
 
     form_fields = ocr_result.get("form_fields") or extract_form_fields(text)
 
+    # ── Resolve or create case ───────────────────────────────────────────
+    case_info = resolve_case_for_intake(firm_id, form_fields, case_id)
+    resolved_case_id = case_info["case_id"]
+
+    # ── Upload to Supabase Storage with case-aware path ──────────────────
+    file_url = None
+    supabase_url = os.getenv("SUPABASE_URL")
+    supabase_key = os.getenv("SUPABASE_SERVICE_KEY")
+    if supabase_url and supabase_key:
+        try:
+            from supabase import create_client
+            supabase = create_client(supabase_url, supabase_key)
+            file_ext = file.filename.split('.')[-1] if '.' in file.filename else 'pdf'
+            storage_path = f"{firm_id}/cases/{resolved_case_id}/intake/{uuid.uuid4()}.{file_ext}" \
+                if resolved_case_id else f"{firm_id}/intake/{uuid.uuid4()}.{file_ext}"
+            supabase.storage.from_("vcf-documents").upload(
+                path=storage_path,
+                file=contents,
+                file_options={"content-type": file.content_type or "application/octet-stream"}
+            )
+            file_url = storage_path
+        except Exception as e:
+            logger.warning(f"[Intake/analyze] Supabase Storage upload failed: {e}")
+    else:
+        logger.warning("[Intake/analyze] SUPABASE_URL or SUPABASE_SERVICE_KEY not set. Skipping file upload.")
+
     with get_conn(firm_id) as conn:
         conn.execute(
             """INSERT INTO intake_scans
-               (firm_id, filename, raw_text, word_count, confidence, ocr_engine,
-                risk_score, risk_level, entities_json, form_fields, created_at)
-               VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)""",
-            (firm_id, file.filename, text, ocr_result["word_count"],
+               (firm_id, case_id, filename, raw_text, word_count, confidence, ocr_engine,
+                risk_score, risk_level, entities_json, form_fields, file_url, created_at)
+               VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)""",
+            (firm_id, resolved_case_id, file.filename, text, ocr_result["word_count"],
              ocr_result["confidence"], ocr_result["engine"],
              risk["score"], risk["level"],
              json.dumps(entities), json.dumps({
                  **form_fields,
                  "_text_english": ocr_result.get("text_english", ""),
              }),
+             file_url,
              datetime.now(timezone.utc).isoformat())
         )
         conn.commit()
@@ -533,6 +679,11 @@ async def analyze_document(
     return {
         "success":  True,
         "filename": file.filename,
+        "file_url": file_url,
+        "case_id": resolved_case_id,
+        "case_number": case_info.get("case_number"),
+        "case_created": case_info.get("created", False),
+        "case_matched": case_info.get("matched", False),
         "ocr":      {"text": text, "text_english": ocr_result.get("text_english", ""),
                      "word_count": ocr_result["word_count"],
                      "confidence": ocr_result["confidence"], "engine": ocr_result["engine"]},
@@ -550,9 +701,10 @@ async def extract_intake_form(
     request: Request,
     file: UploadFile = File(...),
     lang: str = Form(default="eng"),
-    engine: str = Form(default="auto")
+    engine: str = Form(default="auto"),
+    case_id: Optional[int] = Form(default=None)
 ):
-    """Upload handwritten intake form → extract structured fields and persist scan."""
+    """Upload handwritten intake form → extract structured fields → link to case."""
     import uuid
 
     firm_id = getattr(request.state, "firm_id", "default")
@@ -564,7 +716,11 @@ async def extract_intake_form(
     text = clean_ocr_text(ocr_result["text"])
     form_fields = ocr_result.get("form_fields") or extract_form_fields(text)
 
-    # ── Upload to Supabase Storage (same as /intake/scan) ────────────────────────
+    # ── Resolve or create case ───────────────────────────────────────────
+    case_info = resolve_case_for_intake(firm_id, form_fields, case_id)
+    resolved_case_id = case_info["case_id"]
+
+    # ── Upload to Supabase Storage with case-aware path ──────────────────
     file_url = None
     supabase_url = os.getenv("SUPABASE_URL")
     supabase_key = os.getenv("SUPABASE_SERVICE_KEY")
@@ -573,7 +729,8 @@ async def extract_intake_form(
             from supabase import create_client
             supabase = create_client(supabase_url, supabase_key)
             file_ext = file.filename.split('.')[-1] if '.' in file.filename else 'pdf'
-            storage_path = f"{firm_id}/intake/{uuid.uuid4()}.{file_ext}"
+            storage_path = f"{firm_id}/cases/{resolved_case_id}/intake/{uuid.uuid4()}.{file_ext}" \
+                if resolved_case_id else f"{firm_id}/intake/{uuid.uuid4()}.{file_ext}"
             supabase.storage.from_("vcf-documents").upload(
                 path=storage_path,
                 file=contents,
@@ -589,11 +746,11 @@ async def extract_intake_form(
     with get_conn(firm_id) as conn:
         row = conn.execute(
             """INSERT INTO intake_scans
-               (firm_id, filename, raw_text, word_count, confidence, ocr_engine,
+               (firm_id, case_id, filename, raw_text, word_count, confidence, ocr_engine,
                 file_url, form_fields, created_at)
-               VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s)
+               VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)
                RETURNING id""",
-            (firm_id, file.filename, text, ocr_result["word_count"],
+            (firm_id, resolved_case_id, file.filename, text, ocr_result["word_count"],
              ocr_result["confidence"], ocr_result["engine"],
              file_url, json.dumps(form_fields),
              datetime.now(timezone.utc).isoformat())
@@ -605,6 +762,11 @@ async def extract_intake_form(
         "success":      True,
         "scan_id":      scan_id,
         "filename":     file.filename,
+        "file_url":     file_url,
+        "case_id":      resolved_case_id,
+        "case_number":  case_info.get("case_number"),
+        "case_created": case_info.get("created", False),
+        "case_matched": case_info.get("matched", False),
         "raw_text":     text,
         "text_english": ocr_result.get("text_english", ""),
         "confidence":   ocr_result["confidence"],
@@ -614,13 +776,27 @@ async def extract_intake_form(
 
 
 @router.get("/history")
-def intake_history(request: Request, limit: int = 20):
+def intake_history(request: Request, limit: int = 20, case_id: Optional[int] = None):
     firm_id = getattr(request.state, "firm_id", "default")
     with get_conn(firm_id) as conn:
-        rows = conn.execute(
-            "SELECT * FROM intake_scans WHERE firm_id=%s ORDER BY id DESC LIMIT %s",
-            (firm_id, limit)
-        ).fetchall()
+        if case_id is not None:
+            rows = conn.execute(
+                """SELECT s.*, c.case_number, c.client_name AS case_client_name
+                   FROM intake_scans s
+                   LEFT JOIN cases c ON c.id = s.case_id
+                   WHERE s.firm_id=%s AND s.case_id=%s
+                   ORDER BY s.id DESC LIMIT %s""",
+                (firm_id, case_id, limit)
+            ).fetchall()
+        else:
+            rows = conn.execute(
+                """SELECT s.*, c.case_number, c.client_name AS case_client_name
+                   FROM intake_scans s
+                   LEFT JOIN cases c ON c.id = s.case_id
+                   WHERE s.firm_id=%s
+                   ORDER BY s.id DESC LIMIT %s""",
+                (firm_id, limit)
+            ).fetchall()
     results = []
     for r in rows:
         d = dict(r)

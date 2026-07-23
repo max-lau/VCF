@@ -46,7 +46,7 @@ router = APIRouter()
 # ══════════════════════════════════════════════════════════════════════════════
 
 class CreateCaseBody(BaseModel):
-    case_number:          str
+    case_number:          Optional[str] = None
     client_name:          str
     matter_number:        Optional[str] = ""
     status:               Optional[str] = "open"
@@ -105,6 +105,31 @@ def row_to_dict(row):
 def ts_now():
     return datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S")
 
+def generate_case_number(firm_id: str, conn=None) -> str:
+    """Return the next VCF-YYYY-NNNN case number for this firm/year.
+
+    Uses MAX(case_number) + 1. If a connection is passed, the query runs in
+    the caller's transaction (safer for concurrent inserts).
+    """
+    year = datetime.now(timezone.utc).year
+    prefix = f"VCF-{year}-"
+    sql = """SELECT COALESCE(MAX(
+               CAST(SUBSTRING(case_number FROM %s FOR 4) AS INTEGER)
+             ), 0) AS last_n
+             FROM cases
+             WHERE firm_id = %s
+               AND case_number LIKE %s
+               AND deleted = FALSE"""
+    params = (len(prefix) + 1, firm_id, prefix + "%")
+    if conn is not None:
+        row = conn.execute(sql, params).fetchone()
+    else:
+        from backend.demo1.pg import get_conn
+        with get_conn(firm_id) as c:
+            row = c.execute(sql, params).fetchone()
+    last_n = row["last_n"] if row else 0
+    return f"{prefix}{last_n + 1:04d}"
+
 def compute_case_risk(docs: list) -> str:
     scores = [d["risk_score"] for d in docs if d.get("risk_score") is not None]
     if not scores: return "unknown"
@@ -152,6 +177,10 @@ async def create_case(
 ):
     try:
         with get_conn(firm_id) as conn:
+            case_number = body.case_number.strip() if body.case_number else ""
+            if not case_number:
+                case_number = generate_case_number(firm_id, conn)
+
             cur = conn.execute("""
                 INSERT INTO cases
                   (firm_id, case_number, client_name, matter_number, status,
@@ -161,7 +190,7 @@ async def create_case(
                    award_amount, description)
                 VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)
                 RETURNING id
-            """, (firm_id, body.case_number.strip(), body.client_name.strip(),
+            """, (firm_id, case_number, body.client_name.strip(),
                   body.matter_number, body.status,
                   body.claim_stage, body.vcf_status, body.presence_proof_status,
                   body.date_of_birth or None, body.ssn_last4 or None,
@@ -177,10 +206,10 @@ async def create_case(
             conn.execute(
                 "INSERT INTO case_notes (firm_id, case_id, note) VALUES (%s,%s,%s)",
                 (firm_id, case_id,
-                 f"Case created: {body.case_number} for {body.client_name}"))
+                 f"Case created: {case_number} for {body.client_name}"))
 
         return {"success": True, "case_id": case_id,
-                "case_number": body.case_number}
+                "case_number": case_number}
     except psycopg2.errors.UniqueViolation:
         raise HTTPException(409, "Case number already exists")
     except psycopg2.Error as e:
@@ -191,6 +220,12 @@ async def create_case(
     except Exception as e:
         logger.error(f"[case_management] Unexpected error creating case: {e}")
         raise HTTPException(500, "An unexpected error occurred. Please try again.")
+
+
+@router.get("/next-number")
+async def next_case_number(firm_id: str = Depends(get_current_firm_id)):
+    """Preview the next auto-generated case number without creating a case."""
+    return {"success": True, "case_number": generate_case_number(firm_id)}
 
 
 @router.get("/stats")
@@ -365,6 +400,14 @@ async def get_case(
         tags = [r["tag"] for r in conn.execute(
             "SELECT tag FROM case_tags WHERE case_id = %s", (case_id,)).fetchall()]
 
+        scans = [row_to_dict(r) for r in conn.execute(
+            """SELECT id, filename, raw_text, word_count, confidence, ocr_engine,
+                      file_url, form_fields, created_at
+               FROM intake_scans
+               WHERE case_id = %s
+               ORDER BY created_at DESC""",
+            (case_id,)).fetchall()]
+
     # JSONB columns already parsed — convert any stray strings just in case
     for d in docs:
         for f in ["events_json", "entities_json"]:
@@ -373,8 +416,15 @@ async def get_case(
                 except (json.JSONDecodeError, TypeError) as e:
                     logger.debug(f"[case_management] Could not parse {f} in case {case_id}: {e}")
 
-    case.update({"documents": docs, "notes": notes,
-                 "tags": tags, "doc_count": len(docs)})
+    for s in scans:
+        if isinstance(s.get("form_fields"), str):
+            try: s["form_fields"] = json.loads(s["form_fields"])
+            except (json.JSONDecodeError, TypeError) as e:
+                logger.debug(f"[case_management] Could not parse form_fields in scan {s.get('id')}: {e}")
+
+    case.update({"documents": docs, "notes": notes, "tags": tags,
+                 "intake_scans": scans, "doc_count": len(docs),
+                 "scan_count": len(scans)})
     return case
 
 

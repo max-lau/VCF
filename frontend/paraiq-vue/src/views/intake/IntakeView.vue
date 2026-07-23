@@ -10,6 +10,9 @@ const result    = ref(null)
 const error     = ref(null)
 const history   = ref([])
 const fileInput = ref(null)
+const cases     = ref([])
+const selectedCaseId = ref('')
+const loadingCases = ref(false)
 
 const modes = [
   { key: 'analyze', label: 'Analyze', sub: 'Full NLP analysis' },
@@ -22,6 +25,16 @@ const endpointMap = { analyze: '/intake/analyze', scan: '/intake/scan', form: '/
 function onFile(e) { file.value = e.target.files[0] || null }
 function onDrop(e) { e.preventDefault(); file.value = e.dataTransfer.files[0] || null }
 
+async function fetchCases() {
+  loadingCases.value = true
+  try {
+    const { data } = await client.get('/cases/search?limit=500')
+    cases.value = data.results || data.cases || []
+  } catch {
+    cases.value = []
+  } finally { loadingCases.value = false }
+}
+
 async function submit() {
   if (!file.value) return
   loading.value = true
@@ -30,6 +43,9 @@ async function submit() {
   try {
     const fd = new FormData()
     fd.append('file', file.value)
+    if (selectedCaseId.value) {
+      fd.append('case_id', selectedCaseId.value)
+    }
     const { data } = await client.post(endpointMap[mode.value], fd)
     result.value = data
     await fetchHistory()
@@ -41,7 +57,7 @@ async function submit() {
 async function fetchHistory() {
   try {
     const { data } = await client.get('/intake/history')
-    history.value = data.history || data || []
+    history.value = data.scans || data.history || data || []
   } catch { history.value = [] }
 }
 
@@ -171,7 +187,7 @@ const formFieldRows = computed(() => {
   return rows
 })
 
-onMounted(fetchHistory)
+onMounted(() => { fetchHistory(); fetchCases() })
 </script>
 
 <template>
@@ -190,6 +206,20 @@ onMounted(fetchHistory)
         @click="mode = m.key">
         <span class="mode-btn__label">{{ m.label }}</span>
         <span class="mode-btn__sub">{{ m.sub }}</span>
+      </button>
+    </div>
+
+    <!-- Case selector -->
+    <div class="case-row">
+      <label class="case-row__label">Link to case</label>
+      <select v-model="selectedCaseId" class="case-row__select" :disabled="loadingCases">
+        <option value="">Auto-match or create new case</option>
+        <option v-for="c in cases" :key="c.id" :value="c.id">
+          {{ c.case_number }} · {{ c.client_name }}
+        </option>
+      </select>
+      <button type="button" class="case-row__btn" @click="$router.push('/matters/new')">
+        + New case
       </button>
     </div>
 
@@ -214,6 +244,16 @@ onMounted(fetchHistory)
     <!-- Result -->
     <div v-if="result" class="result-card">
       <div class="result-card__title">Result</div>
+      <div v-if="result.case_id" class="result-block result-block--case">
+        <div class="case-badge">
+          <span class="case-badge__label">Linked case</span>
+          <router-link :to="`/matters/${result.case_id}`" class="case-badge__value">
+            {{ result.case_number || result.case_id }}
+          </router-link>
+          <span v-if="result.case_created" class="case-badge__tag case-badge__tag--new">new</span>
+          <span v-else-if="result.case_matched" class="case-badge__tag case-badge__tag--matched">matched</span>
+        </div>
+      </div>
       <div v-if="extractedText" class="result-block">
         <div class="result-block__label">Extracted Text</div>
         <div class="ocr-text" v-html="formattedOcrText"></div>
@@ -264,24 +304,32 @@ onMounted(fetchHistory)
       <div class="section-label">Recent intake history</div>
       <div class="piq-table-wrap">
         <table class="piq-table">
-              <div v-if="history.length" class="history-section">
-      <div class="section-label">Recent intake history</div>
-      <div class="piq-table-wrap">
-        <table class="piq-table">
-          <thead><tr><th>File</th><th>Date</th><th>OCR Engine</th><th>View File</th></tr></thead>
+          <thead>
+            <tr>
+              <th>File</th>
+              <th>Case</th>
+              <th>Date</th>
+              <th>OCR Engine</th>
+              <th>View File</th>
+            </tr>
+          </thead>
           <tbody>
             <tr v-for="h in history" :key="h.id">
               <td class="bold">{{ h.filename || '—' }}</td>
+              <td>
+                <router-link v-if="h.case_id" :to="`/matters/${h.case_id}`" class="bl-link">
+                  {{ h.case_number || h.case_id }}
+                </router-link>
+                <span v-else class="dim">—</span>
+              </td>
               <td class="dim">{{ fmtDate(h.created_at) }}</td>
               <td class="dim">{{ h.ocr_engine || '—' }}</td>
-              <td><a v-if="h.file_url" :href="`/intake/file/${h.file_url}?token=${token()}`" target="_blank" class="bl-link">View PDF ↗</a>
+              <td>
+                <a v-if="h.file_url" :href="`/intake/file/${h.file_url}?token=${token()}`" target="_blank" class="bl-link">View PDF ↗</a>
                 <span v-else class="dim">—</span>
               </td>
             </tr>
           </tbody>
-        </table>
-      </div>
-    </div>
         </table>
       </div>
     </div>
@@ -299,6 +347,12 @@ onMounted(fetchHistory)
 .mode-btn.active { border-color: var(--gold); }
 .mode-btn__label { color: var(--text-primary); font-size: .875rem; font-weight: 600; }
 .mode-btn__sub   { color: var(--text-muted); font-size: .72rem; margin-top: .1rem; }
+
+.case-row { display: flex; align-items: center; gap: .75rem; margin-bottom: 1rem; }
+.case-row__label { color: var(--text-muted); font-size: .72rem; font-weight: 600; letter-spacing: .04em; text-transform: uppercase; white-space: nowrap; }
+.case-row__select { flex: 1; background: var(--bg-card); border: 1px solid var(--border); border-radius: 6px; color: var(--text-primary); font-size: .875rem; padding: .45rem .6rem; }
+.case-row__btn { background: var(--bg-card); border: 1px solid var(--border); border-radius: 6px; color: var(--gold); cursor: pointer; font-size: .8rem; padding: .5rem .9rem; white-space: nowrap; }
+.case-row__btn:hover { border-color: var(--gold); }
 
 .drop-zone { background: var(--bg-card); border: 2px dashed var(--border); border-radius: 10px; cursor: pointer; padding: 2.5rem; text-align: center; transition: border-color .15s; }
 .drop-zone:hover, .drop-zone.has-file { border-color: var(--gold); }
@@ -329,6 +383,16 @@ onMounted(fetchHistory)
 .status-pill { border-radius: 4px; font-size: .72rem; font-weight: 600; padding: .2rem .5rem; text-transform: capitalize; background: rgba(72,187,120,.15); color: #48bb78; }
 .result-block { margin-bottom: 1.5rem; }
 .result-block:last-child { margin-bottom: 0; }
+.result-block--case { margin-bottom: 1rem; }
+.case-badge { align-items: center; display: inline-flex; gap: .6rem; background: var(--bg-raised, #0d0d1a); border: 1px solid var(--border); border-radius: 6px; padding: .45rem .75rem; }
+.case-badge__label { color: var(--text-muted); font-size: .72rem; font-weight: 600; letter-spacing: .04em; text-transform: uppercase; }
+.case-badge__value { color: var(--gold); font-size: .875rem; font-weight: 500; text-decoration: none; }
+.case-badge__value:hover { text-decoration: underline; }
+.case-badge__tag { font-size: .65rem; font-weight: 600; padding: .15rem .4rem; border-radius: 4px; text-transform: uppercase; }
+.case-badge__tag--new { background: rgba(212,175,55,.15); color: var(--gold); }
+.case-badge__tag--matched { background: rgba(72,187,120,.15); color: #48bb78; }
+.bl-link { color: var(--gold); font-size: .875rem; text-decoration: none; }
+.bl-link:hover { text-decoration: underline; }
 .result-block__label { font-size: .72rem; color: var(--text-muted); font-weight: 600; letter-spacing: .05em; margin-bottom: .6rem; text-transform: uppercase; }
 .ocr-text { background: var(--bg-raised, #0d0d1a); border-radius: 6px; padding: 1rem 1.25rem; color: var(--text-primary); font-size: .875rem; line-height: 1.7; }
 .ocr-text p { margin: 0 0 .85rem; }
