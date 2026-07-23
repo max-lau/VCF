@@ -72,7 +72,7 @@
       <div class="grid">
         <label v-for="f in clientFields" :key="f.key" class="field">
           <span class="field__label">{{ f.label }}</span>
-          <input v-model="client.value[f.key]" class="field__input" :placeholder="f.ph || ''" />
+          <input v-model="client[f.key]" class="field__input" :placeholder="f.ph || ''" />
         </label>
       </div>
     </section>
