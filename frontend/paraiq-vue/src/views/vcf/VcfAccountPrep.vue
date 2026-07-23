@@ -57,8 +57,7 @@
         </p>
         <div v-for="s in scans" :key="s.id" class="scans__row scans__row--clickable"
              :data-scan-id="s.id"
-             onclick="window.debugUseScan && window.debugUseScan(Number(this.dataset.scanId)); return false;"
-             @click="() => handleUseScan(s.id)">
+             onclick="if (event.target.closest('button')) return false; window.debugUseScan && window.debugUseScan(Number(this.dataset.scanId)); return false;">
           <span class="scans__id">#{{ s.id }}</span>
           <span class="scans__file">{{ s.filename }}</span>
           <span class="scans__meta">{{ s.ocr_engine }} · {{ s.confidence }}%</span>
