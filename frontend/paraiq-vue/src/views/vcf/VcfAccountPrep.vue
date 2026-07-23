@@ -59,7 +59,10 @@
           <span class="scans__id">#{{ s.id }}</span>
           <span class="scans__file">{{ s.filename }}</span>
           <span class="scans__meta">{{ s.ocr_engine }} · {{ s.confidence }}%</span>
-          <button type="button" class="crow__btn scans__use" :disabled="busy" @click="() => handleUseScan(s.id)">
+          <button type="button" class="crow__btn scans__use" :disabled="busy"
+                  :data-scan-id="s.id"
+                  @click="() => handleUseScan(s.id)"
+                  @mousedown="() => onUseMouseDown(s.id)">
             {{ busy === 'scan' + s.id ? 'extracting…' : 'use' }}
           </button>
         </div>
@@ -252,6 +255,16 @@ async function loadScans() {
 function handleUseScan(id) {
   console.log('[VcfAccountPrep] handleUseScan', id)
   useScan(id)
+}
+
+function onUseMouseDown(id) {
+  console.log('[VcfAccountPrep] onUseMouseDown', id)
+}
+
+// Expose a global fallback so you can test directly from the browser console.
+window.debugUseScan = (id) => {
+  console.log('[GLOBAL] debugUseScan called', id)
+  handleUseScan(Number(id))
 }
 
 async function useScan(id) {
