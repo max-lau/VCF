@@ -425,20 +425,24 @@ async def scan_document(
     result = extract_text(pages, lang=lang, engine=engine,
                           mime_type=mime_type, firm_id=firm_id)
     result["text"] = clean_ocr_text(result["text"])
+    form_fields = result.get("form_fields") or extract_form_fields(result["text"])
 
     # ── Save to Database ─────────────────────────────────────────────────
     with get_conn(firm_id) as conn:
         conn.execute(
             """INSERT INTO intake_scans
-               (firm_id, filename, raw_text, word_count, confidence, ocr_engine, file_url, created_at)
-               VALUES (%s,%s,%s,%s,%s,%s,%s,%s)""",
+               (firm_id, filename, raw_text, word_count, confidence, ocr_engine,
+                file_url, form_fields, created_at)
+               VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s)""",
             (firm_id, file.filename, result["text"], result["word_count"],
              result["confidence"], result["engine"], file_url,
+             json.dumps(form_fields),
              datetime.now(timezone.utc).isoformat())
         )
         conn.commit()
 
-    return {"success": True, "filename": file.filename, "file_url": file_url, **result}
+    return {"success": True, "filename": file.filename, "file_url": file_url,
+            "form_fields": form_fields, **result}
 
 @router.get("/intake/file/{file_path:path}")
 async def download_intake_file(file_path: str, request: Request):
