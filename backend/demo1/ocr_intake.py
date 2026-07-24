@@ -33,6 +33,7 @@ import re
 import base64
 import json
 import logging
+import hashlib
 import httpx
 from datetime import datetime, timezone
 from fastapi import APIRouter, UploadFile, File, HTTPException, Form, Request, Query
@@ -237,6 +238,31 @@ def _safe_doc_type(doc_type: str | None) -> str:
     return re.sub(r"[^a-z0-9_-]", "_", doc_type.lower())[:40]
 
 
+def _content_hash(contents: bytes) -> str:
+    return hashlib.sha256(contents).hexdigest()
+
+
+def _find_existing_scan(firm_id: str, content_hash: str) -> dict | None:
+    """Return an existing scan row if the exact file was already uploaded."""
+    with get_conn(firm_id) as conn:
+        row = conn.execute(
+            """SELECT s.id, s.filename, s.case_id, s.file_url, s.form_fields, s.created_at,
+                      c.case_number, c.client_name AS case_client_name
+               FROM intake_scans s
+               LEFT JOIN cases c ON c.id = s.case_id
+               WHERE s.firm_id = %s AND s.content_hash = %s
+               ORDER BY s.id DESC LIMIT 1""",
+            (firm_id, content_hash)
+        ).fetchone()
+    if not row:
+        return None
+    d = dict(row)
+    if d.get("form_fields") and isinstance(d["form_fields"], str):
+        try: d["form_fields"] = json.loads(d["form_fields"])
+        except (json.JSONDecodeError, TypeError): pass
+    return d
+
+
 def _insert_case_document(
     conn,
     firm_id: str,
@@ -249,6 +275,7 @@ def _insert_case_document(
     file_url: str | None,
     signals: dict,
     match_status: str,
+    content_hash: str,
 ) -> int | None:
     """Create a case_documents row from a routed intake scan.
 
@@ -269,14 +296,15 @@ def _insert_case_document(
         cur = conn.execute(
             """INSERT INTO case_documents
                (firm_id, case_id, scan_id, document_name, source, doc_text, summary,
-                doc_type, file_url, identity_signals, match_status, language, upload_date)
-               VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)
+                doc_type, file_url, identity_signals, match_status, language, upload_date, content_hash)
+               VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)
                RETURNING id""",
             (
                 firm_id, case_id, scan_id, filename, "intake_scan",
                 text or "", summary, doc_type, file_url,
                 json.dumps(identity_signals), match_status, "en",
                 datetime.now(timezone.utc).isoformat(),
+                content_hash,
             ),
         )
         return cur.fetchone()["id"]
@@ -621,6 +649,30 @@ async def scan_document(
             raise HTTPException(status_code=400, detail="Unknown firm_id")
 
     contents = await file.read()
+    content_hash = _content_hash(contents)
+
+    # ── Duplicate check ──────────────────────────────────────────────────
+    existing = _find_existing_scan(firm_id, content_hash)
+    if existing:
+        return {
+            "success": True,
+            "duplicate": True,
+            "existing_scan_id": existing["id"],
+            "scan_id": existing["id"],
+            "filename": existing["filename"],
+            "file_url": existing["file_url"],
+            "case_id": existing["case_id"],
+            "case_number": existing.get("case_number"),
+            "case_created": False,
+            "case_matched": existing.get("case_id") is not None,
+            "match_status": "duplicate",
+            "form_fields": existing.get("form_fields") or {},
+            "text": "",
+            "text_english": "",
+            "word_count": 0,
+            "confidence": 0,
+            "engine": "duplicate",
+        }
 
     # ── Run OCR first so we can resolve the case by identity ─────────────
     pages, mime_type = _prep_upload(contents, file.content_type)
@@ -667,13 +719,13 @@ async def scan_document(
         row = conn.execute(
             """INSERT INTO intake_scans
                (firm_id, case_id, filename, raw_text, word_count, confidence, ocr_engine,
-                file_url, form_fields, created_at)
-               VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)
+                file_url, form_fields, created_at, content_hash)
+               VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)
                RETURNING id""",
             (firm_id, resolved_case_id, file.filename, result["text"], result["word_count"],
              result["confidence"], result["engine"], file_url,
              json.dumps(form_fields),
-             datetime.now(timezone.utc).isoformat())
+             datetime.now(timezone.utc).isoformat(), content_hash)
         ).fetchone()
         scan_id = row["id"] if row else None
         case_doc_id = None
@@ -681,12 +733,14 @@ async def scan_document(
             case_doc_id = _insert_case_document(
                 conn, firm_id, scan_id, resolved_case_id, file.filename,
                 result["text"], result.get("text_english", ""),
-                form_fields, file_url, case_info["signals"], case_info["match_status"]
+                form_fields, file_url, case_info["signals"], case_info["match_status"],
+                content_hash
             )
         conn.commit()
 
     return {
         "success": True,
+        "duplicate": False,
         "scan_id": scan_id,
         "case_document_id": case_doc_id,
         "filename": file.filename,
@@ -747,6 +801,30 @@ async def analyze_document(
     import uuid
     firm_id = getattr(request.state, "firm_id", "default")
     contents = await file.read()
+    content_hash = _content_hash(contents)
+
+    # ── Duplicate check ──────────────────────────────────────────────────
+    existing = _find_existing_scan(firm_id, content_hash)
+    if existing:
+        return {
+            "success": True,
+            "duplicate": True,
+            "existing_scan_id": existing["id"],
+            "scan_id": existing["id"],
+            "filename": existing["filename"],
+            "file_url": existing["file_url"],
+            "case_id": existing["case_id"],
+            "case_number": existing.get("case_number"),
+            "case_created": False,
+            "case_matched": existing.get("case_id") is not None,
+            "match_status": "duplicate",
+            "ocr": {"text": "", "text_english": "", "word_count": 0, "confidence": 0, "engine": "duplicate"},
+            "risk": {"score": 0, "level": "unknown", "top_signals": [], "category_breakdown": {}},
+            "entities": [],
+            "custom_entities": [],
+            "form_fields": existing.get("form_fields") or {},
+        }
+
     pages, mime_type = _prep_upload(contents, file.content_type)
 
     ocr_result = extract_text(pages, lang=lang, engine=engine,
@@ -806,7 +884,7 @@ async def analyze_document(
         row = conn.execute(
             """INSERT INTO intake_scans
                (firm_id, case_id, filename, raw_text, word_count, confidence, ocr_engine,
-                risk_score, risk_level, entities_json, form_fields, file_url, created_at)
+                risk_score, risk_level, entities_json, form_fields, file_url, created_at, content_hash)
                VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)
                RETURNING id""",
             (firm_id, resolved_case_id, file.filename, text, ocr_result["word_count"],
@@ -817,7 +895,7 @@ async def analyze_document(
                  "_text_english": ocr_result.get("text_english", ""),
              }),
              file_url,
-             datetime.now(timezone.utc).isoformat())
+             datetime.now(timezone.utc).isoformat(), content_hash)
         ).fetchone()
         scan_id = row["id"] if row else None
         case_doc_id = None
@@ -825,12 +903,14 @@ async def analyze_document(
             case_doc_id = _insert_case_document(
                 conn, firm_id, scan_id, resolved_case_id, file.filename,
                 text, ocr_result.get("text_english", ""),
-                form_fields, file_url, case_info["signals"], case_info["match_status"]
+                form_fields, file_url, case_info["signals"], case_info["match_status"],
+                content_hash
             )
         conn.commit()
 
     return {
         "success":  True,
+        "duplicate": False,
         "scan_id": scan_id,
         "case_document_id": case_doc_id,
         "filename": file.filename,
@@ -866,6 +946,30 @@ async def extract_intake_form(
 
     firm_id = getattr(request.state, "firm_id", "default")
     contents = await file.read()
+    content_hash = _content_hash(contents)
+
+    # ── Duplicate check ──────────────────────────────────────────────────
+    existing = _find_existing_scan(firm_id, content_hash)
+    if existing:
+        return {
+            "success": True,
+            "duplicate": True,
+            "existing_scan_id": existing["id"],
+            "scan_id": existing["id"],
+            "filename": existing["filename"],
+            "file_url": existing["file_url"],
+            "case_id": existing["case_id"],
+            "case_number": existing.get("case_number"),
+            "case_created": False,
+            "case_matched": existing.get("case_id") is not None,
+            "match_status": "duplicate",
+            "raw_text": "",
+            "text_english": "",
+            "confidence": 0,
+            "engine": "duplicate",
+            "form_fields": existing.get("form_fields") or {},
+        }
+
     pages, mime_type = _prep_upload(contents, file.content_type)
 
     ocr_result = extract_text(pages, lang=lang, engine=engine,
@@ -910,13 +1014,13 @@ async def extract_intake_form(
         row = conn.execute(
             """INSERT INTO intake_scans
                (firm_id, case_id, filename, raw_text, word_count, confidence, ocr_engine,
-                file_url, form_fields, created_at)
-               VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)
+                file_url, form_fields, created_at, content_hash)
+               VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)
                RETURNING id""",
             (firm_id, resolved_case_id, file.filename, text, ocr_result["word_count"],
              ocr_result["confidence"], ocr_result["engine"],
              file_url, json.dumps(form_fields),
-             datetime.now(timezone.utc).isoformat())
+             datetime.now(timezone.utc).isoformat(), content_hash)
         ).fetchone()
         scan_id = row["id"] if row else None
         case_doc_id = None
@@ -924,12 +1028,14 @@ async def extract_intake_form(
             case_doc_id = _insert_case_document(
                 conn, firm_id, scan_id, resolved_case_id, file.filename,
                 text, ocr_result.get("text_english", ""),
-                form_fields, file_url, case_info["signals"], case_info["match_status"]
+                form_fields, file_url, case_info["signals"], case_info["match_status"],
+                content_hash
             )
         conn.commit()
 
     return {
         "success":      True,
+        "duplicate":    False,
         "scan_id":      scan_id,
         "case_document_id": case_doc_id,
         "filename":     file.filename,
@@ -980,6 +1086,43 @@ def intake_history(request: Request, limit: int = 20, case_id: Optional[int] = N
                     logger.debug(f"[Intake] Could not parse {f} in history: {e}")
         results.append(d)
     return {"success": True, "count": len(results), "scans": results}
+
+
+@router.delete("/history/{scan_id}")
+def delete_intake_scan(scan_id: int, request: Request):
+    """Delete an intake scan and its linked case_document (firm-scoped)."""
+    firm_id = getattr(request.state, "firm_id", "default")
+    with get_conn(firm_id) as conn:
+        scan = conn.execute(
+            "SELECT id, file_url FROM intake_scans WHERE id = %s AND firm_id = %s",
+            (scan_id, firm_id)
+        ).fetchone()
+        if not scan:
+            raise HTTPException(status_code=404, detail="Scan not found")
+
+        conn.execute(
+            "DELETE FROM case_documents WHERE scan_id = %s AND firm_id = %s",
+            (scan_id, firm_id)
+        )
+        conn.execute(
+            "DELETE FROM intake_scans WHERE id = %s AND firm_id = %s",
+            (scan_id, firm_id)
+        )
+        conn.commit()
+
+        # Best-effort Supabase Storage cleanup
+        if scan.get("file_url"):
+            try:
+                supabase_url = os.getenv("SUPABASE_URL")
+                supabase_key = os.getenv("SUPABASE_SERVICE_KEY")
+                if supabase_url and supabase_key:
+                    from supabase import create_client
+                    supabase = create_client(supabase_url, supabase_key)
+                    supabase.storage.from_("vcf-documents").remove([scan["file_url"]])
+            except Exception as e:
+                logger.warning(f"[Intake] Could not remove storage object {scan['file_url']}: {e}")
+
+    return {"success": True, "deleted_scan_id": scan_id}
 
 
 @router.get("/inbox")

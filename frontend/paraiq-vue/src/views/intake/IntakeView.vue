@@ -61,6 +61,16 @@ async function fetchHistory() {
   } catch { history.value = [] }
 }
 
+async function deleteScan(scanId) {
+  if (!confirm('Delete this scan and its linked document?')) return
+  try {
+    await client.delete(`/intake/history/${scanId}`)
+    await fetchHistory()
+  } catch (e) {
+    alert('Delete failed: ' + (e.response?.data?.detail || e.message))
+  }
+}
+
 function fmtDate(d) {
   if (!d) return '—'
   return new Date(d).toLocaleDateString('en-US', { month:'short', day:'numeric', year:'numeric' })
@@ -311,11 +321,15 @@ onMounted(() => { fetchHistory(); fetchCases() })
               <th>Date</th>
               <th>OCR Engine</th>
               <th>View File</th>
+              <th></th>
             </tr>
           </thead>
           <tbody>
             <tr v-for="h in history" :key="h.id">
-              <td class="bold">{{ h.filename || '—' }}</td>
+              <td class="bold">
+                {{ h.filename || '—' }}
+                <span v-if="h.ocr_engine === 'duplicate'" class="dup-badge">duplicate</span>
+              </td>
               <td>
                 <router-link v-if="h.case_id" :to="`/matters/${h.case_id}`" class="bl-link">
                   {{ h.case_number || h.case_id }}
@@ -327,6 +341,9 @@ onMounted(() => { fetchHistory(); fetchCases() })
               <td>
                 <a v-if="h.file_url" :href="`/intake/file/${h.file_url}?token=${token()}`" target="_blank" class="bl-link">View PDF ↗</a>
                 <span v-else class="dim">—</span>
+              </td>
+              <td>
+                <button class="del-btn" @click="deleteScan(h.id)">✕</button>
               </td>
             </tr>
           </tbody>
@@ -393,6 +410,9 @@ onMounted(() => { fetchHistory(); fetchCases() })
 .case-badge__tag--matched { background: rgba(72,187,120,.15); color: #48bb78; }
 .bl-link { color: var(--gold); font-size: .875rem; text-decoration: none; }
 .bl-link:hover { text-decoration: underline; }
+.dup-badge { display: inline-block; background: rgba(252,129,129,.12); color: #fc8181; font-size: .65rem; font-weight: 600; padding: .1rem .35rem; border-radius: 4px; margin-left: .4rem; text-transform: uppercase; }
+.del-btn { background: none; border: none; color: var(--text-muted); cursor: pointer; font-size: .8rem; opacity: .5; }
+.del-btn:hover { color: #fc8181; opacity: 1; }
 .result-block__label { font-size: .72rem; color: var(--text-muted); font-weight: 600; letter-spacing: .05em; margin-bottom: .6rem; text-transform: uppercase; }
 .ocr-text { background: var(--bg-raised, #0d0d1a); border-radius: 6px; padding: 1rem 1.25rem; color: var(--text-primary); font-size: .875rem; line-height: 1.7; }
 .ocr-text p { margin: 0 0 .85rem; }
