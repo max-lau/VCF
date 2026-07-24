@@ -46,7 +46,7 @@ async function submit() {
     if (selectedCaseId.value) {
       fd.append('case_id', selectedCaseId.value)
     }
-    const { data } = await client.post(endpointMap[mode.value], fd)
+    const { data } = await client.post(endpointMap[mode.value], fd, { timeout: 120000 })
     result.value = data
     await fetchHistory()
   } catch(e) {
