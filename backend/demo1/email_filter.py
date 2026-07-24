@@ -11,6 +11,9 @@ logger = logging.getLogger(__name__)
 
 TRUSTED_DOMAIN_PATTERNS = [
     r"\.gov$", r"\.court", r"\.uscourts\.gov$", r"\.edu$",
+    r"vcf\.gov$", r"wtchealthprogram\.org$", r"cdc\.gov$",
+    r"cms\.gov$", r"medicare\.gov$", r"medicaid\.gov$",
+    r"hhs\.gov$", r"health\.ny\.gov$", r"nyc\.gov$",
 ]
 # Known system/noreply sender domains to auto-discard
 SYSTEM_DOMAINS = {
@@ -36,6 +39,16 @@ LEGAL_KEYWORDS = [
     "plaintiff","defendant","counsel","attorney","court","filing","discovery",
     "interrogatory","affidavit","brief","appeal","judgment","injunction",
     "damages","exhibit","testimony","verdict","stipulation","mediation",
+]
+
+# VCF / medical-record keywords — used in addition to legal keywords
+VCF_KEYWORDS = [
+    "victim compensation fund", "vcf", "wtc health program", "wtc",
+    "medicare", "medicaid", "social security", "ssa",
+    "medical records", "lab results", "pathology", "radiology",
+    "biopsy", "oncology", "treatment records", "disability",
+    "claim", "claim number", "claimant", "exposure zone",
+    "certified condition", "presence proof", "award determination",
 ]
 
 
@@ -121,7 +134,7 @@ class EmailFilterEngine:
     def _stage2_nlp_case_match(self, msg: EmailMessage) -> tuple:
         score = 0
         matched_case_id = None
-        entities: dict = {"case_refs": [], "legal_keywords": [], "dates": []}
+        entities: dict = {"case_refs": [], "legal_keywords": [], "vcf_keywords": [], "dates": []}
         full_text = f"{msg.subject} {msg.body_text}".lower()
         for case_id, case in self._case_registry.items():
             hit = False
@@ -133,9 +146,14 @@ class EmailFilterEngine:
                 entities["case_refs"].append(case["docket"]); hit = True
             if hit:
                 score += 35; matched_case_id = int(case_id); break
-        hits = [kw for kw in LEGAL_KEYWORDS if kw in full_text]
-        entities["legal_keywords"] = hits
-        score += 20 if len(hits) >= 3 else (10 if hits else 0)
+        legal_hits = [kw for kw in LEGAL_KEYWORDS if kw in full_text]
+        entities["legal_keywords"] = legal_hits
+        score += 20 if len(legal_hits) >= 3 else (10 if legal_hits else 0)
+
+        vcf_hits = [kw for kw in VCF_KEYWORDS if kw in full_text]
+        entities["vcf_keywords"] = vcf_hits
+        score += 20 if len(vcf_hits) >= 3 else (10 if vcf_hits else 0)
+
         dates = re.findall(
             r"\b(\d{1,2}[/-]\d{1,2}[/-]\d{2,4}|(?:jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)[a-z]* \d{1,2},? \d{4})\b",
             full_text

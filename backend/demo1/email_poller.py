@@ -191,7 +191,7 @@ def _save_to_db(msg: EmailMessage, result, firm_id: str):
             )
         # ─────────────────────────────────────────────────────────────────
         # -- Attachment vault --
-        if (intake_id and result.routing_decision == "intake"
+        if (intake_id and result.routing_decision in ("intake", "review")
                 and getattr(msg, '_attachment_parts', [])):
             try:
                 from .attachment_handler import process_attachments

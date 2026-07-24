@@ -258,7 +258,7 @@ def _save_to_db(msg: EmailMessage, result, firm_id: str):
             )
         # ─────────────────────────────────────────────────────────────────
         # -- Attachment vault (Outlook) --
-        if (intake_id and result.routing_decision == "intake"
+        if (intake_id and result.routing_decision in ("intake", "review")
                 and msg.attachment_names):
             try:
                 from .attachment_handler import process_attachments
