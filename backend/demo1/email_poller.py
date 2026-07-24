@@ -170,24 +170,24 @@ def _save_to_db(msg: EmailMessage, result, firm_id: str):
              result.discard_reason, intake_id)
         )
 
-        # ── Case Binder auto-link ─────────────────────────────────────────
-        if (intake_id and result.routing_decision == "intake"
-                and result.case_id_matched):
+        # ── Case Binder auto-link (the email body itself) ─────────────────
+        if intake_id and result.routing_decision == "intake":
             conn.execute(
                 """INSERT INTO case_documents
-                       (firm_id, case_id, document_name, source, source_type,
-                        source_ref, doc_text, entities_json, upload_date, source_url)
-                   VALUES (%s, %s, %s, %s, 'email', %s, %s, %s, %s, %s)
+                       (firm_id, case_id, document_name, source, doc_text,
+                        summary, doc_type, language, upload_date, file_url,
+                        identity_signals, match_status, entities_json)
+                   VALUES (%s, %s, %s, 'email', %s, '', 'correspondence', 'en',
+                           %s, %s, '{}', %s, %s)
                    ON CONFLICT DO NOTHING""",
                 (msg.firm_id,
                  result.case_id_matched,
                  f"Email: {msg.subject[:100]} [from: {msg.from_address[:60]}]",
-                 'email',
-                 intake_id,
                  msg.body_text[:4000] if msg.body_text else None,
-                 json.dumps(result.extracted_entities),
                  msg.received_at,
-                 getattr(msg, 'source_url', None))
+                 getattr(msg, 'source_url', None),
+                 "matched" if result.case_id_matched else "unmatched",
+                 json.dumps(result.extracted_entities))
             )
         # ─────────────────────────────────────────────────────────────────
         # -- Attachment vault --
@@ -286,6 +286,7 @@ def poll_gmail_account(account: dict):
             msg = _parse_gmail_message(raw, account)
             if not msg:
                 continue
+            msg._access_token = creds.token  # needed to download attachments
             filter_result = engine.process(msg)
             _save_to_db(msg, filter_result, firm_id)
 

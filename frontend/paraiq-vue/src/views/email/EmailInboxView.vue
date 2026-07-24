@@ -332,6 +332,24 @@ const tabs = [
           <div class="muted">Raw body visible only for authorised attorney on intake items.</div>
         </div>
 
+        <!-- Attachments -->
+        <div v-if="selectedItem.attachment_names?.length" class="detail-section">
+          <div class="section-label">Attachments ({{ selectedItem.attachment_names.length }})</div>
+          <div class="entity-chips">
+            <span v-for="name in selectedItem.attachment_names" :key="name" class="entity-chip case" title="Saved to case documents">
+              📎 {{ name }}
+            </span>
+          </div>
+          <router-link
+            v-if="selectedItem.case_id"
+            :to="`/matters/${selectedItem.case_id}`"
+            class="bl-link"
+            style="margin-top:8px;display:inline-block;"
+          >
+            View in case binder →
+          </router-link>
+        </div>
+
         <!-- Reply compose panel -->
         <div v-if="showReply" class="reply-panel">
           <div class="reply-panel__header">
@@ -485,4 +503,6 @@ const tabs = [
 .reply-toast { position: fixed; bottom: 20px; left: 50%; transform: translateX(-50%); background: #1E2530; border: 1px solid #6366F1; color: #E2E8F0; font-size: 11px; padding: 8px 16px; border-radius: 8px; z-index: 2000; }
 .toast-enter-active, .toast-leave-active { transition: all 0.2s; }
 .toast-enter-from, .toast-leave-to { opacity: 0; transform: translateX(-50%) translateY(6px); }
+.bl-link { color: var(--gold, #d4af37); font-size: .8rem; text-decoration: none; }
+.bl-link:hover { text-decoration: underline; }
 </style>

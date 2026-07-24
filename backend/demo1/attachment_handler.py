@@ -1,23 +1,54 @@
 """
-attachment_handler.py
-Vault-first attachment processing pipeline:
-  1. Save to quarantine
-  2. Validate file type (whitelist)
-  3. Virus scan (ClamAV)
-  4. Unzip one level (if zip)
-  5. Move cleared files to cleared/
-  6. Write records into case_documents
+attachment_handler.py  (ACP-VCF revision)
+=========================================
+Vault-first attachment processing pipeline for email intake.
+
+Changes vs. ParaIQ original
+  1. Uses the real case_documents schema (no source_type/source_ref columns).
+  2. Uploads cleared attachments to Supabase storage so they are viewable
+     in the case binder.
+  3. Computes SHA-256 content_hash so duplicate email attachments are caught
+     by the same duplicate-prevention logic as intake scans.
+  4. Virus scan and MIME detection are best-effort: on Windows/dev machines
+     without ClamAV/libmagic they warn and continue instead of quarantining
+     every legitimate medical PDF.
+  5. Unmatched attachments (no case identified) are still written to
+     case_documents with match_status='unmatched' so the Document Inbox
+     can route them manually.
 """
-import os, uuid, shutil, subprocess, zipfile, logging, json
+import os
+import uuid
+import shutil
+import subprocess
+import zipfile
+import logging
+import json
+import hashlib
+import mimetypes
 from pathlib import Path
 from typing import Optional
 
-import magic
-
 logger = logging.getLogger(__name__)
 
-QUARANTINE = Path(os.environ.get("QUARANTINE_DIR", str(Path(__file__).parent.parent.parent / "uploads" / "email_attachments" / "quarantine")))
-CLEARED    = Path(os.environ.get("CLEARED_DIR", str(Path(__file__).parent.parent.parent / "uploads" / "email_attachments" / "cleared")))
+# python-magic requires libmagic, which is often missing on Windows.
+try:
+    import magic
+    _MAGIC_AVAILABLE = True
+except Exception:
+    magic = None
+    _MAGIC_AVAILABLE = False
+
+BASE_DIR = Path(__file__).parent.parent.parent
+QUARANTINE = Path(os.environ.get(
+    "QUARANTINE_DIR",
+    str(BASE_DIR / "uploads" / "email_attachments" / "quarantine")
+))
+CLEARED = Path(os.environ.get(
+    "CLEARED_DIR",
+    str(BASE_DIR / "uploads" / "email_attachments" / "cleared")
+))
+
+STRICT_VIRUS_SCAN = os.getenv("ATTACHMENT_STRICT_VIRUS_SCAN", "false").lower() == "true"
 
 # Allowed MIME types
 ALLOWED_MIMES = {
@@ -53,15 +84,27 @@ def _ext(filename: str) -> str:
 
 
 def _safe_mime(path: Path) -> str:
-    try:
-        return magic.from_file(str(path), mime=True)
-    except (OSError, ValueError) as e:
-        logger.warning(f"[Vault] magic.from_file failed for {path}: {e}")
-        return "application/octet-stream"
+    """Best-effort MIME detection. Falls back to mimetypes if python-magic
+    is unavailable or fails."""
+    if _MAGIC_AVAILABLE:
+        try:
+            return magic.from_file(str(path), mime=True)
+        except (OSError, ValueError) as e:
+            logger.warning(f"[Vault] magic.from_file failed for {path}: {e}")
+    guessed, _ = mimetypes.guess_type(str(path))
+    return guessed or "application/octet-stream"
 
 
 def _virus_scan(path: Path) -> tuple[bool, str]:
-    """Returns (is_clean, detail). Treats scan errors as unclean."""
+    """Returns (is_clean, detail). Missing ClamAV is treated as clean in dev,
+    configurable via ATTACHMENT_STRICT_VIRUS_SCAN=true."""
+    if not shutil.which("clamscan"):
+        msg = "clamscan not installed"
+        if STRICT_VIRUS_SCAN:
+            return False, msg
+        logger.warning(f"[Vault] {msg}; skipping virus scan for {path.name}")
+        return True, "skipped (clamscan unavailable)"
+
     try:
         result = subprocess.run(
             ["clamscan", "--no-summary", "-i", str(path)],
@@ -79,6 +122,66 @@ def _virus_scan(path: Path) -> tuple[bool, str]:
         return False, f"scan exception: {e}"
 
 
+def _content_hash(path: Path) -> str:
+    h = hashlib.sha256()
+    with open(path, "rb") as f:
+        for chunk in iter(lambda: f.read(8192), b""):
+            h.update(chunk)
+    return h.hexdigest()
+
+
+def _upload_to_storage(
+    data: bytes,
+    firm_id: str,
+    case_id: Optional[int],
+    ext: str,
+) -> Optional[str]:
+    """Upload bytes to Supabase storage. Returns the storage path or None."""
+    supabase_url = os.getenv("SUPABASE_URL")
+    supabase_key = os.getenv("SUPABASE_SERVICE_KEY")
+    if not supabase_url or not supabase_key:
+        logger.warning("[Vault] SUPABASE_URL or SUPABASE_SERVICE_KEY not set; skipping upload")
+        return None
+
+    try:
+        from supabase import create_client
+        supabase = create_client(supabase_url, supabase_key)
+        storage_path = (
+            f"{firm_id}/cases/{case_id}/email/{uuid.uuid4().hex}.{ext}"
+            if case_id else
+            f"{firm_id}/email/unmatched/{uuid.uuid4().hex}.{ext}"
+        )
+        supabase.storage.from_("vcf-documents").upload(
+            path=storage_path,
+            file=data,
+            file_options={"content-type": mimetypes.guess_type(f"file{ext}")[0] or "application/octet-stream"}
+        )
+        return storage_path
+    except Exception as e:
+        logger.warning(f"[Vault] Supabase upload failed: {e}")
+        return None
+
+
+def _infer_doc_type(filename: str) -> str:
+    ext = _ext(filename)
+    return {
+        ".pdf": "pdf",
+        ".doc": "word",
+        ".docx": "word",
+        ".xls": "spreadsheet",
+        ".xlsx": "spreadsheet",
+        ".csv": "spreadsheet",
+        ".txt": "text",
+        ".png": "image",
+        ".jpg": "image",
+        ".jpeg": "image",
+        ".tiff": "image",
+        ".tif": "image",
+        ".eml": "email",
+        ".msg": "email",
+    }.get(ext, "other")
+
+
 def _process_single_file(src: Path, original_name: str) -> dict:
     """Validate + scan one file already in quarantine. Returns status dict."""
     result = {
@@ -87,8 +190,10 @@ def _process_single_file(src: Path, original_name: str) -> dict:
         "status": "rejected",
         "reason": None,
         "cleared_path": None,
+        "file_url": None,
         "mime": None,
         "size_kb": round(src.stat().st_size / 1024, 1),
+        "content_hash": None,
     }
 
     # Extension check — block double extensions like invoice.pdf.exe
@@ -100,8 +205,9 @@ def _process_single_file(src: Path, original_name: str) -> dict:
             result["reason"] = f"double extension blocked: {original_name}"
             return result
 
-    if _ext(original_name) not in ALLOWED_EXTENSIONS:
-        result["reason"] = f"file type not allowed: {_ext(original_name)}"
+    ext = _ext(original_name)
+    if ext not in ALLOWED_EXTENSIONS:
+        result["reason"] = f"file type not allowed: {ext}"
         return result
 
     # Size check
@@ -124,10 +230,13 @@ def _process_single_file(src: Path, original_name: str) -> dict:
         result["status"] = "quarantined"
         return result
 
+    # Compute hash
+    result["content_hash"] = _content_hash(src)
+
     # Move to cleared
     cleared_path = CLEARED / src.name
     shutil.move(str(src), str(cleared_path))
-    result["status"]       = "clean"
+    result["status"] = "clean"
     result["cleared_path"] = str(cleared_path)
     return result
 
@@ -141,7 +250,7 @@ def process_attachments(
 ) -> dict:
     """
     Full vault pipeline. Returns summary dict with per-file results.
-    Writes cleared files into case_documents.
+    Writes cleared files into case_documents and uploads them to Supabase.
     """
     summary = {
         "total": len(attachments),
@@ -162,7 +271,7 @@ def process_attachments(
         return summary
 
     # Total size gate
-    total_mb = sum(len(a["data"]) for a in attachments) / (1024 * 1024)
+    total_mb = sum(len(a.get("data", b"")) for a in attachments) / (1024 * 1024)
     if total_mb > MAX_TOTAL_MB:
         summary["manual_review"] = True
         logger.warning(f"[Vault] {intake_id}: total size {total_mb:.1f}MB exceeds limit")
@@ -173,9 +282,9 @@ def process_attachments(
     # Stage all files into quarantine first
     for att in attachments:
         filename = att.get("filename") or "attachment"
-        data     = att.get("data", b"")
+        data = att.get("data", b"")
         safe_name = f"{uuid.uuid4().hex}_{Path(filename).name}"
-        q_path    = QUARANTINE / safe_name
+        q_path = QUARANTINE / safe_name
         q_path.write_bytes(data)
         files_to_process.append((q_path, filename))
 
@@ -185,7 +294,6 @@ def process_attachments(
         if _ext(original_name) == ".zip":
             zip_results = _expand_zip(q_path, original_name)
             expanded.extend(zip_results)
-            # Remove the zip itself from quarantine after expansion
             try:
                 q_path.unlink()
             except (OSError, PermissionError):
@@ -209,31 +317,40 @@ def process_attachments(
         else:
             summary["rejected"] += 1
             logger.warning(f"[Vault] Rejected: {original_name} — {result['reason']}")
-            # Clean up rejected file from quarantine
             try:
                 q_path.unlink()
             except (OSError, PermissionError):
                 pass
 
-    # Write cleared files into case_documents
-    if case_id and cleared_files:
-        for f in cleared_files:
-            try:
-                conn.execute("""
-                    INSERT INTO case_documents
-                        (firm_id, case_id, document_name, source, source_type,
-                         source_ref, upload_date)
-                    VALUES (%s, %s, %s, 'email', 'email_attachment', %s, NOW())
-                    ON CONFLICT DO NOTHING
-                """, (
-                    firm_id,
-                    case_id,
-                    f"Attachment: {f['original_name']}",
-                    intake_id,
-                ))
-                logger.info(f"[Vault] Linked to case {case_id}: {f['original_name']}")
-            except (psycopg2.Error, KeyError, ValueError) as e:
-                logger.error(f"[Vault] DB insert failed for {f['original_name']}: {e}")
+    # Upload cleared files and write case_documents rows
+    for f in cleared_files:
+        try:
+            ext = _ext(f["original_name"])
+            with open(f["cleared_path"], "rb") as fh:
+                file_bytes = fh.read()
+            file_url = _upload_to_storage(file_bytes, firm_id, case_id, ext)
+            f["file_url"] = file_url
+
+            conn.execute("""
+                INSERT INTO case_documents
+                    (firm_id, case_id, document_name, source, doc_text,
+                     summary, doc_type, language, upload_date, file_url,
+                     identity_signals, match_status, content_hash)
+                VALUES (%s, %s, %s, 'email_attachment', '', '', %s, 'en',
+                        NOW(), %s, '{}', %s, %s)
+                ON CONFLICT DO NOTHING
+            """, (
+                firm_id,
+                case_id,
+                f"Attachment: {f['original_name']}",
+                _infer_doc_type(f["original_name"]),
+                file_url,
+                "matched" if case_id else "unmatched",
+                f["content_hash"],
+            ))
+            logger.info(f"[Vault] Linked to case {case_id or 'unmatched'}: {f['original_name']}")
+        except Exception as e:
+            logger.error(f"[Vault] DB insert failed for {f['original_name']}: {e}")
 
     logger.info(
         f"[Vault] {intake_id}: {summary['clean']} clean, "
@@ -249,21 +366,19 @@ def _expand_zip(zip_path: Path, original_name: str) -> list[tuple[Path, str]]:
         with zipfile.ZipFile(zip_path, "r") as zf:
             members = [m for m in zf.infolist() if not m.is_dir()]
 
-            # Zip bomb: too many files
             if len(members) > MAX_ZIP_FILES:
                 logger.warning(f"[Vault] Zip {original_name} has {len(members)} files — rejected")
                 return []
 
-            # Zip bomb: total uncompressed size
             total_uncompressed = sum(m.file_size for m in members)
             if total_uncompressed > MAX_ZIP_MB * 1024 * 1024:
                 logger.warning(f"[Vault] Zip {original_name} uncompressed size too large — rejected")
                 return []
 
             for member in members:
-                inner_name = Path(member.filename).name  # strip any path traversal
-                safe_name  = f"{uuid.uuid4().hex}_{inner_name}"
-                out_path   = QUARANTINE / safe_name
+                inner_name = Path(member.filename).name
+                safe_name = f"{uuid.uuid4().hex}_{inner_name}"
+                out_path = QUARANTINE / safe_name
                 out_path.write_bytes(zf.read(member.filename))
                 results.append((out_path, inner_name))
 

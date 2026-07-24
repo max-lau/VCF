@@ -142,6 +142,13 @@ def _parse_graph_message(raw: dict, account: dict) -> Optional[EmailMessage]:
             logger.debug(f"[outlook_poller] receivedDateTime parse failed for '{received_str}': {e}")
             received_at = datetime.now(timezone.utc)
 
+        # Collect attachment names if Graph included them inline
+        att_names = []
+        for att in raw.get("attachments", {}).get("value", []):
+            name = att.get("name") or att.get("displayName")
+            if name:
+                att_names.append(name)
+
         return EmailMessage(
             provider_message_id=raw["id"],
             provider="outlook",
@@ -157,7 +164,7 @@ def _parse_graph_message(raw: dict, account: dict) -> Optional[EmailMessage]:
             received_at=received_at,
             headers={},
             source_url=raw.get("webLink", ""),
-            attachment_names=[],
+            attachment_names=att_names,
         )
     except (ValueError, KeyError, TypeError, AttributeError) as e:
         logger.error(f"Failed to parse Outlook message {raw.get('id')}: {e}")
@@ -230,48 +237,26 @@ def _save_to_db(msg: EmailMessage, result, firm_id: str):
              result.discard_reason, intake_id)
         )
 
-        # ── Case Binder auto-link ─────────────────────────────────────────
-        if (intake_id and result.routing_decision == "intake"
-                and result.case_id_matched):
+        # ── Case Binder auto-link (the email body itself) ─────────────────
+        if intake_id and result.routing_decision == "intake":
             conn.execute(
                 """INSERT INTO case_documents
-                       (firm_id, case_id, document_name, source, source_type,
-                        source_ref, doc_text, entities_json, upload_date, source_url)
-                   VALUES (%s, %s, %s, %s, 'email', %s, %s, %s, %s, %s)
+                       (firm_id, case_id, document_name, source, doc_text,
+                        summary, doc_type, language, upload_date, file_url,
+                        identity_signals, match_status, entities_json)
+                   VALUES (%s, %s, %s, 'email', %s, '', 'correspondence', 'en',
+                           %s, %s, '{}', %s, %s)
                    ON CONFLICT DO NOTHING""",
                 (msg.firm_id,
                  result.case_id_matched,
                  f"Email: {msg.subject[:100]} [from: {msg.from_address[:60]}]",
-                 'email',
-                 intake_id,
                  msg.body_text[:4000] if msg.body_text else None,
-                 json.dumps(result.extracted_entities),
                  msg.received_at,
-                 getattr(msg, 'source_url', None))
+                 getattr(msg, 'source_url', None),
+                 "matched" if result.case_id_matched else "unmatched",
+                 json.dumps(result.extracted_entities))
             )
         # ─────────────────────────────────────────────────────────────────
-        # -- Attachment vault (Outlook) --
-        if (intake_id and result.routing_decision == "intake"
-                and msg.attachment_names):
-            try:
-                from .attachment_handler import process_attachments
-                import requests as _req
-                att_list = []
-                access_token = getattr(msg, '_access_token', None)
-                graph_msg_id = getattr(msg, '_graph_msg_id', None)
-                if access_token and graph_msg_id:
-                    url = f"https://graph.microsoft.com/v1.0/me/messages/{graph_msg_id}/attachments"
-                    resp = _req.get(url, headers={"Authorization": f"Bearer {access_token}"}, timeout=15)
-                    if resp.status_code == 200:
-                        for att in resp.json().get("value", []):
-                            if att.get("@odata.type") == "#microsoft.graph.fileAttachment":
-                                import base64
-                                data = base64.b64decode(att.get("contentBytes", ""))
-                                att_list.append({"filename": att.get("name", "attachment"), "data": data})
-                if att_list:
-                    process_attachments(att_list, msg.firm_id, result.case_id_matched, intake_id, conn)
-            except (OSError, ValueError, KeyError) as ve:
-                logger.error(f"[Vault] Outlook attachment processing error: {ve}")
         # -- Attachment vault (Outlook) --
         if (intake_id and result.routing_decision == "intake"
                 and msg.attachment_names):
@@ -402,6 +387,8 @@ def poll_outlook_account(account: dict):
             msg = _parse_graph_message(raw, account)
             if not msg:
                 continue
+            msg._access_token = access_token
+            msg._graph_msg_id = raw["id"]
             filter_result = engine.process(msg)
             _save_to_db(msg, filter_result, firm_id)
 
