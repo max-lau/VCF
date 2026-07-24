@@ -61,8 +61,10 @@ def init_intake_table():
 # ═══════════════════════════════════════════════════════════════════════════════
 
 def _normalize_name(name: str | None) -> str:
+    """Collapse whitespace and strip punctuation so 'Chen, Weiming' matches 'Chen Weiming'."""
     if not name:
         return ""
+    name = re.sub(r"[^\w\s]", "", name)
     return " ".join(name.split())
 
 
@@ -96,12 +98,16 @@ def find_case_by_identity(firm_id: str, signals: dict) -> tuple[int | None, str 
     if not name:
         return None, None, None
 
+    # Compare names after stripping punctuation so medical-record "Chen, Weiming"
+    # matches case "Chen Weiming".
+    name_sql = """LOWER(REGEXP_REPLACE(client_name, '[^a-z0-9 ]', '', 'g')) = LOWER(%s)"""
+
     with get_conn(firm_id) as conn:
         if dob:
             row = conn.execute(
-                """SELECT id FROM cases
+                f"""SELECT id FROM cases
                    WHERE firm_id = %s AND deleted = FALSE
-                     AND LOWER(client_name) = LOWER(%s)
+                     AND {name_sql}
                      AND date_of_birth = %s
                    ORDER BY id ASC LIMIT 1""",
                 (firm_id, name, dob)
@@ -111,9 +117,9 @@ def find_case_by_identity(firm_id: str, signals: dict) -> tuple[int | None, str 
 
         if ssn:
             row = conn.execute(
-                """SELECT id FROM cases
+                f"""SELECT id FROM cases
                    WHERE firm_id = %s AND deleted = FALSE
-                     AND LOWER(client_name) = LOWER(%s)
+                     AND {name_sql}
                      AND ssn_last4 = %s
                    ORDER BY id ASC LIMIT 1""",
                 (firm_id, name, ssn)
@@ -122,9 +128,9 @@ def find_case_by_identity(firm_id: str, signals: dict) -> tuple[int | None, str 
                 return row["id"], "matched", "name+ssn"
 
         rows = conn.execute(
-            """SELECT id FROM cases
+            f"""SELECT id FROM cases
                WHERE firm_id = %s AND deleted = FALSE
-                 AND LOWER(client_name) = LOWER(%s)
+                 AND {name_sql}
                ORDER BY id ASC""",
             (firm_id, name)
         ).fetchall()
