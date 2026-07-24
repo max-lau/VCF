@@ -410,3 +410,28 @@ def send_reply(
     )
 
     return {"ok": True, "provider": provider, "to": intake["from_address"]}
+
+
+# ── Manual poll (dev / smoke-test helper) ─────────────────────────────────────
+
+@router.post("/email/poll-now")
+def poll_email_now(
+    current_user=Depends(get_current_user),
+    db: PgConn = Depends(db_dep),
+):
+    """Trigger an immediate Gmail poll for the current user's connected account."""
+    account = _row(db.execute(
+        "SELECT * FROM attorney_email_accounts WHERE attorney_id=%s AND provider='gmail' AND is_active=TRUE ORDER BY created_at DESC LIMIT 1",
+        (current_user["id"],),
+    ))
+    if not account:
+        raise HTTPException(404, "No active Gmail account connected. Click + Gmail first.")
+
+    from .email_poller import poll_gmail_account
+    import asyncio
+    try:
+        asyncio.get_event_loop().run_in_executor(None, poll_gmail_account, account)
+    except Exception as e:
+        logger.error(f"[email/poll-now] failed: {e}")
+        raise HTTPException(500, f"Poll failed: {e}")
+    return {"status": "poll_triggered", "account": account["email_address"]}
