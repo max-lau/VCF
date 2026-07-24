@@ -53,6 +53,10 @@ export default defineConfig({
         target: 'http://localhost:5003',
         changeOrigin: true,
         bypass: spaBypass
+      },
+      '/email': {
+        target: 'http://localhost:5003',
+        changeOrigin: true
       }
     }
   },
