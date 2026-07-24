@@ -437,9 +437,10 @@ def poll_email_now(
         raise HTTPException(404, "No active Gmail account connected. Click + Gmail first.")
 
     from .email_poller import poll_gmail_account
-    import asyncio
+    from concurrent.futures import ThreadPoolExecutor
     try:
-        asyncio.get_event_loop().run_in_executor(None, poll_gmail_account, account)
+        with ThreadPoolExecutor(max_workers=1) as executor:
+            executor.submit(poll_gmail_account, account).result(timeout=120)
     except Exception as e:
         logger.error(f"[email/poll-now] failed: {e}")
         raise HTTPException(500, f"Poll failed: {e}")
