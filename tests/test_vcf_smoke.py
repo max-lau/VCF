@@ -157,3 +157,11 @@ class TestVCFDeadlines:
         assert r.status_code == 200
         data = r.json()
         assert data["count"] >= 1
+
+
+class TestVCFHealth:
+    def test_health_returns_ok(self):
+        r = requests.get(f"{BASE}/health")
+        assert r.status_code == 200
+        data = r.json()
+        assert data.get("status") == "ok"
