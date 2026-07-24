@@ -77,6 +77,12 @@ def connect_gmail(current_user=Depends(get_current_user)):
     _oauth_states[state]["code_verifier"] = flow.code_verifier
     return {"auth_url": auth_url}
 
+@router.get("/email/accounts/gmail/redirect-uri")
+def get_gmail_redirect_uri(current_user=Depends(get_current_user)):
+    """Return the redirect URI the backend is currently sending to Google.
+    Useful for debugging redirect_uri_mismatch errors."""
+    return {"redirect_uri": GMAIL_REDIRECT_URI}
+
 @router.get("/auth/gmail/callback")
 def gmail_callback(code:str, state:str, db:PgConn=Depends(db_dep)):
     session = _oauth_states.pop(state, None)
