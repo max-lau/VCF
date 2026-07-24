@@ -28,7 +28,7 @@ function onDrop(e) { e.preventDefault(); file.value = e.dataTransfer.files[0] ||
 async function fetchCases() {
   loadingCases.value = true
   try {
-    const { data } = await client.get('/cases/search?limit=500')
+    const { data } = await client.get('/cases/search?limit=100')
     cases.value = data.results || data.cases || []
   } catch {
     cases.value = []

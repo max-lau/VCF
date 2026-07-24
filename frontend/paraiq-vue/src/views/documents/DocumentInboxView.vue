@@ -24,7 +24,7 @@ async function fetchInbox() {
 
 async function fetchCases() {
   try {
-    const { data } = await axios.get('/cases/search?limit=500', { headers: authHdr() })
+    const { data } = await axios.get('/cases/search?limit=100', { headers: authHdr() })
     cases.value = data.results || data.cases || []
   } catch { cases.value = [] }
 }
