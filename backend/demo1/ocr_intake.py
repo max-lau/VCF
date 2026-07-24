@@ -100,7 +100,7 @@ def find_case_by_identity(firm_id: str, signals: dict) -> tuple[int | None, str 
 
     # Compare names after stripping punctuation so medical-record "Chen, Weiming"
     # matches case "Chen Weiming".
-    name_sql = """LOWER(REGEXP_REPLACE(client_name, '[^a-z0-9 ]', '', 'g')) = LOWER(%s)"""
+    name_sql = """LOWER(REGEXP_REPLACE(client_name, '[^a-zA-Z0-9 ]', '', 'g')) = LOWER(%s)"""
 
     with get_conn(firm_id) as conn:
         if dob:
