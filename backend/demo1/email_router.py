@@ -20,6 +20,9 @@ router = APIRouter(tags=["email"])
 GMAIL_CLIENT_ID     = os.getenv("GMAIL_CLIENT_ID")
 GMAIL_CLIENT_SECRET = os.getenv("GMAIL_CLIENT_SECRET")
 GMAIL_REDIRECT_URI  = os.getenv("GMAIL_REDIRECT_URI", "https://app.para-iq.com/auth/gmail/callback")
+# Where the OAuth callback handler sends the user after tokens are saved.
+# For local dev set this to http://localhost:5174/dashboard
+OAUTH_SUCCESS_REDIRECT = os.getenv("OAUTH_SUCCESS_REDIRECT", "https://app.para-iq.com/dashboard")
 GMAIL_SCOPES = [
     "https://www.googleapis.com/auth/gmail.readonly",
     "https://www.googleapis.com/auth/gmail.send",
@@ -101,7 +104,7 @@ def gmail_callback(code:str, state:str, db:PgConn=Depends(db_dep)):
         (session["attorney_id"],session["firm_id"],email_address,creds.token,creds.refresh_token,creds.expiry)
     )
     logger.info(f"Gmail connected: {email_address}")
-    return RedirectResponse(url="/dashboard?gmail=connected")
+    return RedirectResponse(url=f"{OAUTH_SUCCESS_REDIRECT}?gmail=connected")
 
 @router.delete("/email/accounts/{account_id}")
 def disconnect_account(account_id:str, current_user=Depends(get_current_user), db:PgConn=Depends(db_dep)):
@@ -195,7 +198,7 @@ def outlook_callback(code: str, state: str, db: PgConn = Depends(db_dep)):
          result["access_token"], result.get("refresh_token", ""))
     )
     logger.info(f"Outlook connected: {email_address}")
-    return RedirectResponse(url="/dashboard?outlook=connected")
+    return RedirectResponse(url=f"{OAUTH_SUCCESS_REDIRECT}?outlook=connected")
 
 # ── Reply endpoints ───────────────────────────────────────────────────────────
 
