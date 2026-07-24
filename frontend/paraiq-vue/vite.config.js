@@ -2,6 +2,15 @@ import { defineConfig } from 'vite'
 import vue from '@vitejs/plugin-vue'
 import { fileURLToPath, URL } from 'node:url'
 
+// Let the SPA handle page-load requests (e.g. hard refresh on /intake)
+// while still proxying XHR/fetch API calls to the backend.
+function spaBypass(req) {
+  const accept = req.headers?.accept || ''
+  if (accept.includes('text/html')) {
+    return req.url
+  }
+}
+
 export default defineConfig({
   plugins: [vue()],
   resolve: {
@@ -32,15 +41,18 @@ export default defineConfig({
       },
       '/intake': {
         target: 'http://localhost:5003',
-        changeOrigin: true
+        changeOrigin: true,
+        bypass: spaBypass
       },
       '/dashboard': {
         target: 'http://localhost:5003',
-        changeOrigin: true
+        changeOrigin: true,
+        bypass: spaBypass
       },
       '/communications': {
         target: 'http://localhost:5003',
-        changeOrigin: true
+        changeOrigin: true,
+        bypass: spaBypass
       }
     }
   },
