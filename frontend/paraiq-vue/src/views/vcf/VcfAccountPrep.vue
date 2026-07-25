@@ -97,6 +97,14 @@
         No VCF email assigned yet. It will be auto-generated when you create the prep sheet.
       </div>
       <div class="grid">
+        <label class="field field--full">
+          <span class="field__label">Name order</span>
+          <select v-model="nameOrder" class="field__input" @change="applyNameOrder">
+            <option value="given_first">Western — Given + Family (e.g. John Smith)</option>
+            <option value="surname_first">East Asian — Family + Given (e.g. Chen Weiming)</option>
+          </select>
+          <span class="field__hint">Swap when the source document writes the family name first.</span>
+        </label>
         <label v-for="f in clientFields" :key="f.key" class="field">
           <span class="field__label">{{ f.label }}</span>
           <input
@@ -212,6 +220,7 @@ const prep = ref(null)
 const prepId = ref(null)
 const status = ref('')
 const copied = reactive(new Set())
+const nameOrder = ref('given_first')
 
 const client = ref({
   first_name: '', last_name: '', email: '', vcf_email: '', phone: '',
@@ -253,6 +262,7 @@ async function loadCase() {
       preferred_language: c.preferred_language ?? '',
       notes: c.notes ?? '',
     }
+    nameOrder.value = c.name_order || 'given_first'
   } catch (e) {
     console.error('[VcfAccountPrep] loadCase failed:', e)
   }
@@ -270,6 +280,15 @@ async function loadCases() {
 function selectCase(id) {
   selectedCaseId.value = Number(id) || null
   loadCase()
+}
+
+function applyNameOrder() {
+  const f = client.value.first_name
+  const l = client.value.last_name
+  if (f && l) {
+    client.value.first_name = l
+    client.value.last_name = f
+  }
 }
 
 onMounted(() => {
@@ -308,6 +327,7 @@ async function extract() {
       preferred_language: c.preferred_language ?? '',
       notes: c.notes ?? '',
     }
+    nameOrder.value = c.name_order || 'given_first'
     const warn = []
     if (c.missing_fields?.length) warn.push(`missing: ${c.missing_fields.join(', ')}`)
     if (c.ocr_uncertain?.length) warn.push(`uncertain OCR: ${c.ocr_uncertain.join(', ')}`)
@@ -368,6 +388,7 @@ async function useScan(id) {
       preferred_language: c.preferred_language ?? '',
       notes: c.notes ?? '',
     }
+    nameOrder.value = c.name_order || 'given_first'
     console.log('[VcfAccountPrep] client after assign:', JSON.parse(JSON.stringify(client.value)))
     const warn = [...(r.warnings || [])]
     if (c.missing_fields?.length) warn.push(`missing: ${c.missing_fields.join(', ')}`)
@@ -473,6 +494,8 @@ async function markCreated() {
   text-transform: uppercase; letter-spacing: .05em; margin-bottom: 3px; }
 .field__input { width: 100%; background: var(--bg-void); border: 1px solid var(--border-dim);
   color: var(--text-primary, #eee); border-radius: 6px; padding: 7px 10px; font-size: 13px; }
+.field--full { grid-column: 1 / -1; }
+.field__hint { display: block; font-size: 11px; color: var(--text-tertiary); margin-top: 3px; }
 
 .check { display: block; font-size: 13px; color: var(--text-secondary); margin-bottom: 12px; }
 .check__hint { color: var(--text-tertiary); font-size: 11px; margin-left: 6px; }

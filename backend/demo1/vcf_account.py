@@ -52,6 +52,28 @@ from backend.demo1.case_management import generate_vcf_email
 logger = logging.getLogger(__name__)
 router = APIRouter()
 
+# ── Culture-aware name splitting ──────────────────────────────────────────────
+# Some cultures write the family name first. When name_order is "surname_first",
+# the first token of client_name is the family name and the remainder is the
+# given name(s). Otherwise we assume Western given-first order.
+SURNAME_FIRST_ORDERS = {"surname_first", "family_first", "eastern_order"}
+
+
+def split_client_name(name: str, name_order: str | None = None) -> tuple[str, str]:
+    """Return (first_name, last_name) honoring name_order if known."""
+    name = (name or "").strip()
+    if not name:
+        return "", ""
+    parts = name.split()
+    if len(parts) == 1:
+        return name, ""
+    if name_order and name_order.lower() in SURNAME_FIRST_ORDERS:
+        # e.g. "Chen Weiming" -> first="Weiming", last="Chen"
+        return " ".join(parts[1:]), parts[0]
+    # Default Western order: "John Doe" -> first="John", last="Doe"
+    return " ".join(parts[:-1]), parts[-1]
+
+
 VCF_REGISTER_URL = (
     "https://www.claims.vcf.gov/account/Register"
     "?class=btn%20btn-default%20btn-block%20content-group"
@@ -248,6 +270,7 @@ class ClientData(BaseModel):
     ssn_last4: str = ""
     preferred_language: str = ""
     notes: str = ""
+    name_order: Optional[str] = None  # surname_first | given_first
 
 
 class SecuritySelection(BaseModel):
@@ -297,8 +320,10 @@ Translate to English where needed and extract the client's registration data.
 
 Return ONLY raw JSON (no markdown, no backticks) with exactly these keys:
 {{
-  "first_name": "romanized/English first name (pinyin if Chinese, given name)",
-  "last_name": "romanized/English family name",
+  "client_name": "full romanized/English name as written (e.g. 'Chen Weiming' or 'John Smith')",
+  "name_order": "surname_first for Chinese/Vietnamese/Korean/Hungarian/etc., otherwise given_first",
+  "first_name": "given name(s) in Western order (pinyin if Chinese, e.g. 'Weiming')",
+  "last_name": "family name in Western order (e.g. 'Chen')",
   "email": "email address or empty string",
   "phone": "phone in 000-000-0000 format or empty string",
   "date_of_birth": "YYYY-MM-DD or empty string",
@@ -321,7 +346,17 @@ Source text:
         )
         raw = msg.content[0].text.strip()
         raw = re.sub(r"^```(json)?|```$", "", raw, flags=re.MULTILINE).strip()
-        return json.loads(raw)
+        data = json.loads(raw)
+
+        # Enforce Western given-first/family-last order regardless of how the LLM
+        # returned the fields. If the source document is surname-first, we swap.
+        name_order = data.get("name_order") or data.get("nameOrder")
+        client_name = (data.get("client_name") or "").strip()
+        if client_name:
+            first, last = split_client_name(client_name, name_order)
+            data["first_name"] = first
+            data["last_name"] = last
+        return data
     except json.JSONDecodeError:
         raise HTTPException(500, "Extraction response could not be parsed; retry")
     except Exception as e:
@@ -367,9 +402,8 @@ def client_from_scan(scan_id: int, request: Request):
     if ff and ff.get("client_name"):
         # Vision pass already structured it — map without another AI call.
         name = (ff.get("client_name") or "").strip()
-        parts = name.split()
-        first = " ".join(parts[:-1]) if len(parts) > 1 else name
-        last = parts[-1] if len(parts) > 1 else ""
+        name_order = ff.get("name_order") or ff.get("nameOrder")
+        first, last = split_client_name(name, name_order)
         notes_bits = []
         if ff.get("client_name_native"):
             notes_bits.append(f"Native name: {ff['client_name_native']}")
@@ -381,17 +415,21 @@ def client_from_scan(scan_id: int, request: Request):
             notes_bits.append("Conditions: " + ", ".join(ff["medical_conditions"]))
         if ff.get("wtc_health_program") is not None:
             notes_bits.append(f"WTC Health Program: {'yes' if ff['wtc_health_program'] else 'no'}")
+        if name_order:
+            notes_bits.append(f"Name order: {name_order}")
         notes_bits += ff.get("key_facts") or []
         client_data = {
             "first_name": first,
             "last_name": last,
             "email": ff.get("email") or "",
+            "vcf_email": "",
             "phone": ff.get("phone") or "",
             "date_of_birth": ff.get("date_of_birth") or "",
             "address": ff.get("address") or "",
             "ssn_last4": ff.get("ssn_last4") or "",
             "preferred_language": ff.get("preferred_language") or "",
             "notes": " | ".join(notes_bits)[:2000],
+            "name_order": name_order if name_order else None,
         }
         for k in ("email", "phone", "date_of_birth", "address"):
             if not client_data[k]:

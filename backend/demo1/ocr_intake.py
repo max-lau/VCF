@@ -333,7 +333,8 @@ Read ALL page image(s) provided and respond with ONLY a JSON object (no markdown
   - "other"
 
 "fields": an object containing VCF-specific fields. Extract ONLY what is visible in the document. Never guess. Use null for missing fields.
-  - "client_name": claimant's name romanized to English.
+  - "client_name": claimant's name romanized to English as written in the document.
+  - "name_order": "surname_first" for Chinese/Vietnamese/Korean/Hungarian/etc., "given_first" for Western order, or null if unknown.
   - "date_of_birth": "YYYY-MM-DD" or null.
   - "ssn_last4": last 4 digits of SSN if present, else null.
   - "exposure_location": where the claimant was in the NYC exposure zone, or null.
@@ -400,6 +401,7 @@ def ocr_with_claude(image_pages: Union[bytes, list],
             # VCF schema
             "doc_type":           parsed.get("doc_type", "other"),
             "client_name":        f.get("client_name"),
+            "name_order":         f.get("name_order") or f.get("nameOrder"),
             "date_of_birth":      f.get("date_of_birth"),
             "ssn_last4":          f.get("ssn_last4"),
             "exposure_location":  f.get("exposure_location"),
