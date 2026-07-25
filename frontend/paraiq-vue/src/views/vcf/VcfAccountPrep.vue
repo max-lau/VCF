@@ -139,7 +139,8 @@
 </template>
 
 <script setup>
-import { computed, h, reactive, ref } from 'vue'
+import { computed, h, onMounted, reactive, ref } from 'vue'
+import { useRoute } from 'vue-router'
 
 /* Inline copy-row component (kept local; promote to components/ if reused) */
 const CopyRow = {
@@ -191,13 +192,14 @@ const status = ref('')
 const copied = reactive(new Set())
 
 const client = ref({
-  first_name: '', last_name: '', email: '', phone: '',
+  first_name: '', last_name: '', email: '', vcf_email: '', phone: '',
   date_of_birth: '', address: '', ssn_last4: '', preferred_language: '', notes: '',
 })
 const clientFields = [
   { key: 'first_name', label: 'First name (English)' },
   { key: 'last_name', label: 'Last name (English)' },
-  { key: 'email', label: 'Email' },
+  { key: 'email', label: 'Client personal email' },
+  { key: 'vcf_email', label: 'VCF email (law firm)', ph: 'auto-assigned on case creation' },
   { key: 'phone', label: 'Phone', ph: '000-000-0000' },
   { key: 'date_of_birth', label: 'Date of birth', ph: 'YYYY-MM-DD' },
   { key: 'address', label: 'Address' },
@@ -205,6 +207,34 @@ const clientFields = [
   { key: 'preferred_language', label: 'Preferred language' },
   { key: 'notes', label: 'Notes' },
 ]
+
+const route = useRoute()
+const caseId = computed(() => route.query.case_id ? Number(route.query.case_id) : null)
+
+async function loadCase() {
+  if (!caseId.value) return
+  try {
+    const c = await api(`/cases/${caseId.value}`)
+    client.value = {
+      first_name: c.first_name ?? '',
+      last_name: c.last_name ?? '',
+      email: c.client_email ?? c.email ?? '',
+      vcf_email: c.vcf_email ?? '',
+      phone: c.phone ?? '',
+      date_of_birth: c.date_of_birth ?? '',
+      address: c.address ?? '',
+      ssn_last4: c.ssn_last4 ?? '',
+      preferred_language: c.preferred_language ?? '',
+      notes: c.notes ?? '',
+    }
+  } catch (e) {
+    console.error('[VcfAccountPrep] loadCase failed:', e)
+  }
+}
+
+onMounted(() => {
+  loadCase()
+})
 
 function openVcfWindow() {
   const w = Math.floor(window.screen.availWidth / 2)
@@ -229,6 +259,7 @@ async function extract() {
       first_name: c.first_name ?? '',
       last_name: c.last_name ?? '',
       email: c.email ?? '',
+      vcf_email: c.vcf_email ?? '',
       phone: c.phone ?? '',
       date_of_birth: c.date_of_birth ?? '',
       address: c.address ?? '',
@@ -288,6 +319,7 @@ async function useScan(id) {
       first_name: c.first_name ?? '',
       last_name: c.last_name ?? '',
       email: c.email ?? '',
+      vcf_email: c.vcf_email ?? '',
       phone: c.phone ?? '',
       date_of_birth: c.date_of_birth ?? '',
       address: c.address ?? '',
@@ -314,7 +346,11 @@ async function generate() {
   try {
     const r = await api('/vcf/prep', {
       method: 'POST',
-      body: JSON.stringify({ client: { ...client.value }, demo_mode: demoMode.value }),
+      body: JSON.stringify({
+        case_id: caseId.value,
+        client: { ...client.value },
+        demo_mode: demoMode.value,
+      }),
     })
     prepId.value = r.prep_id
     status.value = 'ready'
@@ -332,8 +368,8 @@ const accountRows = computed(() => {
   const a = prep.value?.account || {}
   return [
     { key: 'user_name', label: 'User Name', value: a.user_name },
-    { key: 'email', label: 'Email', value: a.email },
-    { key: 'confirm_email', label: 'Confirm email', value: a.confirm_email },
+    { key: 'email', label: 'VCF Email (law firm)', value: a.email },
+    { key: 'confirm_email', label: 'Confirm VCF email', value: a.confirm_email },
     { key: 'first_name', label: 'First Name', value: a.first_name },
     { key: 'last_name', label: 'Last Name', value: a.last_name },
     { key: 'password', label: 'Password', value: a.password, hint: a.password_policy },

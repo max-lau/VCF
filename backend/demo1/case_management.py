@@ -22,6 +22,7 @@ Endpoints:
 """
 
 import json
+import os
 import re
 import logging
 import psycopg2
@@ -48,6 +49,7 @@ router = APIRouter()
 class CreateCaseBody(BaseModel):
     case_number:          Optional[str] = None
     client_name:          str
+    client_email:         Optional[str] = ""
     matter_number:        Optional[str] = ""
     status:               Optional[str] = "open"
     claim_stage:          Optional[str] = "intake"
@@ -62,6 +64,7 @@ class CreateCaseBody(BaseModel):
     award_amount:         Optional[float] = None
     description:          Optional[str] = ""
     tags:                 Optional[List[str]] = []
+    vcf_email:            Optional[str] = None
 
 class UpdateStatusBody(BaseModel):
     status: str
@@ -130,6 +133,24 @@ def generate_case_number(firm_id: str, conn=None) -> str:
     last_n = row["last_n"] if row else 0
     return f"{prefix}{last_n + 1:04d}"
 
+def generate_vcf_email(conn=None) -> Optional[str]:
+    """Generate the next unique law-firm email address reserved for VCF.gov
+    account creation and VCF correspondence. Returns None if the domain is not
+    configured."""
+    domain = os.getenv("VCF_DEDICATED_EMAIL_DOMAIN", "").strip()
+    prefix = os.getenv("VCF_DEDICATED_EMAIL_PREFIX", "vcfclaim").strip()
+    if not domain:
+        return None
+    if conn is not None:
+        row = conn.execute("SELECT nextval('vcf_email_seq') AS n").fetchone()
+    else:
+        from backend.demo1.pg import get_conn
+        with get_conn("default") as c:
+            row = c.execute("SELECT nextval('vcf_email_seq') AS n").fetchone()
+    n = row["n"] if row else 1
+    return f"{prefix}{n:05d}@{domain}"
+
+
 def compute_case_risk(docs: list) -> str:
     scores = [d["risk_score"] for d in docs if d.get("risk_score") is not None]
     if not scores: return "unknown"
@@ -181,22 +202,25 @@ async def create_case(
             if not case_number:
                 case_number = generate_case_number(firm_id, conn)
 
+            vcf_email = (body.vcf_email or "").strip() or generate_vcf_email(conn)
+            client_email = (body.client_email or "").strip() or None
+
             cur = conn.execute("""
                 INSERT INTO cases
-                  (firm_id, case_number, client_name, matter_number, status,
+                  (firm_id, case_number, client_name, client_email, matter_number, status,
                    claim_stage, vcf_status, presence_proof_status,
                    date_of_birth, ssn_last4, preferred_language,
                    exposure_location, presence_dates, wtc_health_program,
-                   award_amount, description)
-                VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)
+                   award_amount, description, vcf_email)
+                VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)
                 RETURNING id
-            """, (firm_id, case_number, body.client_name.strip(),
+            """, (firm_id, case_number, body.client_name.strip(), client_email,
                   body.matter_number, body.status,
                   body.claim_stage, body.vcf_status, body.presence_proof_status,
                   body.date_of_birth or None, body.ssn_last4 or None,
                   body.preferred_language or None, body.exposure_location or None,
                   body.presence_dates or None, body.wtc_health_program,
-                  body.award_amount, body.description))
+                  body.award_amount, body.description, vcf_email))
             case_id = cur.fetchone()["id"]
 
             for tag in body.tags:
@@ -209,7 +233,7 @@ async def create_case(
                  f"Case created: {case_number} for {body.client_name}"))
 
         return {"success": True, "case_id": case_id,
-                "case_number": case_number}
+                "case_number": case_number, "vcf_email": vcf_email}
     except psycopg2.errors.UniqueViolation:
         raise HTTPException(409, "Case number already exists")
     except psycopg2.Error as e:

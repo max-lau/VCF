@@ -46,6 +46,8 @@ from typing import Optional
 from fastapi import APIRouter, HTTPException, Request
 from pydantic import BaseModel, Field
 
+from backend.demo1.pg import get_conn
+
 logger = logging.getLogger(__name__)
 router = APIRouter()
 
@@ -237,7 +239,8 @@ def init_vcf_account_table():
 class ClientData(BaseModel):
     first_name: str
     last_name: str
-    email: str = ""
+    email: str = ""           # claimant's personal email
+    vcf_email: str = ""       # law-firm-provided email used only for VCF.gov
     phone: str = ""
     date_of_birth: str = ""
     address: str = ""
@@ -443,13 +446,26 @@ def create_prep(body: PrepRequest, request: Request):
             security.append({"group": group, "question": "", "answer": "",
                              "synthesized": False})  # to be confirmed with client
 
+    # Resolve the VCF email: explicit field wins, then case record, then personal email.
+    vcf_email = (c.vcf_email or "").strip()
+    if not vcf_email and body.case_id:
+        with get_conn(firm_id) as conn:
+            row = conn.execute(
+                "SELECT vcf_email FROM cases WHERE id=%s AND firm_id=%s",
+                (body.case_id, firm_id),
+            ).fetchone()
+            if row and row.get("vcf_email"):
+                vcf_email = row["vcf_email"]
+    if not vcf_email:
+        vcf_email = c.email
+
     prep = {
         "register_url": VCF_REGISTER_URL,
         "browser_note": "VCF supports ONLY Google Chrome or Microsoft Edge.",
         "account_information": {
             "user_name": username,
-            "email": c.email,
-            "confirm_email": c.email,
+            "email": vcf_email,
+            "confirm_email": vcf_email,
             "first_name": c.first_name,
             "last_name": c.last_name,
             "password": password,
@@ -468,7 +484,6 @@ def create_prep(body: PrepRequest, request: Request):
     }
 
     blob, encrypted = _seal(prep)
-    from backend.demo1.pg import get_conn
     with get_conn(firm_id) as conn:
         row = conn.execute(
             """INSERT INTO vcf_account_prep
