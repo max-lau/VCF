@@ -1,179 +1,153 @@
-#!/usr/bin/env python3
 """
-bulk_cleanup_duplicate_scans.py
-===============================
-One-off / reusable cleanup for the VCF intake document tables.
+cleanup_duplicate_scans.py
+──────────────────────────
+Remove duplicate intake-scan rows and their linked case_documents.
 
-Identifies duplicate intake_scans and case_documents rows and removes the
-later copies, plus their linked records and Supabase storage objects.
+Duplicate groups are identified by:
+  • content_hash (when not null) — exact file duplicates
+  • filename     (when content_hash is null) — legacy scans uploaded before
+    the content_hash column was populated
 
-Logic
------
-- intake_scans:     keep earliest id per (firm_id, case_id, filename)
-- case_documents:   keep earliest id per (firm_id, case_id, document_name)
-- test files:       any filename/document_name starting with 'test_' is removed
+In each group the scan linked to a case is preferred; otherwise the earliest
+scan (MIN id) is kept. Newer/unlinked duplicates are deleted.
 
-Safety
-------
-- Always run with --dry-run first.
-- intake_scan rows are only deleted if no remaining case_document references
-  them.
-- Storage removal is best-effort; database rows are deleted regardless.
-
-Usage
------
-    python scripts/cleanup_duplicate_scans.py --dry-run
-    python scripts/cleanup_duplicate_scans.py --execute
+Usage:
+    venv/Scripts/python scripts/cleanup_duplicate_scans.py
+    venv/Scripts/python scripts/cleanup_duplicate_scans.py --execute
 """
-
+import argparse
 import os
 import sys
-import argparse
-from typing import List, Dict
+
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+
 from dotenv import load_dotenv
-import psycopg2
-from psycopg2.extras import RealDictCursor
+load_dotenv(os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), ".env"))
 
-load_dotenv(".env")
-
-DSN = os.environ.get("DATABASE_URL")
-if not DSN:
-    print("DATABASE_URL not set in environment", file=sys.stderr)
-    sys.exit(1)
-
-TEST_PREFIXES = ("test_",)
+from backend.demo1.pg import init_pool, get_conn
 
 
-def connect():
-    return psycopg2.connect(DSN, cursor_factory=RealDictCursor)
+def _delete_group(conn, firm_id, ids_to_delete):
+    doc_rows = conn.execute(
+        "SELECT id, file_url FROM case_documents WHERE firm_id=%s AND scan_id = ANY(%s)",
+        (firm_id, ids_to_delete)
+    ).fetchall()
+    doc_ids = [r["id"] for r in doc_rows]
+    storage_paths = [r["file_url"] for r in doc_rows if r["file_url"]]
 
-
-def find_intake_scan_dups(cur) -> List[Dict]:
-    cur.execute(
-        """
-        SELECT id, firm_id, case_id, filename, content_hash, file_url,
-               ROW_NUMBER() OVER (
-                   PARTITION BY firm_id, COALESCE(case_id, 0), filename
-                   ORDER BY id ASC
-               ) AS rn
-        FROM intake_scans
-        """
-    )
-    rows = cur.fetchall()
-    return [r for r in rows if r["rn"] > 1 or r["filename"].lower().startswith(TEST_PREFIXES)]
-
-
-def find_case_document_dups(cur) -> List[Dict]:
-    cur.execute(
-        """
-        SELECT id, firm_id, case_id, document_name, content_hash, scan_id, file_url,
-               ROW_NUMBER() OVER (
-                   PARTITION BY firm_id, COALESCE(case_id, 0), document_name
-                   ORDER BY id ASC
-               ) AS rn
-        FROM case_documents
-        """
-    )
-    rows = cur.fetchall()
-    return [r for r in rows if r["rn"] > 1 or r["document_name"].lower().startswith(TEST_PREFIXES)]
-
-
-def protected_scan_ids(cur, doc_ids: List[int]) -> set:
-    if not doc_ids:
-        return set()
-    cur.execute(
-        "SELECT scan_id FROM case_documents WHERE id <> ALL(%s) AND scan_id IS NOT NULL",
-        (doc_ids,),
-    )
-    return {r["scan_id"] for r in cur.fetchall()}
-
-
-def delete_records(cur, scan_ids: List[int], doc_ids: List[int]) -> None:
     if doc_ids:
-        cur.execute("DELETE FROM case_documents WHERE id = ANY(%s)", (doc_ids,))
-    if scan_ids:
-        cur.execute("DELETE FROM intake_scans WHERE id = ANY(%s)", (scan_ids,))
+        conn.execute("DELETE FROM case_documents WHERE id = ANY(%s)", (doc_ids,))
+
+    scan_rows = conn.execute(
+        "SELECT file_url FROM intake_scans WHERE id = ANY(%s)", (ids_to_delete,)
+    ).fetchall()
+    storage_paths.extend([r["file_url"] for r in scan_rows if r["file_url"]])
+
+    conn.execute("DELETE FROM intake_scans WHERE id = ANY(%s)", (ids_to_delete,))
+    conn.commit()
+    return len(doc_ids), storage_paths
 
 
-def remove_storage(file_urls: List[str]) -> int:
-    removed = 0
-    supabase_url = os.getenv("SUPABASE_URL")
-    supabase_key = os.getenv("SUPABASE_SERVICE_KEY")
-    if not supabase_url or not supabase_key or not file_urls:
-        return 0
-    try:
-        from supabase import create_client
-        supabase = create_client(supabase_url, supabase_key)
-        for url in set(file_urls):
+def _process_groups(conn, firm_id, groups, key_name, dry_run):
+    scans_deleted = 0
+    docs_deleted = 0
+    storage_paths = []
+
+    for g in groups:
+        key_value = g[key_name]
+        rows = conn.execute(
+            """SELECT id, case_id, file_url FROM intake_scans
+               WHERE firm_id = %s AND {} = %s
+               ORDER BY (case_id IS NULL), id""".format(key_name),
+            (firm_id, key_value)
+        ).fetchall()
+
+        if len(rows) <= 1:
+            continue
+
+        keep_id = rows[0]["id"]
+        ids_to_delete = [r["id"] for r in rows[1:]]
+
+        if dry_run:
+            print(f"[DRY-RUN] firm={firm_id} {key_name}={key_value} keep={keep_id} scans={len(ids_to_delete)}")
+        else:
+            d, paths = _delete_group(conn, firm_id, ids_to_delete)
+            docs_deleted += d
+            storage_paths.extend(paths)
+            print(f"[EXECUTED] firm={firm_id} {key_name}={key_value} keep={keep_id} scans={len(ids_to_delete)} docs={d}")
+
+        scans_deleted += len(ids_to_delete)
+
+    return scans_deleted, docs_deleted, storage_paths
+
+
+def cleanup(dry_run: bool = True):
+    init_pool()
+
+    with get_conn("default") as conn:
+        firms = [r["firm_id"] if hasattr(r, "keys") else r[0]
+                 for r in conn.execute("SELECT DISTINCT firm_id FROM intake_scans").fetchall()]
+
+    total_scans_deleted = 0
+    total_docs_deleted = 0
+    all_storage_paths = []
+
+    for firm_id in firms:
+        firm_id = str(firm_id)
+        with get_conn(firm_id) as conn:
+            # Phase 1: exact duplicates by content_hash
+            hash_groups = conn.execute("""
+                SELECT content_hash FROM intake_scans
+                WHERE firm_id = %s AND content_hash IS NOT NULL
+                GROUP BY content_hash
+                HAVING COUNT(*) > 1
+            """, (firm_id,)).fetchall()
+
+            s, d, p = _process_groups(conn, firm_id, hash_groups, "content_hash", dry_run)
+            total_scans_deleted += s
+            total_docs_deleted += d
+            all_storage_paths.extend(p)
+
+            # Phase 2: legacy duplicates with NULL content_hash
+            file_groups = conn.execute("""
+                SELECT filename FROM intake_scans
+                WHERE firm_id = %s AND content_hash IS NULL
+                GROUP BY filename
+                HAVING COUNT(*) > 1
+            """, (firm_id,)).fetchall()
+
+            s, d, p = _process_groups(conn, firm_id, file_groups, "filename", dry_run)
+            total_scans_deleted += s
+            total_docs_deleted += d
+            all_storage_paths.extend(p)
+
+    if not dry_run and all_storage_paths:
+        supabase_url = os.getenv("SUPABASE_URL")
+        supabase_key = os.getenv("SUPABASE_SERVICE_KEY")
+        if supabase_url and supabase_key:
             try:
-                supabase.storage.from_("vcf-documents").remove([url])
-                removed += 1
+                from supabase import create_client
+                supabase = create_client(supabase_url, supabase_key)
+                for i in range(0, len(all_storage_paths), 100):
+                    chunk = all_storage_paths[i:i+100]
+                    try:
+                        supabase.storage.from_("vcf-documents").remove(chunk)
+                    except Exception as e:
+                        print(f"[WARN] Storage cleanup chunk failed: {e}")
             except Exception as e:
-                print(f"  Could not remove storage object {url}: {e}")
-    except Exception as e:
-        print(f"  Supabase storage client failed: {e}")
-    return removed
+                print(f"[WARN] Could not clean up Supabase storage: {e}")
+        else:
+            print("[WARN] SUPABASE_URL/SUPABASE_SERVICE_KEY not set; skipping storage cleanup")
 
-
-def main():
-    parser = argparse.ArgumentParser(description="Bulk cleanup duplicate VCF intake scans/documents")
-    parser.add_argument("--dry-run", action="store_true", help="Print what would be deleted")
-    parser.add_argument("--execute", action="store_true", help="Actually delete the rows")
-    args = parser.parse_args()
-
-    if not args.dry_run and not args.execute:
-        parser.print_help()
-        sys.exit(1)
-
-    conn = connect()
-    cur = conn.cursor()
-
-    scan_dups = find_intake_scan_dups(cur)
-    doc_dups = find_case_document_dups(cur)
-
-    scan_ids_to_delete = [r["id"] for r in scan_dups]
-    doc_ids_to_delete = [r["id"] for r in doc_dups]
-
-    # Do not delete a scan that is still referenced by a kept case_document.
-    protected = protected_scan_ids(cur, doc_ids_to_delete)
-    safe_scan_ids = [sid for sid in scan_ids_to_delete if sid not in protected]
-
-    # Gather storage URLs from records we are deleting.
-    storage_urls = []
-    for r in scan_dups:
-        if r["id"] in safe_scan_ids and r["file_url"]:
-            storage_urls.append(r["file_url"])
-    for r in doc_dups:
-        if r["file_url"]:
-            storage_urls.append(r["file_url"])
-
-    print(f"Intake scan duplicates to delete: {len(safe_scan_ids)}")
-    for r in scan_dups:
-        if r["id"] in safe_scan_ids:
-            print(f"  scan id={r['id']} case={r['case_id']} {r['filename']}")
-
-    print(f"\nCase document duplicates to delete: {len(doc_ids_to_delete)}")
-    for r in doc_dups:
-        print(f"  doc id={r['id']} case={r['case_id']} {r['document_name']}")
-
-    print(f"\nStorage objects to remove: {len(set(storage_urls))}")
-
-    if args.dry_run:
-        print("\n--dry-run: no rows deleted.")
-        cur.close()
-        conn.close()
-        return
-
-    if args.execute:
-        delete_records(cur, safe_scan_ids, doc_ids_to_delete)
-        conn.commit()
-        removed = remove_storage(storage_urls)
-        print(f"\nDeleted {len(safe_scan_ids)} intake scans, {len(doc_ids_to_delete)} case documents.")
-        print(f"Removed {removed} storage objects.")
-
-    cur.close()
-    conn.close()
+    print(f"\nSummary: {'dry-run' if dry_run else 'executed'}")
+    print(f"  Firms checked: {len(firms)}")
+    print(f"  Intake scans to delete: {total_scans_deleted}")
+    if not dry_run:
+        print(f"  Case documents deleted: {total_docs_deleted}")
 
 
 if __name__ == "__main__":
-    main()
+    parser = argparse.ArgumentParser(description="Deduplicate intake scans")
+    parser.add_argument("--execute", action="store_true", help="Actually delete duplicates (default is dry-run)")
+    args = parser.parse_args()
+    cleanup(dry_run=not args.execute)

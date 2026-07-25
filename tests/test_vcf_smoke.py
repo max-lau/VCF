@@ -63,7 +63,10 @@ def case_id(admin_token):
         "wtc_health_program": True,
     })
     assert r.status_code in (200, 201), f"Create case failed: {r.text}"
-    return r.json()["case_id"]
+    data = r.json()
+    assert "vcf_email" in data
+    assert data["vcf_email"].endswith("@wawvcf.com")
+    return data["case_id"]
 
 
 class TestVCFClaimLifecycle:
@@ -74,6 +77,7 @@ class TestVCFClaimLifecycle:
         assert data["case_number"] == CASE_NUMBER
         assert data["client_name"] == "Smoke Test Client"
         assert data["firm_id"] == "waw_vcf"
+        assert data.get("vcf_email", "").endswith("@wawvcf.com")
 
     def test_get_case_checklist(self, admin_token, case_id):
         r = requests.get(f"{BASE}/vcf/cases/{case_id}/checklist", headers=_headers(admin_token))

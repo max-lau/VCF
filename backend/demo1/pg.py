@@ -63,7 +63,7 @@ def _checkout(firm_id: str = "default") -> psycopg2.extensions.connection:
         raise RuntimeError("Postgres pool not initialised — call init_pool() at startup")
     conn = _pool.getconn()
     with conn.cursor() as cur:
-        cur.execute("SELECT set_config('app.current_firm_id', %s, false)", (firm_id,))
+        cur.execute("SELECT set_config('app.current_firm_id', %s, false)", (str(firm_id),))
     conn.commit()
     return conn
 
