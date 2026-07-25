@@ -51,6 +51,20 @@ VCF_KEYWORDS = [
     "certified condition", "presence proof", "award determination",
 ]
 
+# Medical/financial terms commonly found in intake attachments
+MEDICAL_ATTACHMENT_TERMS = [
+    "medrec", "medical", "pathology", "radiology", "biopsy", "lab", "labs",
+    "oncology", "summary", "discharge", "records", "record", "report",
+    "imaging", "ct", "mri", "x-ray", "xray", "pet", "ultrasound", "ekg",
+    "prescription", "pharmacy", "medication", "treatment", "diagnosis",
+    "statement", "invoice", "bill", "receipt", " medicare ", " medicaid ",
+]
+
+DEFAULT_TRUSTED_DOMAINS = [
+    "vcf.gov", "wtchealthprogram.org", "cdc.gov", "cms.gov",
+    "medicare.gov", "medicaid.gov", "health.ny.gov", "nyc.gov",
+]
+
 
 @dataclass
 class EmailMessage:
@@ -91,26 +105,41 @@ class EmailFilterEngine:
         self.firm_id = firm_id
         self._case_registry: dict = {}
         self._client_domains: set = set()
+        self._trusted_domains: list = DEFAULT_TRUSTED_DOMAINS[:]
+        self._vcf_keywords: list = VCF_KEYWORDS[:]
 
     def load_case_registry(self):
         from .pg import get_conn
         with get_conn(self.firm_id) as conn:
             rows = conn.execute(
-                """SELECT id, case_number, client_name, matter_number
+                """SELECT id, case_number, client_name, matter_number, client_email
                    FROM cases
                    WHERE firm_id = %s
                      AND (deleted IS NULL OR deleted = FALSE)
                      AND status NOT IN ('closed','archived')""",
                 (self.firm_id,)
             ).fetchall()
+            settings = conn.execute(
+                "SELECT trusted_domains, vcf_keywords FROM firm_email_settings WHERE firm_id=%s",
+                (self.firm_id,)
+            ).fetchone()
         self._case_registry = {}
+        self._client_domains = set()
         for r in (rows or []):
             self._case_registry[str(r["id"])] = {
                 "title":  (r["case_number"]  or "").lower(),
                 "client": (r["client_name"]  or "").lower(),
                 "docket": (r["matter_number"] or "").lower(),
             }
-        logger.info(f"[Filter] Loaded {len(self._case_registry)} cases for firm {self.firm_id}")
+            email = (r["client_email"] or "").strip().lower()
+            if email and "@" in email:
+                self._client_domains.add(email.split("@")[-1])
+        if settings:
+            if settings.get("trusted_domains"):
+                self._trusted_domains = [d.lower() for d in settings["trusted_domains"]]
+            if settings.get("vcf_keywords"):
+                self._vcf_keywords = [k.lower() for k in settings["vcf_keywords"]]
+        logger.info(f"[Filter] Loaded {len(self._case_registry)} cases, {len(self._client_domains)} client domains for firm {self.firm_id}")
 
     def _stage1_domain_trust(self, msg: EmailMessage) -> int:
         score = 0
@@ -118,6 +147,10 @@ class EmailFilterEngine:
         for pattern in TRUSTED_DOMAIN_PATTERNS:
             if re.search(pattern, domain):
                 score += 40; break
+        # Per-firm trusted domains (hospitals, labs, VCF, etc.)
+        for trusted in self._trusted_domains:
+            if domain == trusted or domain.endswith("." + trusted):
+                score += 30; break
         if domain in self._client_domains:
             score += 30
         for header in BULK_MAIL_HEADERS:
@@ -135,24 +168,38 @@ class EmailFilterEngine:
         score = 0
         matched_case_id = None
         entities: dict = {"case_refs": [], "legal_keywords": [], "vcf_keywords": [], "dates": []}
-        full_text = f"{msg.subject} {msg.body_text}".lower()
+        attachment_text = " ".join(msg.attachment_names or []).lower()
+        full_text = f"{msg.subject} {msg.body_text} {attachment_text}".lower()
+
+        # Case matching — subject/body first, then attachment names
         for case_id, case in self._case_registry.items():
             hit = False
-            if case["title"] and len(case["title"]) > 4 and case["title"] in full_text:
-                entities["case_refs"].append(case["title"]); hit = True
-            if case["client"] and len(case["client"]) > 3 and case["client"] in full_text:
+            for field, key in (("title", case["title"]), ("client", case["client"]), ("docket", case["docket"])):
+                if not key:
+                    continue
+                min_len = 4 if field != "docket" else 1
+                if len(key) < min_len:
+                    continue
+                if key in full_text:
+                    entities["case_refs"].append(key); hit = True
+            # Extra boost when the client name appears in an attachment filename
+            if not hit and case["client"] and len(case["client"]) > 3 and case["client"] in attachment_text:
                 entities["case_refs"].append(case["client"]); hit = True
-            if case["docket"] and case["docket"] in full_text:
-                entities["case_refs"].append(case["docket"]); hit = True
             if hit:
                 score += 35; matched_case_id = int(case_id); break
+
         legal_hits = [kw for kw in LEGAL_KEYWORDS if kw in full_text]
         entities["legal_keywords"] = legal_hits
         score += 20 if len(legal_hits) >= 3 else (10 if legal_hits else 0)
 
-        vcf_hits = [kw for kw in VCF_KEYWORDS if kw in full_text]
+        # VCF/medical keywords — firm-configurable list + attachment-name medical terms
+        vcf_hits = [kw for kw in self._vcf_keywords if kw in full_text]
         entities["vcf_keywords"] = vcf_hits
-        score += 20 if len(vcf_hits) >= 3 else (10 if vcf_hits else 0)
+        score += min(30, len(vcf_hits) * 10)
+
+        if any(term in attachment_text for term in MEDICAL_ATTACHMENT_TERMS):
+            score += 20
+            entities["vcf_keywords"].append("medical_attachment")
 
         dates = re.findall(
             r"\b(\d{1,2}[/-]\d{1,2}[/-]\d{2,4}|(?:jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)[a-z]* \d{1,2},? \d{4})\b",
