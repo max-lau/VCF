@@ -45,8 +45,13 @@ $("grab").addEventListener("click", async () => {
   out.className = "";
 
   try {
-    const tabs = await chrome.tabs.query({ url: ["http://localhost:5174/*", "http://127.0.0.1:5174/*"] });
-    const tab = tabs.find((t) => t.active) || tabs[0];
+    // Query all tabs and filter manually so URL-pattern permission issues don't block us.
+    const allTabs = await chrome.tabs.query({});
+    const acpTabs = allTabs.filter((t) =>
+      t.url && (/^http:\/\/localhost:5174\b/i.test(t.url) || /^http:\/\/127\.0\.0\.1:5174\b/i.test(t.url))
+    );
+    const tab = acpTabs.find((t) => t.active) || acpTabs[0];
+
     if (!tab) {
       out.textContent = "✗ No ACP-VCF tab found. Open http://localhost:5174 and log in.";
       out.className = "err";
