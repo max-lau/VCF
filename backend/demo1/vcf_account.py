@@ -47,6 +47,7 @@ from fastapi import APIRouter, HTTPException, Request
 from pydantic import BaseModel, Field
 
 from backend.demo1.pg import get_conn
+from backend.demo1.case_management import generate_vcf_email
 
 logger = logging.getLogger(__name__)
 router = APIRouter()
@@ -446,7 +447,8 @@ def create_prep(body: PrepRequest, request: Request):
             security.append({"group": group, "question": "", "answer": "",
                              "synthesized": False})  # to be confirmed with client
 
-    # Resolve the VCF email: explicit field wins, then case record, then personal email.
+    # Resolve the VCF email: explicit field wins, then case record (auto-generate
+    # if missing), then personal email as a last resort.
     vcf_email = (c.vcf_email or "").strip()
     if not vcf_email and body.case_id:
         with get_conn(firm_id) as conn:
@@ -456,6 +458,17 @@ def create_prep(body: PrepRequest, request: Request):
             ).fetchone()
             if row and row.get("vcf_email"):
                 vcf_email = row["vcf_email"]
+            elif row:
+                # Auto-reserve the next dedicated law-firm email for this claimant.
+                generated = generate_vcf_email(conn)
+                if generated:
+                    conn.execute(
+                        "UPDATE cases SET vcf_email=%s, updated_at=NOW() WHERE id=%s AND firm_id=%s",
+                        (generated, body.case_id, firm_id),
+                    )
+                    conn.commit()
+                    vcf_email = generated
+                    logger.info(f"[vcf_account] auto-generated vcf_email {generated} for case {body.case_id}")
     if not vcf_email:
         vcf_email = c.email
 

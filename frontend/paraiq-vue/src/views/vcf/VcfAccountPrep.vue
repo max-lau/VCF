@@ -25,6 +25,20 @@
       unzip → load chrome_extension_vcf as an unpacked extension in Chrome/Edge.
     </p>
 
+    <!-- CASE SELECTOR (when opened without ?case_id=) -->
+    <section v-if="!caseId" class="card">
+      <h2 class="card__title">Select a claim</h2>
+      <label class="field">
+        <span class="field__label">Case</span>
+        <select class="field__input" @change="selectCase($event.target.value)">
+          <option value="">— choose a case —</option>
+          <option v-for="c in cases" :key="c.id" :value="c.id">
+            {{ c.case_number }} · {{ c.client_name }}
+          </option>
+        </select>
+      </label>
+    </section>
+
     <!-- STEP 1 · Intake source -->
     <section class="card">
       <h2 class="card__title">1 · Client data</h2>
@@ -79,10 +93,18 @@
         </div>
       </div>
 
+      <div v-if="!client.vcf_email" class="warn">
+        No VCF email assigned yet. It will be auto-generated when you create the prep sheet.
+      </div>
       <div class="grid">
         <label v-for="f in clientFields" :key="f.key" class="field">
           <span class="field__label">{{ f.label }}</span>
-          <input v-model="client[f.key]" class="field__input" :placeholder="f.ph || ''" />
+          <input
+            v-model="client[f.key]"
+            class="field__input"
+            :placeholder="f.ph || ''"
+            :readonly="f.key === 'vcf_email' && !!client.vcf_email"
+          />
         </label>
       </div>
     </section>
@@ -195,6 +217,9 @@ const client = ref({
   first_name: '', last_name: '', email: '', vcf_email: '', phone: '',
   date_of_birth: '', address: '', ssn_last4: '', preferred_language: '', notes: '',
 })
+const cases = ref([])
+const selectedCaseId = ref(null)
+const effectiveCaseId = computed(() => caseId.value || selectedCaseId.value)
 const clientFields = [
   { key: 'first_name', label: 'First name (English)' },
   { key: 'last_name', label: 'Last name (English)' },
@@ -212,9 +237,10 @@ const route = useRoute()
 const caseId = computed(() => route.query.case_id ? Number(route.query.case_id) : null)
 
 async function loadCase() {
-  if (!caseId.value) return
+  const id = effectiveCaseId.value
+  if (!id) return
   try {
-    const c = await api(`/cases/${caseId.value}`)
+    const c = await api(`/cases/${id}`)
     client.value = {
       first_name: c.first_name ?? '',
       last_name: c.last_name ?? '',
@@ -232,8 +258,23 @@ async function loadCase() {
   }
 }
 
+async function loadCases() {
+  try {
+    const r = await api('/cases/search?limit=200')
+    cases.value = r.results || r.cases || []
+  } catch (e) {
+    console.error('[VcfAccountPrep] loadCases failed:', e)
+  }
+}
+
+function selectCase(id) {
+  selectedCaseId.value = Number(id) || null
+  loadCase()
+}
+
 onMounted(() => {
   loadCase()
+  if (!caseId.value) loadCases()
 })
 
 function openVcfWindow() {
@@ -347,7 +388,7 @@ async function generate() {
     const r = await api('/vcf/prep', {
       method: 'POST',
       body: JSON.stringify({
-        case_id: caseId.value,
+        case_id: effectiveCaseId.value,
         client: { ...client.value },
         demo_mode: demoMode.value,
       }),
