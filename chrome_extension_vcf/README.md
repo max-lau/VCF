@@ -19,9 +19,18 @@ A side-panel companion for `claims.vcf.gov`. It shows the VCF account prep sheet
 
 ## Configure
 
+### Easy way — grab the token automatically
+
+1. In ACP-VCF, log in at `http://localhost:5174`.
+2. Click the extension icon in the Chrome toolbar.
+3. Click **Grab token from ACP-VCF tab**.
+4. Click **Save & test connection**.
+
+### Manual way
+
 1. In ACP-VCF, log in.
 2. Open Chrome DevTools → **Application** → **Local Storage** → `http://localhost:5174`.
-3. Copy the value of the `token` key.
+3. Copy the value of the **`paraiq_token`** key.
 4. Click the extension icon in Chrome toolbar.
 5. Paste the token into **JWT token**.
 6. Backend URL should already be `http://localhost:5003`. If not, set it.
@@ -52,7 +61,7 @@ Chrome does **not** auto-reload unpacked extensions when files on disk change.
 | Problem | Fix |
 |---------|-----|
 | Panel does not appear on VCF.gov | Make sure the extension is enabled and you are on `https://www.claims.vcf.gov`. Reload the extension and refresh the page. |
-| "No token set" | Open the extension popup and paste a fresh JWT from ACP-VCF Local Storage. |
+| "No token set" | Open the extension popup and click **Grab token from ACP-VCF tab**, then **Save**. |
 | "Cannot reach http://localhost:5003" | Confirm the ACP-VCF backend is running on port 5003. |
 | 401 / auth failed | The JWT has expired. Copy a new one from ACP-VCF and save it in the popup. |
 

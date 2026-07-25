@@ -26,13 +26,15 @@
   <label for="token">JWT token</label>
   <input id="token" type="password" placeholder="paste your ACP-VCF Bearer token" />
 
+  <button id="grab">Grab token from ACP-VCF tab</button>
   <button id="save">Save & test connection</button>
   <div id="out"></div>
 
   <p class="note">
-    Get the token from ACP-VCF: log in at the app, then copy the JWT
-    (DevTools → Application → Local Storage → token). Tokens expire —
-    re-paste when the panel reports 401.
+    The app stores the JWT under <code>paraiq_token</code> in Local Storage.
+    Click <strong>Grab token</strong> while the ACP-VCF app is open in another
+    tab, or paste it manually from DevTools → Application → Local Storage.
+    Tokens expire — refresh when the panel reports 401.
   </p>
 
   <script src="popup.js"></script>
