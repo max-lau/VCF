@@ -5,6 +5,11 @@ import { fileURLToPath, URL } from 'node:url'
 // Let the SPA handle page-load requests (e.g. hard refresh on /intake)
 // while still proxying XHR/fetch API calls to the backend.
 function spaBypass(req) {
+  const url = req.url || ''
+  // Never bypass actual file downloads — proxy them to the backend
+  if (url.startsWith('/intake/file/')) {
+    return null
+  }
   const accept = req.headers?.accept || ''
   if (accept.includes('text/html')) {
     return '/index.html'
