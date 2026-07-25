@@ -100,10 +100,10 @@
         <label class="field field--full">
           <span class="field__label">Name order</span>
           <select v-model="nameOrder" class="field__input" @change="applyNameOrder">
-            <option value="given_first">Western — Given + Family (e.g. John Smith)</option>
-            <option value="surname_first">East Asian — Family + Given (e.g. Chen Weiming)</option>
+            <option value="given_first">Given-first (Western / most of world)</option>
+            <option value="surname_first">Surname-first (Chinese, Korean, Japanese, Vietnamese, Hungarian, Mongolian, Khmer, Lao)</option>
           </select>
-          <span class="field__hint">Swap when the source document writes the family name first.</span>
+          <span class="field__hint">Auto-selects from Preferred language. Toggle to swap first/last values.</span>
         </label>
         <label v-for="f in clientFields" :key="f.key" class="field">
           <span class="field__label">{{ f.label }}</span>
@@ -169,7 +169,7 @@
 </template>
 
 <script setup>
-import { computed, h, onMounted, reactive, ref } from 'vue'
+import { computed, h, onMounted, reactive, ref, watch } from 'vue'
 import { useRoute } from 'vue-router'
 
 /* Inline copy-row component (kept local; promote to components/ if reused) */
@@ -222,6 +222,54 @@ const status = ref('')
 const copied = reactive(new Set())
 const nameOrder = ref('given_first')
 
+// Languages/nationalities where the official written order is family-name-first.
+// Keep in sync with docs/name_order_conventions.md.
+const SURNAME_FIRST_TOKENS = new Set([
+  'chinese', 'mandarin', 'cantonese', 'yue', 'korean', 'japanese', 'vietnamese',
+  'vietnam', 'mongolian', 'mongolia', 'khmer', 'cambodian', 'cambodia', 'lao',
+  'laos', 'laotian', 'hungarian', 'hungary',
+])
+
+function normalizeLang(lang) {
+  return (lang || '').toLowerCase().replace(/[^a-z]/g, '')
+}
+
+function inferNameOrderFromLanguage(lang) {
+  const normalized = normalizeLang(lang)
+  if (!normalized) return null
+  // Match whole words or substrings for compound labels like "chinese (cantonese)"
+  for (const token of SURNAME_FIRST_TOKENS) {
+    if (normalized.includes(token)) return 'surname_first'
+  }
+  return 'given_first'
+}
+
+// When the backend explicitly returns name_order, trust it and assume names are
+// already in Western order. Otherwise infer from language; if the source is
+// surname-first, swap the raw values so they land in first_name/last_name correctly.
+function applyInferredNameOrder(c, setNameOrder = true) {
+  applyingInferredNameOrder = true
+  try {
+    const explicit = c.name_order || c.nameOrder
+    if (explicit) {
+      if (setNameOrder) nameOrder.value = explicit
+      return
+    }
+    const inferred = inferNameOrderFromLanguage(c.preferred_language)
+    if (inferred === 'surname_first' && c.first_name && c.last_name) {
+      if (setNameOrder) nameOrder.value = 'surname_first'
+      const f = c.first_name
+      const l = c.last_name
+      c.first_name = l
+      c.last_name = f
+    } else if (setNameOrder) {
+      nameOrder.value = inferred || 'given_first'
+    }
+  } finally {
+    applyingInferredNameOrder = false
+  }
+}
+
 const client = ref({
   first_name: '', last_name: '', email: '', vcf_email: '', phone: '',
   date_of_birth: '', address: '', ssn_last4: '', preferred_language: '', notes: '',
@@ -229,6 +277,10 @@ const client = ref({
 const cases = ref([])
 const selectedCaseId = ref(null)
 const effectiveCaseId = computed(() => caseId.value || selectedCaseId.value)
+
+// Guard used to skip the language watcher when we are populating data from the API.
+let applyingInferredNameOrder = false
+
 const clientFields = [
   { key: 'first_name', label: 'First name (English)' },
   { key: 'last_name', label: 'Last name (English)' },
@@ -250,7 +302,7 @@ async function loadCase() {
   if (!id) return
   try {
     const c = await api(`/cases/${id}`)
-    client.value = {
+    const mapped = {
       first_name: c.first_name ?? '',
       last_name: c.last_name ?? '',
       email: c.client_email ?? c.email ?? '',
@@ -261,8 +313,11 @@ async function loadCase() {
       ssn_last4: c.ssn_last4 ?? '',
       preferred_language: c.preferred_language ?? '',
       notes: c.notes ?? '',
+      name_order: c.name_order || null,
     }
-    nameOrder.value = c.name_order || 'given_first'
+    applyInferredNameOrder(mapped)
+    delete mapped.name_order
+    client.value = mapped
   } catch (e) {
     console.error('[VcfAccountPrep] loadCase failed:', e)
   }
@@ -296,6 +351,20 @@ onMounted(() => {
   if (!caseId.value) loadCases()
 })
 
+// Auto-switch the name-order dropdown when staff type a surname-first language
+// into the Preferred language field. The actual swap is still triggered by the
+// user via the Name order dropdown, so we don't accidentally flip already-correct names.
+watch(
+  () => client.value.preferred_language,
+  (lang) => {
+    if (applyingInferredNameOrder) return
+    const inferred = inferNameOrderFromLanguage(lang)
+    if (inferred === 'surname_first' && nameOrder.value !== 'surname_first') {
+      nameOrder.value = 'surname_first'
+    }
+  }
+)
+
 function openVcfWindow() {
   const w = Math.floor(window.screen.availWidth / 2)
   const hgt = window.screen.availHeight
@@ -315,7 +384,7 @@ async function extract() {
     })
     const c = r.client || {}
     console.log('[VcfAccountPrep] extract response:', r)
-    client.value = {
+    const mapped = {
       first_name: c.first_name ?? '',
       last_name: c.last_name ?? '',
       email: c.email ?? '',
@@ -326,8 +395,11 @@ async function extract() {
       ssn_last4: c.ssn_last4 ?? '',
       preferred_language: c.preferred_language ?? '',
       notes: c.notes ?? '',
+      name_order: c.name_order || null,
     }
-    nameOrder.value = c.name_order || 'given_first'
+    applyInferredNameOrder(mapped)
+    delete mapped.name_order
+    client.value = mapped
     const warn = []
     if (c.missing_fields?.length) warn.push(`missing: ${c.missing_fields.join(', ')}`)
     if (c.ocr_uncertain?.length) warn.push(`uncertain OCR: ${c.ocr_uncertain.join(', ')}`)
@@ -376,7 +448,7 @@ async function useScan(id) {
     const c = r.client || {}
     console.log('[VcfAccountPrep] from-scan response:', r)
     console.log('[VcfAccountPrep] client before assign:', JSON.parse(JSON.stringify(client.value)))
-    client.value = {
+    const mapped = {
       first_name: c.first_name ?? '',
       last_name: c.last_name ?? '',
       email: c.email ?? '',
@@ -387,8 +459,11 @@ async function useScan(id) {
       ssn_last4: c.ssn_last4 ?? '',
       preferred_language: c.preferred_language ?? '',
       notes: c.notes ?? '',
+      name_order: c.name_order || null,
     }
-    nameOrder.value = c.name_order || 'given_first'
+    applyInferredNameOrder(mapped)
+    delete mapped.name_order
+    client.value = mapped
     console.log('[VcfAccountPrep] client after assign:', JSON.parse(JSON.stringify(client.value)))
     const warn = [...(r.warnings || [])]
     if (c.missing_fields?.length) warn.push(`missing: ${c.missing_fields.join(', ')}`)
