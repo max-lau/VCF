@@ -7,7 +7,7 @@ import { fileURLToPath, URL } from 'node:url'
 function spaBypass(req) {
   const accept = req.headers?.accept || ''
   if (accept.includes('text/html')) {
-    return req.url
+    return '/index.html'
   }
 }
 
@@ -24,7 +24,8 @@ export default defineConfig({
     proxy: {
       '/vcf': {
         target: 'http://127.0.0.1:5003',
-        changeOrigin: true
+        changeOrigin: true,
+        bypass: spaBypass
       },
       '/auth': {
         target: 'http://127.0.0.1:5003',
@@ -56,7 +57,8 @@ export default defineConfig({
       },
       '/email': {
         target: 'http://127.0.0.1:5003',
-        changeOrigin: true
+        changeOrigin: true,
+        bypass: spaBypass
       }
     }
   },

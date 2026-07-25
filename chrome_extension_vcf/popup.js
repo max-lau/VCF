@@ -7,7 +7,7 @@ chrome.storage.local.get(["baseUrl", "token"]).then((d) => {
 });
 
 $("save").addEventListener("click", async () => {
-  const baseUrl = $("baseUrl").value.trim() || "http://localhost:8000";
+  const baseUrl = $("baseUrl").value.trim() || "http://localhost:5003";
   const token = $("token").value.trim();
   await chrome.storage.local.set({ baseUrl, token });
 

@@ -1,5 +1,7 @@
 <template>
-  <slot v-if="!error" />
+  <div v-if="!error" style="display: contents">
+    <slot />
+  </div>
   <div v-else class="eb-fallback">
     <div class="eb-icon">⚠</div>
     <div class="eb-title">Something went wrong</div>
