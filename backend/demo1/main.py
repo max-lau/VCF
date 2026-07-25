@@ -223,6 +223,26 @@ app = FastAPI(
     swagger_js_url="https://unpkg.com/swagger-ui-dist@5/swagger-ui-bundle.js",
 )
 
+# ── /api prefix normalization ─────────────────────────────────────────────────
+# The Vue dev proxy prefixes all backend calls with /api and then rewrites the
+# path to remove it. In production the same built frontend calls /api/..., so the
+# backend must strip the prefix before routing.
+class ApiPrefixStripMiddleware:
+    def __init__(self, app):
+        self.app = app
+
+    async def __call__(self, scope, receive, send):
+        if scope.get("type") == "http":
+            path = scope.get("path", "")
+            if path.startswith("/api/"):
+                scope["path"] = path[4:]  # remove /api prefix
+                raw = scope.get("raw_path")
+                if raw and raw.startswith(b"/api/"):
+                    scope["raw_path"] = raw[4:]
+        await self.app(scope, receive, send)
+
+app.add_middleware(ApiPrefixStripMiddleware)
+
 # Force single tenant for WAW VCF + Robust Error Handling
 @app.middleware("http")
 async def force_waw_tenant(request: Request, call_next):
