@@ -7,7 +7,8 @@ from backend.demo1.auth import get_current_firm_id
 
 router = APIRouter(prefix="/calendar", tags=["calendar"])
 
-EVENT_TYPES = ["deadline", "hearing", "deposition", "meeting", "filing", "trial", "conference", "other"]
+EVENT_TYPES = ["deadline", "vcf_deadline", "medical_appointment", "client_followup",
+               "document_request", "claim_milestone", "meeting", "other"]
 STATUSES    = ["upcoming", "completed", "cancelled", "rescheduled"]
 
 
@@ -20,20 +21,20 @@ init_table()
 
 
 class EventCreate(BaseModel):
-    matter_id:    Optional[int] = None
-    title:        str
-    event_type:   Optional[str]  = "deadline"
-    due_date:     str
-    due_time:     Optional[str]  = None
-    location:     Optional[str]  = ""
-    description:  Optional[str]  = ""
-    attendees:    Optional[str]  = ""
-    status:       Optional[str]  = "upcoming"
+    case_id:       Optional[int] = None
+    title:         str
+    event_type:    Optional[str]  = "deadline"
+    due_date:      str
+    due_time:      Optional[str]  = None
+    location:      Optional[str]  = ""
+    description:   Optional[str]  = ""
+    attendees:     Optional[str]  = ""
+    status:        Optional[str]  = "upcoming"
     reminder_days: Optional[int] = 3
-    is_court_date: Optional[bool] = False
 
 
 class EventUpdate(BaseModel):
+    case_id:       Optional[int]  = None
     title:         Optional[str]  = None
     event_type:    Optional[str]  = None
     due_date:      Optional[str]  = None
@@ -43,18 +44,17 @@ class EventUpdate(BaseModel):
     attendees:     Optional[str]  = None
     status:        Optional[str]  = None
     reminder_days: Optional[int]  = None
-    is_court_date: Optional[bool] = None
 
 
-@router.get("/matter/{matter_id}")
-def list_matter_events(
-    matter_id: int,
-    status:    Optional[str] = None,
-    firm_id:   str           = Depends(get_current_firm_id),
+@router.get("/case/{case_id}")
+def list_case_events(
+    case_id: int,
+    status:  Optional[str] = None,
+    firm_id: str           = Depends(get_current_firm_id),
 ):
     with get_conn(firm_id) as conn:
-        sql    = "SELECT * FROM calendar_events WHERE matter_id = %s"
-        params = [matter_id]
+        sql    = "SELECT * FROM calendar_events WHERE case_id = %s"
+        params = [case_id]
         if status:
             sql += " AND status = %s"
             params.append(status)
@@ -110,14 +110,13 @@ def create_event(
     with get_conn(firm_id) as conn:
         cur = conn.execute("""
             INSERT INTO calendar_events
-              (firm_id, matter_id, title, event_type, due_date, due_time,
-               location, description, attendees, status, reminder_days, is_court_date)
-            VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)
+              (firm_id, case_id, title, event_type, due_date, due_time,
+               location, description, attendees, status, reminder_days)
+            VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)
             RETURNING id
-        """, (firm_id, event.matter_id, event.title, event.event_type,
+        """, (firm_id, event.case_id, event.title, event.event_type,
               event.due_date, event.due_time, event.location, event.description,
-              event.attendees, event.status, event.reminder_days,
-              event.is_court_date or False))
+              event.attendees, event.status, event.reminder_days))
         new_id = cur.fetchone()["id"]
         row    = conn.execute(
             "SELECT * FROM calendar_events WHERE id = %s", (new_id,)

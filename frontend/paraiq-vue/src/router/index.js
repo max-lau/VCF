@@ -27,6 +27,7 @@ const BatchIntakeView    = () => import('@/views/intake/BatchIntakeView.vue')
 const EsignView          = () => import('@/views/esign/EsignView.vue')
 const ClientPortalManage = () => import('@/views/portal/ClientPortalManageView.vue')
 const CommunicationsView = () => import('@/views/communications/CommunicationsView.vue')
+const RedactionView      = () => import('@/views/redaction/RedactionView.vue')
 const AuditLogView       = () => import('@/views/audit/AuditLogView.vue')
 const UsersView          = () => import('@/views/admin/UsersView.vue')
 const AdminView          = () => import('@/views/admin/AdminView.vue')
@@ -94,6 +95,12 @@ const routes = [
         path: 'communications',
         name: 'communications',
         component: CommunicationsView,
+      },
+      {
+        path: 'redaction',
+        name: 'redaction',
+        component: RedactionView,
+        meta: { module: 'redaction' },
       },
       {
         path: 'calendar',

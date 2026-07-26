@@ -44,7 +44,7 @@ async function redactPdf() {
 }
 
 function downloadPdf(id) {
-  window.open(`/api/redact/download/${id}`, '_blank')
+  window.open(`/redact/${id}/download`, '_blank')
 }
 
 async function deleteFile(id) {

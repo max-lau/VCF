@@ -84,8 +84,8 @@ def _get_firm_events_for_ical(firm_id: str, days_ahead: int = 365) -> List[dict]
         with get_conn(firm_id) as conn:
             rows = conn.execute(
                 """
-                SELECT id, matter_id, title, event_type, due_date, due_time,
-                       location, description, status, is_court_date,
+                SELECT id, case_id, title, event_type, due_date, due_time,
+                       location, description, status,
                        reminder_days, attendees
                 FROM calendar_events
                 WHERE due_date BETWEEN %s AND %s
@@ -108,10 +108,10 @@ def generate_ical_feed(firm_id: str) -> str:
     lines = [
         "BEGIN:VCALENDAR",
         "VERSION:2.0",
-        "PRODID:-//ParaIQ//Legal Intelligence Platform//EN",
+        "PRODID:-//VCFClaimsIQ//WAW Law Firm//EN",
         "CALSCALE:GREGORIAN",
         "METHOD:PUBLISH",
-        f"X-WR-CALNAME:ParaIQ Deadlines ({firm_id})",
+        f"X-WR-CALNAME:VCFClaimsIQ Deadlines ({firm_id})",
         "X-WR-TIMEZONE:America/New_York",
     ]
 
@@ -134,21 +134,19 @@ def generate_ical_feed(firm_id: str) -> str:
             except (ValueError, TypeError):
                 dt_end = dt_start
 
-        uid = f"paraiq-{ev['id']}@paraiq.legal"
-        summary = ev.get("title", "ParaIQ Event")
-        if ev.get("is_court_date"):
-            summary = f"[Court] {summary}"
+        uid = f"vcfclaimsiq-{ev['id']}@vcfclaimsiq.local"
+        summary = ev.get("title", "VCFClaimsIQ Event")
         if ev.get("event_type"):
             summary = f"[{ev['event_type'].upper()}] {summary}"
 
         desc_parts = []
         if ev.get("description"):
             desc_parts.append(ev["description"])
-        if ev.get("matter_id"):
-            desc_parts.append(f"Matter ID: {ev['matter_id']}")
+        if ev.get("case_id"):
+            desc_parts.append(f"Case ID: {ev['case_id']}")
         if ev.get("attendees"):
             desc_parts.append(f"Attendees: {ev['attendees']}")
-        desc_parts.append("Synced from ParaIQ Legal Intelligence Platform")
+        desc_parts.append("Synced from VCFClaimsIQ")
         description = "\\n".join(desc_parts)
 
         lines.extend([
@@ -213,7 +211,7 @@ async def export_ical(
         content=ical_content,
         media_type="text/calendar",
         headers={
-            "Content-Disposition": f"attachment; filename=paraiq-calendar-{firm_id}.ics"
+            "Content-Disposition": f"attachment; filename=vcfclaimsiq-calendar-{firm_id}.ics"
         }
     )
 

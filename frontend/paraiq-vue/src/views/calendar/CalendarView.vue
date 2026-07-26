@@ -5,7 +5,7 @@ import client from '@/api/client'
 const firmId  = () => { try { return JSON.parse(localStorage.getItem('paraiq_user')||'{}').firm_id||'default' } catch { return 'default' } }
 
 const events     = ref([])
-const matters    = ref([])
+const cases      = ref([])
 const loading    = ref(false)
 const showCreate = ref(false)
 const saving     = ref(false)
@@ -20,16 +20,16 @@ const pushResult  = ref(null)
 
 const form = ref(emptyForm())
 function emptyForm() {
-  return { title:'', event_type:'deadline', due_date:'', due_time:'', location:'', description:'', attendees:'', status:'upcoming', reminder_days:3, is_court_date:false, matter_id:null }
+  return { title:'', event_type:'deadline', due_date:'', due_time:'', location:'', description:'', attendees:'', status:'upcoming', reminder_days:3, case_id:null }
 }
 
-const EVENT_TYPES = ['deadline','hearing','deposition','meeting','filing','trial','conference','other']
+const EVENT_TYPES = ['deadline','vcf_deadline','medical_appointment','client_followup','document_request','claim_milestone','meeting','other']
 const STATUSES    = ['upcoming','completed','cancelled','rescheduled']
 
-async function fetchMatters() {
+async function fetchCases() {
   try {
     const { data } = await client.get('/cases/search?q=&firm_id=' + firmId())
-    matters.value = data.cases || []
+    cases.value = data.cases || []
   } catch {}
 }
 
@@ -42,7 +42,7 @@ async function fetchEvents() {
   finally { loading.value = false }
 }
 
-onMounted(() => { fetchMatters(); fetchEvents(); fetchSyncStatus() })
+onMounted(() => { fetchCases(); fetchEvents(); fetchSyncStatus() })
 
 async function fetchSyncStatus() {
   try {
@@ -118,7 +118,7 @@ async function saveEvent() {
   if (!form.value.title.trim() || !form.value.due_date) return
   saving.value = true
   try {
-    await client.post('/calendar/', { ...form.value, firm_id: firmId() }, { headers: authHdr() })
+    await client.post('/calendar/', { ...form.value, firm_id: firmId() })
     showCreate.value = false
     form.value = emptyForm()
     fetchEvents()
@@ -137,11 +137,19 @@ async function deleteEvent(id) {
 }
 
 function typeColor(t) {
-  const m = { deadline:'#fc8181', hearing:'#9f7aea', deposition:'#4a7cf7', meeting:'#48bb78', filing:'#ecc94b', trial:'#fc8181', conference:'#48bb78', other:'#718096' }
+  const m = {
+    deadline:'#fc8181', vcf_deadline:'#fc8181', medical_appointment:'#4a7cf7',
+    client_followup:'#48bb78', document_request:'#ecc94b', claim_milestone:'#9f7aea',
+    meeting:'#48bb78', other:'#718096'
+  }
   return m[t] || '#718096'
 }
 function typeIcon(t) {
-  return { deadline:'⏰', hearing:'⚖', deposition:'📋', meeting:'👥', filing:'📁', trial:'🏛', conference:'📞', other:'◎' }[t] || '◎'
+  return {
+    deadline:'⏰', vcf_deadline:'⏰', medical_appointment:'🏥',
+    client_followup:'📞', document_request:'📄', claim_milestone:'🎯',
+    meeting:'👥', other:'◎'
+  }[t] || '◎'
 }
 
 function daysUntil(d) {
@@ -172,7 +180,7 @@ const grouped = computed(() => {
 const counts = computed(() => ({
   total: events.value.length,
   overdue: events.value.filter(e => e.status === 'upcoming' && new Date(e.due_date) < new Date()).length,
-  courtDates: events.value.filter(e => e.is_court_date).length,
+  vcfDeadlines: events.value.filter(e => e.event_type === 'vcf_deadline').length,
 }))
 </script>
 
@@ -182,7 +190,7 @@ const counts = computed(() => ({
     <div class="cal__header">
       <div>
         <h1 class="cal__title">Calendar</h1>
-        <p class="cal__sub">Deadlines · hearings · filings · meetings</p>
+        <p class="cal__sub">VCF deadlines · appointments · follow-ups · milestones</p>
       </div>
       <div class="cal__header-actions">
         <button class="btn-secondary" @click="showSync = true">📅 Sync</button>
@@ -211,7 +219,7 @@ const counts = computed(() => ({
     <div class="stats-row" v-if="events.length">
       <div class="stat"><span class="stat__n">{{ counts.total }}</span><span class="stat__l">Events</span></div>
       <div class="stat"><span class="stat__n" style="color:#fc8181">{{ counts.overdue }}</span><span class="stat__l">Overdue</span></div>
-      <div class="stat"><span class="stat__n" style="color:#9f7aea">{{ counts.courtDates }}</span><span class="stat__l">Court Dates</span></div>
+      <div class="stat"><span class="stat__n" style="color:#9f7aea">{{ counts.vcfDeadlines }}</span><span class="stat__l">VCF Deadlines</span></div>
     </div>
 
     <div v-if="loading" class="state-msg">Loading…</div>
@@ -227,14 +235,14 @@ const counts = computed(() => ({
     <div v-else>
       <div v-for="(evts, month) in grouped" :key="month" class="month-group">
         <div class="month-label">{{ month }}</div>
-        <div class="event-card" v-for="ev in evts" :key="ev.id" :class="{ 'event-card--done': ev.status === 'completed', 'event-card--court': ev.is_court_date }">
+        <div class="event-card" v-for="ev in evts" :key="ev.id" :class="{ 'event-card--done': ev.status === 'completed', 'event-card--vcf': ev.event_type === 'vcf_deadline' }">
           <div class="event-card__left">
             <span class="type-icon">{{ typeIcon(ev.event_type) }}</span>
           </div>
           <div class="event-card__body">
             <div class="event-card__top">
               <span class="event-title" :class="{ done: ev.status === 'completed' }">{{ ev.title }}</span>
-              <span v-if="ev.is_court_date" class="court-badge">⚖ Court</span>
+              <span v-if="ev.event_type === 'vcf_deadline'" class="vcf-badge">VCF</span>
               <span class="type-pill" :style="{ background: typeColor(ev.event_type)+'22', color: typeColor(ev.event_type) }">{{ ev.event_type }}</span>
             </div>
             <div class="event-card__meta">
@@ -278,17 +286,17 @@ const counts = computed(() => ({
             <div class="field"><label>Reminder (days)</label><input type="number" v-model="form.reminder_days" min="0" max="90" /></div>
           </div>
           <div class="field-row">
-            <div class="field f2"><label>Matter</label>
-              <select v-model="form.matter_id">
+            <div class="field f2"><label>Claim</label>
+              <select v-model="form.case_id">
                 <option :value="null">— Firm-wide —</option>
-                <option v-for="m in matters" :key="m.id" :value="m.id">{{ m.case_number }} — {{ m.client_name }}</option>
+                <option v-for="c in cases" :key="c.id" :value="c.id">{{ c.case_number }} — {{ c.client_name }}</option>
               </select>
             </div>
             <div class="field"><label>Location</label><input v-model="form.location" placeholder="Courtroom 4B" /></div>
           </div>
           <div class="field"><label>Description</label><textarea v-model="form.description" rows="3" placeholder="Notes or details…"></textarea></div>
           <div class="field"><label>Attendees</label><input v-model="form.attendees" placeholder="Comma-separated names or emails" /></div>
-          <label class="check-label"><input type="checkbox" v-model="form.is_court_date" /> Court date</label>
+
         </div>
         <div class="modal__footer">
           <button class="btn-secondary" @click="showCreate = false">Cancel</button>
@@ -323,7 +331,7 @@ const counts = computed(() => ({
           <!-- Google Calendar -->
           <div class="sync-section">
             <div class="sync-section__title">📅 Google Calendar</div>
-            <div class="sync-section__sub">Two-way push of deadlines and court dates to your Google Calendar.</div>
+            <div class="sync-section__sub">Push VCF deadlines and firm events to your Google Calendar.</div>
             <div v-if="syncStatus?.google?.connected" class="sync-connected">
               <span class="sync-badge sync-badge--on">● Connected</span>
               <button class="btn-gold sm" @click="pushToGoogle" :disabled="syncLoading">{{ syncLoading ? 'Pushing…' : 'Push Events Now' }}</button>
@@ -335,7 +343,7 @@ const counts = computed(() => ({
           <!-- Outlook Calendar -->
           <div class="sync-section">
             <div class="sync-section__title">📧 Outlook Calendar</div>
-            <div class="sync-section__sub">Two-way push of deadlines and court dates to your Outlook Calendar.</div>
+            <div class="sync-section__sub">Push VCF deadlines and firm events to your Outlook Calendar.</div>
             <div v-if="syncStatus?.outlook?.connected" class="sync-connected">
               <span class="sync-badge sync-badge--on">● Connected</span>
               <button class="btn-gold sm" @click="pushToOutlook" :disabled="syncLoading">{{ syncLoading ? 'Pushing…' : 'Push Events Now' }}</button>
@@ -383,7 +391,7 @@ const counts = computed(() => ({
 .event-card { background: var(--bg-card); border: 1px solid var(--border); border-radius: 8px; display: flex; align-items: center; gap: 1rem; margin-bottom: 0.5rem; padding: 0.9rem 1rem; transition: border-color .15s; }
 .event-card:hover { border-color: var(--gold); }
 .event-card--done  { opacity: 0.55; }
-.event-card--court { border-left: 3px solid #9f7aea; }
+.event-card--vcf { border-left: 3px solid #fc8181; }
 .event-card__left  { font-size: 1.4rem; width: 36px; text-align: center; flex-shrink: 0; }
 .event-card__body  { flex: 1; min-width: 0; }
 .event-card__top   { display: flex; align-items: center; gap: 0.5rem; margin-bottom: 0.3rem; }
@@ -391,7 +399,7 @@ const counts = computed(() => ({
 .event-card__right { display: flex; align-items: center; gap: 0.5rem; flex-shrink: 0; }
 .event-title { font-size: 0.95rem; font-weight: 600; color: var(--text-primary); }
 .event-title.done { text-decoration: line-through; color: var(--text-muted); }
-.court-badge  { background: rgba(159,122,234,.15); border-radius: 4px; color: #9f7aea; font-size: 0.68rem; font-weight: 700; padding: 0.15rem 0.4rem; }
+.vcf-badge  { background: rgba(252,129,129,.15); border-radius: 4px; color: #fc8181; font-size: 0.68rem; font-weight: 700; padding: 0.15rem 0.4rem; }
 .type-pill    { border-radius: 4px; font-size: 0.68rem; font-weight: 700; padding: 0.15rem 0.4rem; text-transform: capitalize; }
 .countdown    { font-size: 0.8rem; font-weight: 700; min-width: 40px; text-align: right; }
 .done-btn     { background: rgba(72,187,120,.15); border: none; border-radius: 4px; color: #48bb78; cursor: pointer; font-size: 0.8rem; font-weight: 700; padding: 0.2rem 0.5rem; transition: background .15s; }

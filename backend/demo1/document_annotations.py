@@ -18,7 +18,7 @@ import logging
 from typing import Optional, Dict, Any, List, Tuple
 from datetime import datetime
 
-from fastapi import APIRouter, HTTPException, Depends, Request
+from fastapi import APIRouter, HTTPException, Depends, Request, Query
 from pydantic import BaseModel
 
 from backend.demo1.pg import get_conn
@@ -301,6 +301,54 @@ def _annotate_text(text: str, llm_entities: Dict = None, privilege_info: Dict = 
 
 
 # ── Routes ───────────────────────────────────────────────────────────────────
+
+@router.get("/")
+async def list_documents(
+    limit: int = Query(200, le=500),
+    case_id: Optional[int] = Query(None),
+    firm_id: str = Depends(get_current_firm_id),
+    current_user: dict = Depends(get_current_user),
+):
+    """List case documents for the firm — replacement for the deleted /discovery/queue."""
+    params = [firm_id]
+    sql = """
+        SELECT cd.id, cd.case_id, cd.document_name, cd.source, cd.doc_type,
+               cd.doc_text, cd.summary, cd.file_url, cd.match_status,
+               cd.content_hash, cd.upload_date, cd.created_at,
+               c.case_number
+        FROM case_documents cd
+        LEFT JOIN cases c ON c.id = cd.case_id AND c.firm_id = cd.firm_id
+        WHERE cd.firm_id = %s
+    """
+    if case_id is not None:
+        sql += " AND cd.case_id = %s"
+        params.append(case_id)
+    sql += " ORDER BY cd.created_at DESC LIMIT %s"
+    params.append(limit)
+
+    with get_conn(firm_id) as conn:
+        rows = conn.execute(sql, params).fetchall()
+
+    files = []
+    for r in rows:
+        has_text = bool(r["doc_text"] and r["doc_text"].strip())
+        files.append({
+            "id": r["id"],
+            "case_id": r["case_id"],
+            "case_number": r["case_number"],
+            "original_name": r["document_name"],
+            "source": r["source"],
+            "doc_type": r["doc_type"],
+            "route": r["source"] or r["doc_type"] or "other",
+            "status": "processed" if has_text else "pending",
+            "file_hash": r["content_hash"],
+            "file_url": r["file_url"],
+            "summary": r["summary"],
+            "created_at": str(r["created_at"]),
+            "upload_date": str(r["upload_date"]) if r["upload_date"] else str(r["created_at"]),
+        })
+    return {"files": files, "count": len(files)}
+
 
 @router.get("/{doc_id}/annotated")
 async def get_annotated_document(

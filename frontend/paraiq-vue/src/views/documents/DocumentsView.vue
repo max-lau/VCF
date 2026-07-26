@@ -21,8 +21,8 @@ const filterCase  = ref('')
 const filterRoute = ref('')
 const filterStatus= ref('')
 
-const ROUTES   = ['digital','ocr','audio','zip','image']
-const STATUSES = ['pending','text_extracted','ocr_complete','processed','error']
+const ROUTES   = ['intake_scan','email_attachment','manual','other']
+const STATUSES = ['pending','processed']
 
 // ── Upload state ───────────────────────────────────────────────────────────
 const showPicker      = ref(false)
@@ -38,7 +38,7 @@ const mattersError    = ref('')
 async function fetchFiles() {
   loading.value = true
   try {
-    const { data } = await axios.get('/discovery/queue?limit=200', { headers: authHdr() })
+    const { data } = await axios.get('/documents/?limit=200', { headers: authHdr() })
     files.value = data.files || []
   } catch { files.value = [] }
   finally { loading.value = false }
@@ -84,6 +84,17 @@ function onUploadClose() {
   showUpload.value = false
 }
 
+async function redactDoc(file) {
+  try {
+    const { data } = await axios.post(`/redact/case-document/${file.id}`, {}, { headers: authHdr() })
+    if (data.download_url) {
+      window.open(data.download_url, '_blank')
+    }
+  } catch (e) {
+    alert(e.response?.data?.detail || 'Redaction failed')
+  }
+}
+
 function onUploaded() {
   // Give backend ~1.5s to register then refresh the list
   setTimeout(fetchFiles, 1500)
@@ -109,14 +120,10 @@ const statsByRoute = computed(() => {
 
 // ── Helpers ────────────────────────────────────────────────────────────────
 function routeColor(r) {
-  return { digital:'#4a7cf7', ocr:'#48bb78', audio:'#c9a84c', zip:'#a0aec0', image:'#9f7aea' }[r] || '#718096'
+  return { intake_scan:'#4a7cf7', email_attachment:'#48bb78', manual:'#c9a84c', other:'#a0aec0' }[r] || '#718096'
 }
 function statusColor(s) {
-  return { pending:'#718096', text_extracted:'#4a7cf7', ocr_complete:'#48bb78', processed:'#48bb78', error:'#fc8181' }[s] || '#718096'
-}
-function fmtSize(b) {
-  if (!b) return '—'
-  return b < 1024 ? b+'B' : b < 1048576 ? (b/1024).toFixed(1)+'KB' : (b/1048576).toFixed(1)+'MB'
+  return { pending:'#718096', processed:'#48bb78', error:'#fc8181' }[s] || '#718096'
 }
 function fmtDate(d) {
   if (!d) return '—'
@@ -194,16 +201,15 @@ function closeDoc() {
             <th>Case</th>
             <th>Type</th>
             <th>Status</th>
-            <th>Privilege</th>
-            <th>Size</th>
             <th>Uploaded</th>
+            <th>Actions</th>
           </tr>
         </thead>
         <tbody>
-          <tr v-for="f in filtered" :key="f.id" class="doc-row" @click="openDoc(f)">
+          <tr v-for="f in filtered" :key="f.id" class="doc-row">
             <td class="dim mono">{{ f.id }}</td>
             <td>
-              <div class="filename">{{ f.original_name }}</div>
+              <div class="filename" @click="openDoc(f)">{{ f.original_name }}</div>
               <div v-if="f.file_hash" class="dim mono" style="font-size:0.72rem">{{ f.file_hash }}</div>
             </td>
             <td class="dim mono">{{ f.case_number || '—' }}</td>
@@ -217,18 +223,10 @@ function closeDoc() {
                 {{ f.status?.replace('_',' ') }}
               </span>
             </td>
-            <!-- Privilege badge — soft scan flag from pipeline -->
-            <td>
-              <span v-if="f.privilege_flag === true || f.privilege_flag === 1" class="priv-badge">
-                ⚠ Review
-              </span>
-              <span v-else-if="f.privilege_flag === false || f.privilege_flag === 0" class="priv-clear">
-                ✓ Clear
-              </span>
-              <span v-else class="dim" style="font-size:0.75rem">—</span>
-            </td>
-            <td class="dim">{{ fmtSize(f.file_size) }}</td>
             <td class="dim nowrap">{{ fmtDate(f.created_at) }}</td>
+            <td>
+              <button class="link-btn" @click.stop="redactDoc(f)">Redact</button>
+            </td>
           </tr>
         </tbody>
       </table>

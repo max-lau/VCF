@@ -16,6 +16,32 @@ class DeadlineBody(BaseModel):
     description: str = ""
 
 
+def _sync_deadline_to_calendar(firm_id: str, case_id: int, deadline_type: str, due_date: date, description: str = ""):
+    """Mirror a VCF deadline in the firm calendar so it appears alongside other events."""
+    try:
+        with get_conn(firm_id) as conn:
+            # Avoid duplicate calendar entries for the same deadline type/date/case.
+            existing = conn.execute(
+                """SELECT id FROM calendar_events
+                   WHERE firm_id = %s AND case_id = %s AND event_type = 'vcf_deadline'
+                     AND title = %s AND due_date = %s""",
+                (firm_id, case_id, f"VCF: {deadline_type}", due_date)
+            ).fetchone()
+            if existing:
+                return
+
+            conn.execute(
+                """INSERT INTO calendar_events
+                   (firm_id, case_id, title, event_type, due_date, description, status, reminder_days)
+                   VALUES (%s, %s, %s, %s, %s, %s, 'upcoming', 3)
+                   ON CONFLICT DO NOTHING""",
+                (firm_id, case_id, f"VCF: {deadline_type}", "vcf_deadline",
+                 due_date, description or f"VCF deadline: {deadline_type}"),
+            )
+    except Exception as e:
+        logger.warning(f"[VCF deadlines] Could not sync deadline to calendar: {e}")
+
+
 def _send_deadline_reminder(firm_id: str, deadline: dict, days_left: int):
     """Create an in-app notification and optionally log an email alert."""
     case_id = deadline["case_id"]
@@ -152,6 +178,8 @@ async def create_case_deadline(
                 RETURNING id, case_id, deadline_type, due_date, status, created_at
             """, (firm_id, case_id, body.deadline_type, due_date, body.description)).fetchone()
             conn.commit()
+
+            _sync_deadline_to_calendar(firm_id, case_id, body.deadline_type, due_date, body.description)
 
             return {"success": True, "deadline": dict(row)}
     except HTTPException:

@@ -17,6 +17,7 @@
         <NavItem to="/documents"      icon="file-text"        label="Documents" />
         <NavItem to="/communications" icon="mail"             label="Communications" />
         <NavItem to="/email-inbox"    icon="inbox"            label="Email Intake" />
+        <NavItem to="/redaction"      icon="eraser"           label="Redaction" />
         <NavItem to="/calendar"       icon="calendar"         label="Calendar" />
         <NavItem to="/contacts"       icon="address-book"     label="Contacts" />
       </NavGroup>

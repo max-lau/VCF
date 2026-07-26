@@ -320,6 +320,70 @@ async def delete_redacted_file(request: Request, redaction_id: str):
     return {"message": f"'{row['filename']}' securely deleted.", "id": redaction_id}
 
 
+@router.post("/case-document/{doc_id}")
+async def redact_case_document(doc_id: int, request: Request, use_claude: bool = Query(True)):
+    """Redact PII from an existing case_document's extracted text.
+
+    Returns a redacted text download. This is the VCF export flow:
+    select a document in the case binder, redact it, then download the
+    sanitized version for external sharing.
+    """
+    _require_auth(request)
+    firm_id = getattr(request.state, "firm_id", "default")
+
+    with get_conn(firm_id) as conn:
+        doc = conn.execute(
+            """SELECT id, document_name, doc_text, content_hash, case_id
+               FROM case_documents
+               WHERE id = %s AND firm_id = %s""",
+            (doc_id, firm_id),
+        ).fetchone()
+
+    if not doc:
+        raise HTTPException(404, "Document not found")
+
+    text = (doc["doc_text"] or "").strip()
+    if not text:
+        raise HTTPException(400, "No extracted text available for this document. Run OCR/intake first.")
+
+    redacted, findings, confidence = _run_presidio(text, 0.5, "label")
+    if use_claude:
+        try:
+            findings = _claude_enhance(text, findings, "label", firm_id=firm_id)
+            redacted = _apply_claude_extras(redacted, findings, "label")
+        except (json.JSONDecodeError, KeyError, IndexError, TypeError, ValueError) as e:
+            logger.warning(f"[redaction] Claude enhance failed (case-document endpoint): {e}")
+
+    rec_id   = str(uuid.uuid4())[:8]
+    base     = os.path.splitext(doc["document_name"] or "document")[0]
+    out_name = f"{base}_redacted_{rec_id}.txt"
+    out_path = STORAGE_DIR / out_name
+    out_path.write_text(redacted, encoding="utf-8")
+    size_kb  = round(out_path.stat().st_size / 1024, 2)
+
+    with get_conn(firm_id) as conn:
+        conn.execute(
+            """INSERT INTO redactions
+               (id, firm_id, filename, original_filename, size_kb, style,
+                total_redactions, confidence_score, file_path, created_at)
+               VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)""",
+            (rec_id, firm_id, out_name, doc["document_name"], size_kb, "label",
+             len(findings), confidence, str(out_path),
+             datetime.now(timezone.utc).isoformat()),
+        )
+
+    categories_found = list({f["category"] for f in findings})
+    return {
+        "success": True,
+        "redaction_id": rec_id,
+        "download_url": f"/redact/{rec_id}/download",
+        "filename": out_name,
+        "total_redactions": len(findings),
+        "categories_found": categories_found,
+        "confidence_score": confidence,
+    }
+
+
 @router.get("/{redaction_id}/download")
 async def download_redacted_file(request: Request, redaction_id: str):
     _require_auth(request)
