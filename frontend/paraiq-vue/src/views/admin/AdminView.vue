@@ -216,7 +216,7 @@ onMounted(fetchUsers)
         </div>
         <div class="modal__field">
           <label>Firm</label>
-          <input v-model="inviteForm.firm_id" class="piq-input" placeholder="default" />
+          <input :value="auth.firmId || 'default'" class="piq-input" disabled />
         </div>
         <div v-if="inviteError" class="modal__error">{{ inviteError }}</div>
         <div class="modal__actions">

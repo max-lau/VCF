@@ -184,16 +184,6 @@
       </RouterLink>
     </div>
   </div>
-
-        <!-- YubiKey Registration Panel -->
-        <div class="mt-6 p-4 bg-blue-50 border border-blue-200 rounded-lg shadow-sm">
-          <h3 class="text-lg font-medium text-blue-900">🔐 Hardware Security (Anti-USB Hack)</h3>
-          <p class="text-sm text-blue-700 mt-1 mb-3">Protect against physical USB attacks. Register a YubiKey to require a physical tap during login.</p>
-          <button type="button" @click="registerYubiKey" class="px-4 py-2 bg-blue-600 text-white text-sm font-medium rounded-md hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500">
-            Register New Security Key
-          </button>
-        </div>
-
 </template>
 
 <script setup>
@@ -365,78 +355,21 @@ onMounted(async () => {
 
 // ── Module cards ──────────────────────────────────────────────────────────
 const ALL_CARDS = [
-  { to: '/matters',        icon: '⬡', name: 'Matters',          desc: 'Active cases',           gate: 'matters'       },
+  { to: '/matters',        icon: '⬡', name: 'Claims',            desc: 'Active VCF claims',       gate: 'matters'       },
   { to: '/documents',      icon: '◻', name: 'Documents',         desc: 'Upload & review',         gate: 'documents'     },
-  { to: '/privilege-log',  icon: '◈', name: 'Privilege Log',     desc: 'Review & classify',       gate: 'privilege_log' },
-  { to: '/timeline',       icon: '⊣', name: 'Timeline',          desc: 'Case chronology',         gate: 'timeline'      },
-  { to: '/discovery',      icon: '◎', name: 'Discovery',         desc: 'Productions & requests',  gate: 'discovery'     },
-  { to: '/depositions',    icon: '◷', name: 'Depositions',       desc: 'Transcripts & prep',      gate: 'depositions'   },
-  { to: '/motions',        icon: '◈', name: 'Motions',           desc: 'Drafting & filing',       gate: 'motions'       },
-  { to: '/contracts',      icon: '⊠', name: 'Contracts',         desc: 'Review & redline',        gate: 'contracts'     },
-  { to: '/correspondence', icon: '◬', name: 'Correspondence',    desc: 'Emails & letters',        gate: 'correspondence'},
+  { to: '/communications', icon: '◬', name: 'Communications',    desc: 'Client & agency calls',   gate: 'correspondence'},
   { to: '/email-inbox',    icon: '📥', name: 'Email Intake',      desc: 'AI-filtered email feed' },
-  { to: '/calendar',       icon: '◫', name: 'Calendar',          desc: 'Deadlines & hearings',    gate: 'calendar'      },
-  { to: '/contacts',       icon: '◉', name: 'Contacts',          desc: 'Parties & counsel',       gate: 'contacts'      },
-  { to: '/intelligence',   icon: '◈', name: 'Case Intelligence', desc: 'AI signals & deadlines',  gate: 'legal_bert'    },
-  { to: '/legal-bert',     icon: '⬡', name: 'Legal-BERT',        desc: 'AI document analysis',    gate: 'legal_bert'    },
-  { to: '/research',       icon: '◎', name: 'Research',          desc: 'Case law & statutes',     gate: 'legal_research'},
-  { to: '/reports',        icon: '◫', name: 'Reports',           desc: 'Analytics & insights',    gate: 'reports'       },
-  { to: '/exports',        icon: '◬', name: 'Exports',           desc: 'PDF & DOCX bundles',      gate: 'exports'       },
+  { to: '/calendar',       icon: '◫', name: 'Calendar',          desc: 'Deadlines & appointments', gate: 'calendar'      },
+  { to: '/contacts',       icon: '◉', name: 'Contacts',          desc: 'Clients & providers',     gate: 'contacts'      },
+  { to: '/intake',         icon: 'scan', name: 'OCR Intake',      desc: 'Scan & classify documents' },
+  { to: '/document-inbox', icon: '◻', name: 'Document Inbox',    desc: 'Route unmatched documents' },
+  { to: '/vcf-reports',    icon: '◫', name: 'VCF Reports',       desc: 'Claims & deadlines',      gate: 'reports'       },
+  { to: '/exports',        icon: '◬', name: 'Exports',           desc: 'PDF & CSV bundles',       gate: 'exports'       },
   { to: '/portal',         icon: '◉', name: 'Client Portal',     desc: 'Client-facing view',      gate: 'client_portal' },
   { to: '/admin',          icon: '⊡', name: 'Users & Roles',     desc: 'Team management',         gate: 'users_roles',  badge: 'Admin' },
   { to: '/admin/audit',    icon: '◫', name: 'Audit Log',         desc: 'Activity trail',          gate: 'audit_log'     },
-  { to: '/admin/enclave',  icon: '⬡', name: 'Enclaves',          desc: 'AI enclave health',       gate: 'enclave_mgmt', badge: 'Admin' },
-  { to: '/admin/billing',  icon: '◎', name: 'Billing',           desc: 'Plans & invoices',        gate: 'billing'       },
 ]
 const visibleCards = computed(() => ALL_CARDS.filter(c => !c.gate || g.value[c.gate]))
-
-// --- WebAuthn / YubiKey Registration ---
-const registerYubiKey = async () => {
-  // Safely attempt to get the logged-in username from Pinia auth store
-  let user = '';
-  try {
-    const { useAuthStore } = await import('@/stores/auth');
-    const authStore = useAuthStore();
-    user = authStore.user?.username || authStore.username || '';
-  } catch(e) {}
-  
-  // Fallback to prompt if it can't find it automatically
-  if (!user) {
-    user = prompt("Please enter your username to register a security key:");
-  }
-  if (!user) return;
-
-  try {
-    const beginRes = await fetch(`/api/webauthn/register/begin/${user}`);
-    if (!beginRes.ok) throw new Error('Failed to start registration');
-    const options = await beginRes.json();
-
-    // This tells the browser to wait for the physical YubiKey tap
-    const credential = await navigator.credentials.create({ publicKey: options });
-
-    // Send the new key data to the backend to be saved
-    const verifyRes = await fetch(`/api/webauthn/register/complete/${user}`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        credential_id: credential.id,
-        authenticator_data: btoa(String.fromCharCode(...new Uint8Array(credential.response.authenticatorData))),
-        client_data_json: btoa(String.fromCharCode(...new Uint8Array(credential.response.clientDataJSON))),
-        signature: btoa(String.fromCharCode(...new Uint8Array(credential.response.signature)))
-      })
-    });
-
-    if (verifyRes.ok) {
-      alert('✅ Security Key registered successfully! You can now use it to log in.');
-    } else {
-      const err = await verifyRes.json();
-      throw new Error(err.detail || 'Registration failed');
-    }
-  } catch (error) {
-    console.error('YubiKey registration error:', error);
-    alert('Registration failed: ' + error.message);
-  }
-};
 
 </script>
 

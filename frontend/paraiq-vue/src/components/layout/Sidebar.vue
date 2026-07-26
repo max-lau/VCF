@@ -15,7 +15,7 @@
       <NavGroup label="Claim Work">
         <NavItem to="/matters"        icon="briefcase"        label="Claims" />
         <NavItem to="/documents"      icon="file-text"        label="Documents" />
-        <NavItem to="/correspondence" icon="mail"             label="Correspondence" />
+        <NavItem to="/communications" icon="mail"             label="Communications" />
         <NavItem to="/email-inbox"    icon="inbox"            label="Email Intake" />
         <NavItem to="/calendar"       icon="calendar"         label="Calendar" />
         <NavItem to="/contacts"       icon="address-book"     label="Contacts" />
@@ -30,13 +30,10 @@
         <NavItem to="/intake"    icon="scan"        label="OCR Intake" />
         <NavItem to="/document-inbox" icon="inbox"  label="Document Inbox" />
         <NavItem to="/batch-intake" icon="stack-2" label="Batch Intake" />
-        <NavItem to="/redaction" icon="eraser"      label="Redaction" />
         <NavItem to="/esign"     icon="pen-tool"    label="E-Signatures" />
       </NavGroup>
 
-      <NavGroup label="AI & Analysis">
-        <NavItem to="/intelligence" icon="brain"     label="Case Intelligence" />
-        <NavItem to="/multilingual" icon="world"     label="Multilingual" />
+      <NavGroup label="Reports">
         <NavItem to="/vcf-reports" icon="report"    label="VCF Reports" />
         <NavItem to="/exports"      icon="download"  label="Exports" />
       </NavGroup>
@@ -45,18 +42,12 @@
         <NavItem to="/portal" icon="users" label="Client Portal" />
       </NavGroup>
 
-      <NavGroup label="Workflow">
-        <NavItem to="/approvals"      icon="checks"      label="Approval Queue" />
-        <NavItem to="/time-capture"   icon="clock"       label="Time Capture" />
-      </NavGroup>
-
       <NavGroup v-if="isFirmAdmin" label="Firm Admin">
         <NavItem v-if="g.users_roles"  to="/admin"         icon="users"       label="Users & Roles" />
         <NavItem v-if="g.audit_log"    to="/admin/audit"   icon="list-check"  label="Audit Log" />
-        <NavItem v-if="g.billing"      to="/admin/billing" icon="credit-card" label="Billing" />
       </NavGroup>
 
-      <NavGroup v-if="role === 'acpvcf_super'" label="Super Admin">
+      <NavGroup v-if="role === 'paraiq_super'" label="Super Admin">
         <NavItem to="/super-admin/monitor" icon="activity" label="System Monitor" />
         <NavItem to="/ai-config" icon="settings" label="AI Config" />
       </NavGroup>

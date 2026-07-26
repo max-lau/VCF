@@ -3,56 +3,24 @@
     <div class="piq-page-header">
       <h2 class="piq-page-title">{{ moduleName }}</h2>
       <p class="piq-page-subtitle">
-        <span class="piq-badge piq-badge--amber">In development</span>
+        <span class="piq-badge piq-badge--amber">Not available</span>
       </p>
     </div>
     <div class="stub">
       <div class="stub__icon" aria-hidden="true">◎</div>
       <p class="stub__msg">
-        This module is being migrated to the Vue frontend.<br />
-        The existing HTML version remains accessible at
-        <a :href="`/frontend/demo1/${legacyPage}`" target="_blank" class="stub__link">
-          /frontend/demo1/{{ legacyPage }}
-        </a>
+        This module is not part of the VCFClaimsIQ workflow.<br />
+        Return to the <RouterLink to="/dashboard" class="stub__link">Dashboard</RouterLink>.
       </p>
     </div>
   </div>
 </template>
 
 <script setup>
-import { computed } from 'vue'
-
-const props = defineProps({
+defineProps({
   moduleName: { type: String, default: 'Module' },
   moduleKey:  { type: String, default: '' },
 })
-
-// Maps module key → existing HTML file for reference during migration
-const LEGACY_MAP = {
-  matters:        'cases.html',
-  documents:      'analyzer.html',
-  privilege_log:  'privilege_review.html',
-  timeline:       'timeline.html',
-  discovery:      'discovery.html',
-  depositions:    'deposition.html',
-  motions:        'review.html',
-  contracts:      'compare.html',
-  correspondence: 'intake.html',
-  calendar:       'dashboard.html',
-  contacts:       'dashboard.html',
-  legal_bert:     'analyzer.html',
-  legal_research: 'citations.html',
-  ai_config:      'model.html',
-  exports:        'batch.html',
-  reports:        'insights.html',
-  client_portal:  'dashboard.html',
-  users_roles:    'admin.html',
-  audit_log:      'audit.html',
-  enclave_mgmt:   'admin.html',
-  billing:        'admin.html',
-}
-
-const legacyPage = computed(() => LEGACY_MAP[props.moduleKey] || 'index.html')
 </script>
 
 <style scoped>

@@ -302,7 +302,7 @@ async def startup_event():
     init_transcription_table()
     init_messages_table()
     init_vcf_account_table()
-    init_enclave_tables()
+    # init_enclave_tables()  # litigation-only enclaves; unmounted in VCFClaimsIQ
     from backend.demo1.esignature import init_esign_tables
     init_esign_tables()
     from backend.demo1.client_portal import init_tables as init_portal_tables
@@ -362,14 +362,15 @@ app.include_router(pdf_router, prefix="/export", tags=["PDF Export"])
 app.include_router(module_pdf_router, prefix="/export", tags=["PDF Export"])
 app.include_router(audit_router, prefix="/audit", tags=["Audit Trail"])
 app.include_router(cases_router, prefix="/cases", tags=["Case Management"])
-app.include_router(matter_export_router, prefix="/export", tags=["Matter Exports"])
+# Litigation-only routers removed for VCFClaimsIQ:
+# app.include_router(matter_export_router, prefix="/export", tags=["Matter Exports"])
 app.include_router(redaction_router, prefix="/redact", tags=["Redaction"])
 app.include_router(messages_router, tags=["Message Parsers"])
 app.include_router(vcf_disbursements_router, tags=["VCF Disbursements"])
-app.include_router(correspondence_router)
+# app.include_router(correspondence_router)  # legacy litigation correspondence
 app.include_router(feedback_router)
-app.include_router(summary_router)
-app.include_router(nlp_router)
+# app.include_router(summary_router)        # litigation summary output
+# app.include_router(nlp_router)            # litigation entities/timeline
 app.include_router(chat_router)
 app.include_router(monitor_router)
 
@@ -384,17 +385,17 @@ async def shutdown_event():
 app.include_router(calendar_router)
 app.include_router(calendar_sync_router, prefix="/calendar", tags=["Calendar Sync"])
 app.include_router(contacts_router)
-app.include_router(reports_router)
+# app.include_router(reports_router)        # legacy litigation reports
 app.include_router(exports_router)
 app.include_router(ai_config_router)
 app.include_router(client_portal_router)
 app.include_router(email_router)
-app.include_router(kanban_router)
+# app.include_router(kanban_router)         # litigation workflow board
 app.include_router(notifications_router, prefix="", tags=["notifications"])
-app.include_router(approval_router, prefix="/approvals", tags=["approvals"])
+# app.include_router(approval_router, prefix="/approvals", tags=["approvals"])  # litigation billing
 app.include_router(document_annotations_router, prefix="/documents", tags=["document-annotations"])
 app.include_router(esign_router, prefix="/esign", tags=["e-signature"])
-app.include_router(workflows_router, tags=["workflows"])
+# app.include_router(workflows_router, tags=["workflows"])  # litigation workflow automation
 app.include_router(vcf_deadlines_router, tags=["VCF Deadlines"])
 app.include_router(vcf_account_router, prefix="/vcf", tags=["VCF Account Prep"])
 app.include_router(vcf_workflow_router, tags=["VCF Workflow"])
