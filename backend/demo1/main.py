@@ -163,11 +163,18 @@ M2M_PREFIXES = ("/intake/scan", "/discovery/process/ocr/", "/media/transcribe/di
 # index.html without a JWT. This replaces the broad "Accept: text/html" bypass
 # that allowed unauthenticated access to API endpoints such as /cases/{id}.
 _SPA_EXACT = {
-    "/", "/intake", "/matters", "/claims", "/vcf-account-prep", "/email-inbox",
-    "/documents", "/dashboard", "/admin", "/reports", "/communications",
+    "/", "/intake", "/batch-intake", "/matters", "/claims",
+    "/vcf-account-prep", "/vcf-deadlines", "/vcf-reports",
+    "/email-inbox", "/documents", "/document-inbox",
+    "/dashboard", "/admin", "/reports", "/communications",
     "/correspondence", "/login", "/super-admin", "/profile", "/settings",
+    "/calendar", "/contacts", "/esign", "/exports", "/ai-config",
+    "/audit-log", "/users", "/client-portal",
 }
-_SPA_PARAM_RE = re.compile(r"^/(matters|claims|vcf-account-prep|documents|reports|communications|correspondence)/[^/]+(/|$)")
+_SPA_PARAM_RE = re.compile(
+    r"^/(matters|claims|vcf-account-prep|vcf-deadlines|documents|reports|"
+    r"communications|correspondence|client-portal|users)/[^/]+(/|$)"
+)
 
 
 def _is_spa_navigation(path: str, method: str, accept: str) -> bool:
