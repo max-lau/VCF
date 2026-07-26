@@ -18,15 +18,10 @@ from backend.demo1.observability.tracer import trace_claude_call
 from backend.demo1.mlops.tracker import log_inference as _mlflow_log
 from backend.demo1.pii import redact_text as _pii_redact, redaction_summary as _pii_summary
 from backend.demo1.case_management   import router as cases_router
-from backend.demo1.matter_exports import router as matter_export_router
 from backend.demo1.redaction import router as redaction_router, init_redaction_table
 from backend.demo1.media_transcription import init_transcription_table
 from backend.demo1.message_parser import router as messages_router, init_messages_table
 from backend.demo1.email_router import router as email_router
-from backend.demo1.multilingual import analyze_multilingual, detect_language, SUPPORTED_LANGUAGES
-from backend.demo1.summary_scorer import score_summary
-from backend.demo1.entity_confidence import score_entities, get_entity_summary
-from backend.demo1.entity_linker import find_linked_entities, link_documents_by_entity
 from backend.demo1.calendar_sync import router as calendar_sync_router
 from backend.demo1.document_annotations import router as document_annotations_router
 from backend.demo1.esignature import router as esign_router
@@ -69,27 +64,17 @@ from backend.demo1.pg import init_pool, make_tenant_middleware
 
 import jwt
 import psycopg2
-from backend.demo1.enclave_router import router as enclave_privilege_router
 
 logger = logging.getLogger(__name__)
 
-from backend.demo1.db_enclaves import init_enclave_tables
-from backend.demo1.routers.correspondence_router import router as correspondence_router
-# from backend.demo1.routers.webauthn_router import router as webauthn_router
 from backend.demo1.routers.feedback_router        import router as feedback_router
-from backend.demo1.routers.summary_router         import router as summary_router
-from backend.demo1.routers.nlp_router             import router as nlp_router
 from backend.demo1.routers.calendar_router       import router as calendar_router
 from backend.demo1.routers.contacts_router       import router as contacts_router
 from backend.demo1.routers.chat_router            import router as chat_router
 from backend.demo1.routers.monitor_router         import router as monitor_router
-# from backend.demo1.risk_watcher                   import start_scheduler
-from backend.demo1.routers.reports_router        import router as reports_router
 from backend.demo1.routers.misc_routers import (
     exports_router, ai_config_router,
 )  # client_portal_router removed: canonical version imported from client_portal.py (line ~44); duplicate import here shadowed it, leaving the full portal unmounted
-from backend.demo1.kanban_router import router as kanban_router
-from backend.demo1.routers.approval_router import router as approval_router
 from backend.demo1.notifications_router import router as notifications_router
 
 # ── Phase 1: AI Infrastructure Modules ─────────────────────────────────────────
@@ -241,7 +226,6 @@ class APIKeyMiddleware(BaseHTTPMiddleware):
         request.state.client_id = request.headers.get("X-Client-ID", "")
         return await call_next(request)
 
-from backend.demo1.routers.workflows_router import router as workflows_router
 from backend.demo1.auth import require_admin as _require_admin
 from backend.demo1.auth import get_current_user as _get_current_user
 
@@ -396,14 +380,10 @@ app.include_router(module_pdf_router, prefix="/export", tags=["PDF Export"])
 app.include_router(audit_router, prefix="/audit", tags=["Audit Trail"])
 app.include_router(cases_router, prefix="/cases", tags=["Case Management"])
 # Litigation-only routers removed for VCFClaimsIQ:
-# app.include_router(matter_export_router, prefix="/export", tags=["Matter Exports"])
 app.include_router(redaction_router, prefix="/redact", tags=["Redaction"])
 app.include_router(messages_router, tags=["Message Parsers"])
 app.include_router(vcf_disbursements_router, tags=["VCF Disbursements"])
-# app.include_router(correspondence_router)  # legacy litigation correspondence
 app.include_router(feedback_router)
-# app.include_router(summary_router)        # litigation summary output
-# app.include_router(nlp_router)            # litigation entities/timeline
 app.include_router(chat_router)
 app.include_router(monitor_router)
 
@@ -412,23 +392,18 @@ _scheduler = None
 
 @app.on_event("shutdown")
 async def shutdown_event():
-    # if _scheduler:
-    #     _scheduler.shutdown(wait=False)
     pass
+
 app.include_router(calendar_router)
 app.include_router(calendar_sync_router, prefix="/calendar", tags=["Calendar Sync"])
 app.include_router(contacts_router)
-# app.include_router(reports_router)        # legacy litigation reports
 app.include_router(exports_router)
 app.include_router(ai_config_router)
 app.include_router(client_portal_router)
 app.include_router(email_router)
-# app.include_router(kanban_router)         # litigation workflow board
 app.include_router(notifications_router, prefix="", tags=["notifications"])
-# app.include_router(approval_router, prefix="/approvals", tags=["approvals"])  # litigation billing
 app.include_router(document_annotations_router, prefix="/documents", tags=["document-annotations"])
 app.include_router(esign_router, prefix="/esign", tags=["e-signature"])
-# app.include_router(workflows_router, tags=["workflows"])  # litigation workflow automation
 app.include_router(vcf_deadlines_router, tags=["VCF Deadlines"])
 app.include_router(vcf_account_router, prefix="/vcf", tags=["VCF Account Prep"])
 app.include_router(vcf_workflow_router, tags=["VCF Workflow"])
@@ -674,54 +649,6 @@ def history(
 ):
     results = query_analyses(sentiment=sentiment, keyword=keyword, limit=limit, firm_id=getattr(request.state, 'firm_id', 'default'))
     return {"count": len(results), "results": results}
-
-# disambiguate + coreference → routers/nlp_router.py
-
-@app.post("/entities/score")
-def entities_score(body: TextInput, request: Request):
-    """Extract and score entities with confidence and salience metrics."""
-    if not body.text or len(body.text.strip()) < 20:
-        raise HTTPException(status_code=400, detail="Text too short")
-    
-    firm_id = getattr(request.state, 'firm_id', 'default')
-    # Use Claude for initial extraction then score
-    result = run_analysis(body.text, firm_id=firm_id)
-    entities = result.get("entities", [])
-    scored   = score_entities(body.text, entities)
-    summary  = get_entity_summary(scored)
-    
-    return {
-        "entities": scored,
-        "summary":  summary,
-        "text_preview": body.text[:100]
-    }
-
-# summary/score → routers/summary_router.py
-
-@app.post("/summary/score/auto")
-def summary_score_auto(body: TextInput, request: Request):
-    """
-    Analyze text, generate summary, then immediately score it.
-    One endpoint that does the full pipeline.
-    """
-    if not body.text or len(body.text.strip()) < 20:
-        raise HTTPException(status_code=400, detail="Text too short")
-
-    firm_id = getattr(request.state, 'firm_id', 'default')
-    # Run full analysis to get the summary
-    result  = run_analysis(body.text, firm_id=firm_id)
-    summary = result.get("summary", "")
-
-    if not summary:
-        raise HTTPException(status_code=500, detail="No summary generated")
-
-    # Score the summary
-    score          = score_summary(body.text, summary)
-    result["summary_score"] = score
-    return result
-
-# languages + multilingual + detect → routers/nlp_router.py
-
 
 
 # ── Feature 26: Legal Entity Extraction ──────────────────────────────────────

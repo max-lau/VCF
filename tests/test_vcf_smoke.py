@@ -4,6 +4,8 @@ test_vcf_smoke.py - End-to-end smoke tests for VCFClaimsIQ core flows.
 Run with the backend server on http://127.0.0.1:5003:
     venv/Scripts/python -m pytest tests/test_vcf_smoke.py -v
 """
+import hashlib
+import json
 import os
 import time
 import pytest
@@ -12,6 +14,11 @@ from dotenv import load_dotenv
 
 _HERE = os.path.dirname(os.path.abspath(__file__))
 load_dotenv(os.path.join(_HERE, "..", ".env"))
+
+# Light-weight DB access for fixtures that bypass the OCR pipeline.
+import backend.demo1.pg as _pg
+_pg.init_pool()
+from backend.demo1.pg import get_conn
 
 BASE    = "http://127.0.0.1:5003"
 API_KEY = os.environ.get("PARAIQ_API_KEY", "")
@@ -169,3 +176,132 @@ class TestVCFHealth:
         assert r.status_code == 200
         data = r.json()
         assert data.get("status") == "ok"
+
+
+class TestVCFIntakeToPrepFlow:
+    """OCR intake scan → /vcf/from-scan → prep sheet → status sync."""
+
+    def test_scan_bridges_to_prep_sheet(self, admin_token):
+        # 1. Create a VCF case with identity signals the scanner would extract.
+        case_number = f"VCF-SCAN-{int(time.time())}"
+        r = requests.post(f"{BASE}/cases/", headers=_headers(admin_token), json={
+            "case_number": case_number,
+            "client_name": "Smoke Scan Client",
+            "client_email": "smokescan@test.internal",
+            "date_of_birth": "1960-04-15",
+            "ssn_last4": "9876",
+            "claim_stage": "intake",
+            "vcf_status": "pending",
+        })
+        assert r.status_code in (200, 201), f"Create case failed: {r.text}"
+        case = r.json()
+        case_id = case["case_id"]
+
+        # 2. Seed an intake_scans row with Vision-structured form_fields.
+        #    This bypasses the actual OCR/AI call while exercising the bridge code.
+        form_fields = {
+            "client_name": "Smoke Scan Client",
+            "date_of_birth": "1960-04-15",
+            "ssn_last4": "9876",
+            "phone": "718-555-0199",
+            "email": "smokescan@test.internal",
+            "address": "100 Test St, New York, NY",
+            "preferred_language": "English",
+            "exposure_location": "World Trade Center",
+            "presence_dates": "2001-09-11 to 2001-09-12",
+            "medical_conditions": ["asthma"],
+            "doc_type": "intake_form",
+            "name_order": "given_first",
+            "key_facts": ["Worked near WTC on 9/11."],
+        }
+        content_hash = hashlib.sha256(os.urandom(32)).hexdigest()
+        with get_conn("waw_vcf") as conn:
+            scan_row = conn.execute(
+                """INSERT INTO intake_scans
+                   (firm_id, filename, raw_text, confidence, ocr_engine, form_fields, content_hash)
+                   VALUES (%s,%s,%s,%s,%s,%s,%s) RETURNING id""",
+                ("waw_vcf", "smoke_intake.pdf", "Smoke Scan Client DOB 1960-04-15",
+                 0.95, "claude-vision", json.dumps(form_fields), content_hash),
+            ).fetchone()
+            scan_id = scan_row["id"]
+
+        try:
+            # 3. Bridge the scan to a ClientData payload.
+            r = requests.post(
+                f"{BASE}/vcf/from-scan/{scan_id}",
+                headers=_headers(admin_token),
+            )
+            assert r.status_code == 200, f"from-scan failed: {r.text}"
+            data = r.json()
+            assert data["success"] is True
+            assert data["source"] == "vision_form_fields"
+            client = data["client"]
+            assert client["first_name"] == "Smoke Scan"
+            assert client["last_name"] == "Client"
+            assert client["date_of_birth"] == "1960-04-15"
+
+            # 4. Create a VCF prep sheet from the bridged client data.
+            r = requests.post(
+                f"{BASE}/vcf/prep",
+                headers=_headers(admin_token),
+                json={
+                    "case_id": case_id,
+                    "client": client,
+                    "demo_mode": True,
+                },
+            )
+            assert r.status_code == 200, f"prep create failed: {r.text}"
+            prep = r.json()
+            assert prep["success"] is True
+            prep_id = prep["prep_id"]
+            assert prep["prep"]["account_information"]["email"].endswith("@wawvcf.com")
+
+            # 5. Mark the prep sheet as account-created and verify case sync.
+            r = requests.patch(
+                f"{BASE}/vcf/prep/{prep_id}/status",
+                headers=_headers(admin_token),
+                json={"status": "account_created", "vcf_username": "smoke.scan.client"},
+            )
+            assert r.status_code == 200, f"prep status update failed: {r.text}"
+            assert r.json()["status"] == "account_created"
+
+            r = requests.get(
+                f"{BASE}/vcf/cases/{case_id}/prep-status",
+                headers=_headers(admin_token),
+            )
+            assert r.status_code == 200, f"prep-status failed: {r.text}"
+            status_data = r.json()
+            assert status_data["status"] == "account_created"
+            assert status_data["case_vcf_account_created"] is True
+        finally:
+            # Best-effort cleanup so repeated runs stay tidy.
+            with get_conn("waw_vcf") as conn:
+                conn.execute("DELETE FROM vcf_account_prep WHERE firm_id=%s AND case_id=%s", ("waw_vcf", case_id))
+                conn.execute("DELETE FROM vcf_deadlines WHERE firm_id=%s AND case_id=%s", ("waw_vcf", case_id))
+                conn.execute("DELETE FROM case_notes WHERE firm_id=%s AND case_id=%s", ("waw_vcf", case_id))
+                conn.execute("DELETE FROM intake_scans WHERE firm_id=%s AND id=%s", ("waw_vcf", scan_id))
+                conn.execute("DELETE FROM cases WHERE firm_id=%s AND id=%s", ("waw_vcf", case_id))
+
+
+class TestVCFEmailEndpoints:
+    """Smoke checks for the email intake/OCR loop endpoints."""
+
+    def test_email_intake_list(self, admin_token):
+        r = requests.get(f"{BASE}/email/intake", headers=_headers(admin_token))
+        assert r.status_code == 200, f"email/intake failed: {r.text}"
+        data = r.json()
+        assert "items" in data
+        assert isinstance(data["items"], list)
+
+    def test_email_log_list(self, admin_token):
+        r = requests.get(f"{BASE}/email/log", headers=_headers(admin_token))
+        assert r.status_code == 200, f"email/log failed: {r.text}"
+        data = r.json()
+        assert "items" in data
+        assert isinstance(data["items"], list)
+
+    def test_email_poll_now_is_reachable(self, admin_token):
+        # Without a connected account this may report "no accounts", but it must
+        # not crash with a 500.
+        r = requests.post(f"{BASE}/email/poll-now", headers=_headers(admin_token))
+        assert r.status_code in (200, 202, 400, 404), f"poll-now crashed: {r.text}"

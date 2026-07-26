@@ -2,7 +2,6 @@
 import { ref, computed, onMounted, watch } from "vue"
 import { useRoute, useRouter } from 'vue-router'
 import axios from 'axios'
-import CaseKanban from '@/components/CaseKanban.vue'
 
 const route  = useRoute()
 const router = useRouter()
@@ -18,15 +17,10 @@ const notes       = ref([])
 const intakeScans = ref([])
 const loading     = ref(true)
 const activeTab   = ref('documents')
-const contacts       = ref([])
-const correspondence = ref([])
-const loadingMod     = ref(false)
-const timeline       = ref([])
-const intelligence   = ref({ signals: [] })
-const loadingTL      = ref(false)
-const loadingIntel   = ref(false)
-const modModal       = ref(false)
-const modForm        = ref({})
+const contacts        = ref([])
+const contactsLoading = ref(false)
+const contactModal    = ref(false)
+const contactForm     = ref({})
 const newNote     = ref('')
 const savingNote  = ref(false)
 
@@ -44,16 +38,12 @@ const TABS = [
   { key: 'documents',      label: 'Documents',      icon: '📄' },
   { key: 'intake-scans',   label: 'Intake Scans',   icon: '🔍' },
   { key: 'notes',          label: 'Notes',          icon: '📝' },
-  { key: 'intelligence',   label: 'Intelligence',   icon: '🧠' },
-  { key: 'timeline',       label: 'Timeline',       icon: '📅' },
   { key: 'contacts',       label: 'Contacts',       icon: '👤' },
-  { key: 'correspondence', label: 'Correspondence', icon: '✉️' },
   { key: 'deadlines',      label: 'Deadlines',      icon: '⏰' },
   { key: 'communications', label: 'Communications', icon: '💬' },
   { key: 'disbursements',  label: 'Disbursements',  icon: '💵' },
   { key: 'account-prep',   label: 'VCF Account',    icon: '🔐' },
   { key: 'stage-history',  label: 'Stage History',  icon: '📈' },
-  { key: 'kanban',         label: 'Workflow',       icon: '⚖️' },
 ]
 
 const PIPELINE_COLORS = {
@@ -83,61 +73,44 @@ async function fetchMatter() {
   }
 }
 
-const MOD_KEYS = ['contacts','correspondence']
-
 function switchTab(key) {
   activeTab.value = key
-  modModal.value  = false
-  if (key === 'timeline'      && !timeline.value.length)       fetchTimeline()
-  if (key === 'intelligence'  && !intelligence.value.signals?.length) fetchIntelligence()
   if (key === 'disbursements' && !disbursement.value)          fetchDisbursement()
   if (key === 'deadlines'     && !deadlines.value.length)      fetchDeadlines()
   if (key === 'communications' && !communications.value.length) fetchCommunications()
   if (key === 'stage-history' && !stageHistory.value.length)   fetchStageHistory()
   if (key === 'account-prep'  && !accountPrep.value)           fetchAccountPrep()
-  if (MOD_KEYS.includes(key)) fetchModule(key)
+  if (key === 'contacts'      && !contacts.value.length)       fetchContacts()
 }
 
-async function fetchModule(key) {
-  loadingMod.value = true
+async function fetchContacts() {
+  contactsLoading.value = true
   try {
     const id = caseId.value
-    const h  = { headers: authHdr() }
-    let data = []
-    if (key === 'contacts')       { const r = await axios.get(`/contacts/matter/${id}`, h); data = Array.isArray(r.data) ? r.data : (r.data.contacts || r.data.items || []) }
-    if (key === 'correspondence') { const r = await axios.get(`/correspondence/${id}`, h);  data = Array.isArray(r.data) ? r.data : (r.data.items || r.data.correspondence || []) }
-    if (key === 'contacts')       contacts.value = data
-    if (key === 'correspondence') correspondence.value = data
-  } catch(e) { console.error('fetchModule', key, e) } finally { loadingMod.value = false }
+    const { data } = await axios.get(`/contacts/matter/${id}`, { headers: authHdr() })
+    contacts.value = Array.isArray(data) ? data : (data.contacts || data.items || [])
+  } catch(e) { console.error('fetchContacts', e) }
+  finally { contactsLoading.value = false }
 }
 
-async function deleteModItem(key, id) {
-  if (!confirm('Delete this item?')) return
-  const urlMap = {
-    contacts:       `/contacts/${id}`,
-    correspondence: `/correspondence/${id}`,
-  }
-  try { await axios.delete(urlMap[key], { headers: authHdr() }) } catch(e) { console.error(e) }
-  fetchModule(key)
+async function deleteContact(id) {
+  if (!confirm('Delete this contact?')) return
+  try { await axios.delete(`/contacts/${id}`, { headers: authHdr() }) } catch(e) { console.error(e) }
+  fetchContacts()
 }
 
-function openAdd(defaults = {}) { modForm.value = { ...defaults }; modModal.value = true }
+function openAddContact(defaults = {}) { contactForm.value = { ...defaults }; contactModal.value = true }
 
-async function submitMod() {
-  const key = activeTab.value
-  const urlMap = {
-    contacts:       '/contacts/',
-    correspondence: '/correspondence/',
-  }
+async function submitContact() {
   const payload = {
-    ...modForm.value,
+    ...contactForm.value,
     matter_id: caseId.value,
     firm_id:   firmId(),
   }
   try {
-    await axios.post(urlMap[key], payload, { headers: authHdr() })
-    modModal.value = false
-    fetchModule(key)
+    await axios.post('/contacts/', payload, { headers: authHdr() })
+    contactModal.value = false
+    fetchContacts()
   } catch (e) { alert('Save failed: ' + (e?.response?.data?.detail || e.message)) }
 }
 
@@ -219,24 +192,6 @@ function fmtDateTime(d) {
 function fmtSize(b) {
   if (!b) return '—'
   return b < 1_048_576 ? (b/1024).toFixed(1)+' KB' : (b/1_048_576).toFixed(1)+' MB'
-}
-
-async function fetchTimeline() {
-  loadingTL.value = true
-  try {
-    const { data } = await axios.get(`/cases/${caseId.value}/timeline`, { headers: authHdr() })
-    timeline.value = data.timeline || []
-  } catch { timeline.value = [] }
-  finally { loadingTL.value = false }
-}
-
-async function fetchIntelligence() {
-  loadingIntel.value = true
-  try {
-    const { data } = await axios.get(`/cases/${caseId.value}/intelligence`, { headers: authHdr() })
-    intelligence.value = data
-  } catch { intelligence.value = { signals: [] } }
-  finally { loadingIntel.value = false }
 }
 
 onMounted(fetchMatter)
@@ -510,7 +465,6 @@ function fmtMoney(v) {
           </div>
         </div>
         <div class="case-header__actions">
-          <button class="btn-secondary" @click="router.push('/intelligence')">🧠 AI Analysis</button>
           <button class="btn-gold" @click="router.push('/intake')">↑ Upload</button>
         </div>
       </div>
@@ -545,7 +499,6 @@ function fmtMoney(v) {
           <span v-if="t.key==='intake-scans' && intakeScans.length" class="tab-count">{{ intakeScans.length }}</span>
           <span v-if="t.key==='notes' && notes.length" class="tab-count">{{ notes.length }}</span>
           <span v-if="t.key==='contacts' && contacts.length" class="tab-count">{{ contacts.length }}</span>
-          <span v-if="t.key==='correspondence' && correspondence.length" class="tab-count">{{ correspondence.length }}</span>
           <span v-if="t.key==='deadlines' && deadlines.length" class="tab-count">{{ deadlines.length }}</span>
           <span v-if="t.key==='communications' && communications.length" class="tab-count">{{ communications.length }}</span>
         </button>
@@ -588,11 +541,6 @@ function fmtMoney(v) {
             <option value="closed">Closed</option>
           </select>
         </div>
-      </div>
-
-      <!-- Kanban -->
-      <div v-else-if="activeTab === 'kanban'">
-        <CaseKanban :case-id="caseId" />
       </div>
 
       <!-- Disbursements -->
@@ -838,73 +786,13 @@ function fmtMoney(v) {
         </div>
       </div>
 
-      <!-- Intelligence -->
-      <div v-else-if="activeTab === 'intelligence'" class="intel-pane">
-        <div v-if="loadingIntel" class="state-msg">Loading intelligence…</div>
-        <template v-else>
-          <div class="tab-toolbar">
-            <span class="dim sm">{{ intelligence.signals?.length || 0 }} signal{{ intelligence.signals?.length !== 1 ? 's' : '' }}</span>
-            <button class="btn-gold sm" @click="fetchIntelligence">↻ Refresh</button>
-          </div>
-          <div v-if="!intelligence.signals?.length" class="empty-tab">
-            <div class="empty-tab__icon">🧠</div>
-            <div class="empty-tab__title">No signals yet</div>
-            <div class="empty-tab__sub dim sm">Upload and extract documents to generate AI insights.</div>
-          </div>
-          <div v-else class="signal-list">
-            <div v-for="(sig, i) in intelligence.signals" :key="i"
-                 class="signal-card" :class="'signal-card--' + sig.severity">
-              <div class="signal-card__header">
-                <span class="sev-badge" :class="'sev-badge--' + sig.severity">{{ sig.severity }}</span>
-                <span v-if="sig.ai" class="ai-badge">✦ AI</span>
-                <span class="signal-card__title">{{ sig.title }}</span>
-              </div>
-              <div class="signal-card__desc">{{ sig.description }}</div>
-            </div>
-          </div>
-        </template>
-      </div>
-
-      <!-- Timeline -->
-      <div v-else-if="activeTab === 'timeline'" class="tl-pane">
-        <div v-if="loadingTL" class="state-msg">Loading timeline…</div>
-        <template v-else>
-          <div class="tab-toolbar">
-            <span class="dim sm">{{ timeline.length }} event{{ timeline.length !== 1 ? 's' : '' }}</span>
-            <button class="btn-gold sm" @click="fetchTimeline">↻ Refresh</button>
-          </div>
-          <div v-if="!timeline.length" class="empty-tab">
-            <div class="empty-tab__icon">📅</div>
-            <div class="empty-tab__title">No timeline events yet</div>
-            <div class="empty-tab__sub dim sm">Extract text from documents to populate the timeline.</div>
-          </div>
-          <div v-else class="tl-list">
-            <div v-for="(ev, i) in timeline" :key="i" class="tl-item">
-              <div class="tl-item__spine">
-                <div class="tl-item__dot" :class="'dot-' + (ev.significance || 'low')"></div>
-                <div v-if="i < timeline.length - 1" class="tl-item__line"></div>
-              </div>
-              <div class="tl-item__body">
-                <div class="tl-item__date dim sm">{{ ev.date }}</div>
-                <div class="tl-item__event">{{ ev.event || ev.context }}</div>
-                <div class="tl-item__meta">
-                  <span v-if="ev.source_doc" class="dim sm">📄 {{ ev.source_doc }}</span>
-                  <span v-if="ev.parties?.length" class="dim sm"> · {{ ev.parties.join(', ') }}</span>
-                  <span v-if="ev.significance" class="sig-chip" :class="'sig-chip--' + ev.significance">{{ ev.significance }}</span>
-                </div>
-              </div>
-            </div>
-          </div>
-        </template>
-      </div>
-
       <!-- Contacts -->
       <div v-else-if="activeTab === 'contacts'" class="mod-pane">
         <div class="tab-toolbar">
           <span class="dim sm">{{ contacts.length }} contact{{ contacts.length !== 1 ? 's' : '' }}</span>
-          <button class="btn-gold sm" @click="openAdd({role:'VCF Claimant'})">+ Add Contact</button>
+          <button class="btn-gold sm" @click="openAddContact({role:'VCF Claimant'})">+ Add Contact</button>
         </div>
-        <div v-if="loadingMod" class="state-msg">Loading…</div>
+        <div v-if="contactsLoading" class="state-msg">Loading…</div>
         <div v-else-if="!contacts.length" class="empty-tab"><div class="empty-tab__icon">👤</div><div class="empty-tab__title">No contacts yet</div></div>
         <div v-else class="table-wrap">
           <table class="piq-table">
@@ -916,31 +804,7 @@ function fmtMoney(v) {
                 <td class="dim">{{ c.organization || '—' }}</td>
                 <td class="dim">{{ c.email || '—' }}</td>
                 <td class="dim">{{ c.phone || '—' }}</td>
-                <td><button class="del-btn" @click="deleteModItem('contacts', c.id)">✕</button></td>
-              </tr>
-            </tbody>
-          </table>
-        </div>
-      </div>
-
-      <!-- Correspondence -->
-      <div v-else-if="activeTab === 'correspondence'" class="mod-pane">
-        <div class="tab-toolbar">
-          <span class="dim sm">{{ correspondence.length }} item{{ correspondence.length !== 1 ? 's' : '' }}</span>
-          <button class="btn-gold sm" @click="openAdd({direction:'outbound'})">+ Add</button>
-        </div>
-        <div v-if="loadingMod" class="state-msg">Loading…</div>
-        <div v-else-if="!correspondence.length" class="empty-tab"><div class="empty-tab__icon">✉️</div><div class="empty-tab__title">No correspondence yet</div></div>
-        <div v-else class="table-wrap">
-          <table class="piq-table">
-            <thead><tr><th>Subject</th><th>Direction</th><th>Counterparty</th><th>Date</th><th></th></tr></thead>
-            <tbody>
-              <tr v-for="c in correspondence" :key="c.id">
-                <td class="doc-name">{{ c.subject || '—' }}</td>
-                <td><span class="type-pill" :class="c.direction==='inbound'?'pill-in':'pill-out'">{{ c.direction }}</span></td>
-                <td class="dim">{{ c.counterparty || '—' }}</td>
-                <td class="dim nowrap">{{ c.date ? fmtDate(c.date) : '—' }}</td>
-                <td><button class="del-btn" @click="deleteModItem('correspondence', c.id)">✕</button></td>
+                <td><button class="del-btn" @click="deleteContact(c.id)">✕</button></td>
               </tr>
             </tbody>
           </table>
@@ -949,37 +813,24 @@ function fmtMoney(v) {
 
     </template>
 
-    <!-- ── Add Modal (shared) ── -->
+    <!-- ── Add Contact Modal ── -->
     <Teleport to="body">
-      <div v-if="modModal" class="mod-overlay" @click.self="modModal=false">
+      <div v-if="contactModal" class="mod-overlay" @click.self="contactModal=false">
         <div class="mod-modal">
           <div class="mod-modal__header">
-            <span>Add {{ activeTab.charAt(0).toUpperCase() + activeTab.slice(1) }}</span>
-            <button class="mod-modal__close" @click="modModal=false">✕</button>
+            <span>Add Contact</span>
+            <button class="mod-modal__close" @click="contactModal=false">✕</button>
           </div>
           <div class="mod-modal__body">
-
-            <template v-if="activeTab==='contacts'">
-              <div class="field"><label class="field__label">Name *</label><input v-model="modForm.name" class="piq-input w100" placeholder="Jane Smith" /></div>
-              <div class="field"><label class="field__label">Role</label><input v-model="modForm.role" class="piq-input w100" placeholder="VCF Claimant" /></div>
-              <div class="field"><label class="field__label">Organization</label><input v-model="modForm.organization" class="piq-input w100" /></div>
-              <div class="field"><label class="field__label">Email</label><input v-model="modForm.email" class="piq-input w100" type="email" /></div>
-              <div class="field"><label class="field__label">Phone</label><input v-model="modForm.phone" class="piq-input w100" /></div>
-            </template>
-
-            <template v-else-if="activeTab==='correspondence'">
-              <div class="field"><label class="field__label">Subject *</label><input v-model="modForm.subject" class="piq-input w100" /></div>
-              <div class="field"><label class="field__label">Direction</label>
-                <select v-model="modForm.direction" class="piq-input w100"><option value="outbound">Outbound</option><option value="inbound">Inbound</option></select>
-              </div>
-              <div class="field"><label class="field__label">Counterparty</label><input v-model="modForm.counterparty" class="piq-input w100" /></div>
-              <div class="field"><label class="field__label">Body</label><textarea v-model="modForm.body" class="note-input w100" rows="3"></textarea></div>
-            </template>
-
+            <div class="field"><label class="field__label">Name *</label><input v-model="contactForm.name" class="piq-input w100" placeholder="Jane Smith" /></div>
+            <div class="field"><label class="field__label">Role</label><input v-model="contactForm.role" class="piq-input w100" placeholder="VCF Claimant" /></div>
+            <div class="field"><label class="field__label">Organization</label><input v-model="contactForm.organization" class="piq-input w100" /></div>
+            <div class="field"><label class="field__label">Email</label><input v-model="contactForm.email" class="piq-input w100" type="email" /></div>
+            <div class="field"><label class="field__label">Phone</label><input v-model="contactForm.phone" class="piq-input w100" /></div>
           </div>
           <div class="mod-modal__footer">
-            <button class="btn-secondary" @click="modModal=false">Cancel</button>
-            <button class="btn-gold" @click="submitMod">Save</button>
+            <button class="btn-secondary" @click="contactModal=false">Cancel</button>
+            <button class="btn-gold" @click="submitContact">Save</button>
           </div>
         </div>
       </div>
@@ -1101,51 +952,6 @@ function fmtMoney(v) {
 .mod-modal__footer { border-top: 1px solid var(--border); display: flex; gap: 0.5rem; justify-content: flex-end; padding: 1rem 1.25rem; }
 .field { display: flex; flex-direction: column; gap: 0.3rem; }
 
-
-/* Intelligence signals */
-.intel-pane { }
-.signal-list { display: flex; flex-direction: column; gap: 0.75rem; }
-.signal-card { border-radius: 8px; border: 1px solid var(--border); padding: 1rem 1.1rem; }
-.signal-card--critical { border-left: 3px solid #fc8181; background: rgba(252,129,129,.04); }
-.signal-card--warning  { border-left: 3px solid #ecc94b; background: rgba(236,201,75,.04); }
-.signal-card--info     { border-left: 3px solid #4a7cf7; background: rgba(74,124,247,.04); }
-.signal-card__header { align-items: center; display: flex; gap: 0.5rem; margin-bottom: 0.5rem; flex-wrap: wrap; }
-.signal-card__title  { color: var(--text-primary); font-size: 0.875rem; font-weight: 600; flex: 1; }
-.signal-card__desc   { color: var(--text-muted); font-size: 0.82rem; line-height: 1.6; }
-.sev-badge { border-radius: 3px; font-size: 0.65rem; font-weight: 700; letter-spacing: .05em; padding: 0.15rem 0.45rem; text-transform: uppercase; }
-.sev-badge--critical { background: rgba(252,129,129,.18); color: #fc8181; }
-.sev-badge--warning  { background: rgba(236,201,75,.18);  color: #ecc94b; }
-.sev-badge--info     { background: rgba(74,124,247,.18);  color: #4a7cf7; }
-.ai-badge { background: rgba(159,122,234,.15); border-radius: 3px; color: #9f7aea; font-size: 0.65rem; font-weight: 700; padding: 0.15rem 0.4rem; }
-
-/* Timeline */
-.tl-pane { }
-.tl-list { display: flex; flex-direction: column; }
-.tl-item { display: flex; gap: 0.75rem; }
-.tl-item__spine { align-items: center; display: flex; flex-direction: column; flex-shrink: 0; width: 16px; }
-.tl-item__dot { border-radius: 50%; flex-shrink: 0; height: 12px; width: 12px; margin-top: 4px; }
-.dot-high   { background: #fc8181; box-shadow: 0 0 0 3px rgba(252,129,129,.2); }
-.dot-medium { background: #ecc94b; box-shadow: 0 0 0 3px rgba(236,201,75,.2); }
-.dot-low    { background: #718096; }
-.tl-item__line { background: var(--border); flex: 1; margin: 4px 0; width: 1px; min-height: 24px; }
-.tl-item__body { padding-bottom: 1.25rem; flex: 1; min-width: 0; }
-.tl-item__date  { margin-bottom: 0.2rem; }
-.tl-item__event { color: var(--text-primary); font-size: 0.875rem; line-height: 1.55; margin-bottom: 0.35rem; }
-.tl-item__meta  { align-items: center; display: flex; flex-wrap: wrap; gap: 0.4rem; }
-.sig-chip { border-radius: 3px; font-size: 0.65rem; font-weight: 700; padding: 0.1rem 0.4rem; text-transform: uppercase; }
-.sig-chip--high   { background: rgba(252,129,129,.15); color: #fc8181; }
-.sig-chip--medium { background: rgba(236,201,75,.15);  color: #ecc94b; }
-.sig-chip--low    { background: rgba(113,128,150,.15); color: #718096; }
-.binder-type--email    { background: #1a3a5c; color: #7ec8e3; }
-.binder-type--upload   { background: #2a2a1a; color: #c8b96e; }
-.binder-link           { color: var(--gold, #c9a84c); text-decoration: none; font-weight: 500; }
-.binder-link:hover     { text-decoration: underline; }
-.binder-type--ai_draft { background: #1a2a1a; color: #7ec87e; }
-.binder-type--research { background: #2a1a2a; color: #c87ec8; }
-.score-pill            { padding: 2px 7px; border-radius: 10px; font-size: 11px; font-weight: 600; }
-.score-pill--high      { background: #1a3a1a; color: #7ec87e; }
-.score-pill--mid       { background: #3a2a1a; color: #c8a06e; }
-.empty-tab__sub        { font-size: 12px; color: var(--dim); margin-top: 4px; }
 
 /* ── Docketing ─────────────────────────────────────────── */
 .dock-modal-overlay    { position:fixed;inset:0;background:rgba(0,0,0,.85);z-index:1000;display:flex;align-items:center;justify-content:center;backdrop-filter:blur(4px); }
