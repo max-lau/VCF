@@ -801,12 +801,16 @@ def case_wall(case_id: int, request: Request):
             case = case_rows[0]
 
             items.append({
-                "date": str(case["filing_date"]) if case["filing_date"] else str(case["created_at"]),
+                "date": str(case["created_at"]),
                 "type": "case_opened",
-                "title": f"Case opened — {case['case_number']}",
-                "body": (f"Client: {case['client_name']} | Court: {case['court'] or 'TBD'} | "
-                         f"Judge: {case['judge'] or 'TBD'} | Matter: {case['matter_number'] or '—'}"),
-                "meta": {"risk": case["risk_level"], "status": case["status"]}
+                "title": f"Claim opened — {case['case_number']}",
+                "body": (f"Client: {case['client_name']} | Stage: {case['claim_stage'] or 'intake'} | "
+                         f"VCF status: {case['vcf_status'] or 'pending'}"),
+                "meta": {
+                    "claim_stage": case["claim_stage"],
+                    "vcf_status": case["vcf_status"],
+                    "status": case["status"],
+                }
             })
 
             # ── Documents ─────────────────────────────────────────────
@@ -858,19 +862,55 @@ def case_wall(case_id: int, request: Request):
                     "meta": {"pinned": bool(note["pinned"])}
                 })
 
-            # ── AI Briefs ─────────────────────────────────────────────
-            briefs = conn.execute("""
-                SELECT generated_at, brief_json FROM case_briefs
-                WHERE case_id=%s ORDER BY generated_at ASC
-            """, (case_id,)).fetchall()
+            # ── VCF deadlines ─────────────────────────────────────────
+            deadlines = conn.execute("""
+                SELECT id, deadline_type, due_date, status, description
+                FROM vcf_deadlines
+                WHERE case_id=%s AND firm_id=%s
+                ORDER BY due_date ASC
+            """, (case_id, firm_id)).fetchall()
 
-            for brief in briefs:
+            for dl in deadlines:
                 items.append({
-                    "date": str(brief["generated_at"]),
-                    "type": "brief",
-                    "title": "AI Case Brief generated",
-                    "body": "Full case analysis brief produced by Claude. View in Overview tab.",
-                    "meta": {}
+                    "date": str(dl["due_date"]),
+                    "type": "deadline",
+                    "title": f"Deadline — {dl['deadline_type']}",
+                    "body": dl["description"] or f"Status: {dl['status']}",
+                    "meta": {"deadline_id": dl["id"], "status": dl["status"]}
+                })
+
+            # ── Communications ────────────────────────────────────────
+            comms = conn.execute("""
+                SELECT id, created_at, direction, channel, party_type, party_name, subject, body
+                FROM communications
+                WHERE case_id=%s AND firm_id=%s
+                ORDER BY created_at ASC
+            """, (case_id, firm_id)).fetchall()
+
+            for comm in comms:
+                items.append({
+                    "date": str(comm["created_at"]),
+                    "type": "communication",
+                    "title": f"{comm['direction']} {comm['channel']} — {comm['party_type']}",
+                    "body": comm["subject"] or comm["body"] or f"From/to {comm['party_name']}",
+                    "meta": {"communication_id": comm["id"], "channel": comm["channel"]}
+                })
+
+            # ── VCF account prep sheets ─────────────────────────────────
+            preps = conn.execute("""
+                SELECT id, client_name, status, created_at, updated_at
+                FROM vcf_account_prep
+                WHERE case_id=%s AND firm_id=%s
+                ORDER BY updated_at DESC
+            """, (case_id, firm_id)).fetchall()
+
+            for prep in preps:
+                items.append({
+                    "date": str(prep["updated_at"]),
+                    "type": "vcf_prep",
+                    "title": f"VCF prep sheet — {prep['status']}",
+                    "body": f"Client: {prep['client_name'] or case['client_name']}",
+                    "meta": {"prep_id": prep["id"], "status": prep["status"]}
                 })
 
     except Exception as e:
@@ -905,36 +945,51 @@ def case_intelligence(case_id: int, request: Request):
                 return {"signals": [], "error": "Case not found"}
             case = case_rows[0]
 
-            filing_date_str = str(case["filing_date"]) if case["filing_date"] else None
             case_number     = case["case_number"]
             client_name     = case["client_name"]
             description     = case["description"] or ""
+            claim_stage     = case["claim_stage"] or "intake"
+            vcf_status      = case["vcf_status"] or "pending"
 
-            # ── 2. Deadline signal (jurisdiction-aware answer window) ───
-            court_str = case["court"] or ""
-            answer_days, rule_note = get_answer_days(court_str)
-            if filing_date_str:
-                try:
-                    fd = datetime.strptime(filing_date_str[:10], "%Y-%m-%d").date()
-                    answer_dl = fd + timedelta(days=answer_days)
-                    diff = (answer_dl - today).days
-                    if 0 <= diff <= answer_days:
-                        sev = "critical" if diff <= 7 else "warning" if diff <= 14 else "watch"
-                        signals.append({
-                            "severity": sev,
-                            "title": f"Answer deadline in {diff} day{'s' if diff!=1 else ''} — {answer_dl.strftime('%B %d, %Y')}",
-                            "description": f"{rule_note} closes on {answer_dl.strftime('%B %d, %Y')} based on filing date {filing_date_str[:10]}. Immediate action may be required."
-                        })
-                    elif diff < 0:
-                        signals.append({
-                            "severity": "critical",
-                            "title": f"Answer deadline may have passed ({answer_dl.strftime('%B %d, %Y')})",
-                            "description": f"{rule_note} based on filing date appears to have elapsed. Verify current status with the court immediately."
-                        })
-                except (ValueError, TypeError) as e:
-                    logger.debug(f"[main] answer deadline date parse failed: {e}")
+            # ── 2. VCF account readiness ───────────────────────────────
+            if not case.get("vcf_account_created"):
+                signals.append({
+                    "severity": "warning",
+                    "title": "VCF.gov account not yet created",
+                    "description": "Generate a VCF Account Prep sheet and register the claimant on VCF.gov."
+                })
 
-            # ── 3. Dates in documents ──────────────────────────────────
+            if not case.get("wtc_health_program"):
+                signals.append({
+                    "severity": "info",
+                    "title": "WTC Health Program registration not confirmed",
+                    "description": "Confirm the claimant is enrolled in the WTC Health Program for certified-condition coverage."
+                })
+
+            if (case.get("presence_proof_status") or "not_started") in ("not_started", "missing"):
+                signals.append({
+                    "severity": "warning",
+                    "title": "Presence proof still needed",
+                    "description": "Collect documents proving presence in the NYC exposure zone during the eligible period."
+                })
+
+            # ── 3. Upcoming VCF deadlines ──────────────────────────────
+            deadline_rows = conn.execute(
+                """SELECT deadline_type, due_date, status FROM vcf_deadlines
+                   WHERE case_id=%s AND firm_id=%s AND status IN ('pending','overdue')
+                   ORDER BY due_date ASC LIMIT 5""",
+                (case_id, firm_id)
+            ).fetchall()
+            for dl in deadline_rows:
+                diff = (dl["due_date"] - today).days
+                sev = "critical" if diff <= 3 else "warning" if diff <= 14 else "watch"
+                signals.append({
+                    "severity": sev,
+                    "title": f"VCF deadline '{dl['deadline_type']}' in {diff} day{'s' if diff != 1 else ''}",
+                    "description": f"Due {dl['due_date'].strftime('%B %d, %Y')}. Status: {dl['status']}."
+                })
+
+            # ── 4. Dates in documents ──────────────────────────────────
             docs = conn.execute(
                 "SELECT doc_text, document_name FROM case_documents WHERE case_id=%s AND doc_text IS NOT NULL AND doc_text!=''",
                 (case_id,)
@@ -957,23 +1012,8 @@ def case_intelligence(case_id: int, request: Request):
                 signals.append({
                     "severity": sev,
                     "title": f"Upcoming date detected: {dl.strftime('%B %d, %Y')} ({diff}d away)",
-                    "description": f"Found in document: {docname}. Review to confirm if this is a filing deadline, hearing date, or contractual milestone."
+                    "description": f"Found in document: {docname}. Review to confirm if this is a VCF response deadline, medical appointment, or other claim-relevant date."
                 })
-
-            # ── 4. Contradictions ──────────────────────────────────────
-            try:
-                row = conn.execute(
-                    "SELECT COUNT(*) as cnt FROM case_contradictions WHERE case_id=%s", (case_id,)
-                ).fetchone()
-                contr_count = row["cnt"] if row else 0
-                if contr_count > 0:
-                    signals.append({
-                        "severity": "warning",
-                        "title": f"{contr_count} contradiction{'s' if contr_count!=1 else ''} detected across documents",
-                        "description": "The AI found conflicting statements between linked documents. Open the Contradictions tab to review each conflict and assess impact on case strategy."
-                    })
-            except (psycopg2.Error, KeyError, ValueError) as e:
-                logger.debug(f"[main] contradiction count query failed: {e}")
 
             # ── 5. Document coverage ───────────────────────────────────
             doc_count  = len(docs)
@@ -983,45 +1023,30 @@ def case_intelligence(case_id: int, request: Request):
             if doc_count == 0:
                 signals.append({
                     "severity": "info",
-                    "title": "No documents linked to this case",
-                    "description": "Link documents from the Discovery queue to enable contradiction detection, timeline extraction, and deeper AI analysis."
+                    "title": "No documents linked to this claim",
+                    "description": "Upload or link intake forms, medical records, presence proof, and correspondence to build the claim file."
                 })
             elif doc_count == 1:
                 signals.append({
                     "severity": "info",
-                    "title": "Only 1 document linked — contradiction detection limited",
-                    "description": "Contradiction analysis requires at least 2 documents. Link additional filings, depositions, or contracts for full coverage."
+                    "title": "Only 1 document linked",
+                    "description": "A complete VCF claim typically requires intake form, medical records, presence proof, and supporting correspondence."
                 })
             if empty_docs:
                 names = ", ".join(empty_docs[:3]) + ("..." if len(empty_docs) > 3 else "")
                 signals.append({
                     "severity": "warning",
                     "title": f"{len(empty_docs)} document(s) not yet analyzed - text not extracted",
-                    "description": f"No readable text found in: {names}. Images and audio require OCR/transcription before AI analysis can run."
+                    "description": f"No readable text found in: {names}. Scanned images and PDFs may need OCR before data can be extracted."
                 })
             if rich_docs >= 2:
                 signals.append({
                     "severity": "info",
                     "title": f"{rich_docs} documents fully analyzed and indexed",
-                    "description": "All linked documents have been processed. Contradiction detection, timeline extraction, and AI brief generation are available."
+                    "description": "Linked documents have been processed and are available for review and VCF form fill-in."
                 })
 
-            # ── 6. Risk level ──────────────────────────────────────────
-            risk = case["risk_level"] or "unknown"
-            if risk == "high":
-                signals.append({
-                    "severity": "critical",
-                    "title": "Case flagged as HIGH RISK",
-                    "description": "Document analysis has identified high-risk indicators. Review the AI Case Brief for a full breakdown of risk factors."
-                })
-            elif risk == "unknown" and doc_count > 0:
-                signals.append({
-                    "severity": "info",
-                    "title": "Risk level not yet assessed",
-                    "description": "Generate an AI Case Brief to automatically score this case for risk based on all linked documents."
-                })
-
-            # ── 7. Claude AI Partner Signal ────────────────────────────
+            # ── 6. Claude AI Partner Signal ────────────────────────────
             rich_texts = []
             for doc in docs:
                 txt = (doc["doc_text"] or "").strip()
@@ -1031,12 +1056,12 @@ def case_intelligence(case_id: int, request: Request):
                 import json as _json
                 combined = "\n\n---\n\n".join(rich_texts)[:8000]
                 case_ctx = (f"Case: {case_number} | Client: {client_name} | "
-                            f"Court: {case['court'] or 'Unknown'} | Filed: {filing_date_str or 'Unknown'}")
+                            f"Stage: {claim_stage} | VCF status: {vcf_status}")
                 ai_prompt = (
-                    "You are a senior litigation partner reviewing a case file. "
-                    "Surface the 2-3 most critical things this attorney MUST know right now.\n\n"
-                    "Focus on: statute of limitations risks (calculate from dates), hidden obligations, "
-                    "jurisdictional issues, factual gaps, anything requiring immediate action.\n\n"
+                    "You are a VCF claims paralegal supervisor reviewing a claimant file. "
+                    "Surface the 2-3 most critical things the team MUST know right now.\n\n"
+                    "Focus on: missing eligibility evidence, approaching VCF deadlines, "
+                    "inconsistent medical history, gaps in presence proof, anything blocking submission.\n\n"
                     f"Case context: {case_ctx}\n\nDocuments:\n{combined}\n\n"
                     "Return ONLY a JSON array (no markdown) of 2-3 objects with keys: "
                     "severity (critical|warning|watch|info), title (max 12 words), description (2-3 sentences)."
