@@ -159,6 +159,26 @@ STATIC_EXTS = (".html", ".js", ".css", ".ico", ".png", ".svg", ".woff", ".woff2"
 # Internal machine-to-machine paths: static key valid ONLY here, ONLY from localhost.
 M2M_PREFIXES = ("/intake/scan", "/discovery/process/ocr/", "/media/transcribe/discovery/")
 
+# Exact Vue SPA routes and parameterized patterns that should be served as
+# index.html without a JWT. This replaces the broad "Accept: text/html" bypass
+# that allowed unauthenticated access to API endpoints such as /cases/{id}.
+_SPA_EXACT = {
+    "/", "/intake", "/matters", "/claims", "/vcf-account-prep", "/email-inbox",
+    "/documents", "/dashboard", "/admin", "/reports", "/communications",
+    "/correspondence", "/login", "/super-admin", "/profile", "/settings",
+}
+_SPA_PARAM_RE = re.compile(r"^/(matters|claims|vcf-account-prep|documents|reports|communications|correspondence)/[^/]+(/|$)")
+
+
+def _is_spa_navigation(path: str, method: str, accept: str) -> bool:
+    """True when a browser is loading a Vue Router route as HTML."""
+    if method != "GET" or "text/html" not in accept:
+        return False
+    if path in _SPA_EXACT:
+        return True
+    return bool(_SPA_PARAM_RE.match(path))
+
+
 class APIKeyMiddleware(BaseHTTPMiddleware):
     async def dispatch(self, request: Request, call_next):
         # Always allow OPTIONS (CORS preflight)
@@ -170,14 +190,13 @@ class APIKeyMiddleware(BaseHTTPMiddleware):
         if path.startswith("/api/"):
             path = path[4:]
             request.scope["path"] = path
-        # Allow exempt paths, static assets, and browser navigation (SPA HTML loads)
+        # Allow exempt paths, static assets, and Vue SPA navigation only.
         ext = os.path.splitext(path)[1].lower()
-        accepts_html = request.method == "GET" and "text/html" in request.headers.get("Accept", "")
         if (
             path in EXEMPT_PATHS
             or any(path.startswith(p) for p in EXEMPT_PREFIXES)
             or ext in STATIC_EXTS
-            or accepts_html
+            or _is_spa_navigation(path, request.method, request.headers.get("Accept", ""))
         ):
             return await call_next(request)
                 # Check key OR valid Bearer JWT
