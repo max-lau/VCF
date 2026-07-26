@@ -49,6 +49,7 @@ CLEARED = Path(os.environ.get(
 ))
 
 STRICT_VIRUS_SCAN = os.getenv("ATTACHMENT_STRICT_VIRUS_SCAN", "false").lower() == "true"
+EMAIL_OCR_ENABLED = os.getenv("EMAIL_OCR_ENABLED", "true").lower() != "false"
 
 # Allowed MIME types
 ALLOWED_MIMES = {
@@ -182,6 +183,18 @@ def _infer_doc_type(filename: str) -> str:
     }.get(ext, "other")
 
 
+def _mime_type_from_ext(filename: str) -> str:
+    ext = _ext(filename)
+    return {
+        ".pdf": "application/pdf",
+        ".png": "image/png",
+        ".jpg": "image/jpeg",
+        ".jpeg": "image/jpeg",
+        ".tiff": "image/tiff",
+        ".tif": "image/tiff",
+    }.get(ext, "application/octet-stream")
+
+
 def _process_single_file(src: Path, original_name: str) -> dict:
     """Validate + scan one file already in quarantine. Returns status dict."""
     result = {
@@ -238,6 +251,106 @@ def _process_single_file(src: Path, original_name: str) -> dict:
     shutil.move(str(src), str(cleared_path))
     result["status"] = "clean"
     result["cleared_path"] = str(cleared_path)
+    return result
+
+
+def _run_ocr_on_attachment(
+    firm_id: str,
+    doc_id: int,
+    filename: str,
+    file_bytes: bytes,
+    initial_case_id: Optional[int],
+    content_hash: str,
+    conn,
+) -> dict:
+    """Run OCR on an email attachment and auto-link it to a case by identity.
+
+    OCR failures are logged and swallowed so the document stays in the inbox.
+    Returns a small status dict for debugging/metrics.
+    """
+    from backend.demo1.ocr_intake import (
+        extract_text, clean_ocr_text, extract_form_fields,
+        pdf_to_image_pages, _extract_identity_signals, find_case_by_identity,
+    )
+
+    result = {
+        "ocr_done": False,
+        "case_id": initial_case_id,
+        "match_status": "matched" if initial_case_id else "unmatched",
+        "match_reason": None,
+        "error": None,
+    }
+    try:
+        mime = _mime_type_from_ext(filename)
+        if mime == "application/pdf":
+            pages = pdf_to_image_pages(file_bytes)
+        elif mime.startswith("image/"):
+            pages = file_bytes
+        else:
+            logger.info(f"[Vault OCR] Skipping OCR for non-image/PDF attachment: {filename}")
+            return result
+
+        ocr_result = extract_text(pages, lang="eng", engine="auto",
+                                  mime_type=mime, firm_id=firm_id)
+        text = clean_ocr_text(ocr_result.get("text", ""))
+        form_fields = ocr_result.get("form_fields") or extract_form_fields(text)
+        signals = _extract_identity_signals(form_fields)
+
+        matched_case_id = initial_case_id
+        match_status = "matched" if initial_case_id else "unmatched"
+        match_reason = "provided_case_id" if initial_case_id else None
+
+        if not matched_case_id and signals.get("name"):
+            found_case_id, found_status, found_reason = find_case_by_identity(firm_id, signals)
+            if found_case_id:
+                matched_case_id = found_case_id
+                match_status = found_status or "matched"
+                match_reason = found_reason
+
+        summary = ""
+        key_facts = form_fields.get("key_facts") or []
+        if key_facts:
+            summary = " ".join(str(k) for k in key_facts)[:1000]
+        elif text:
+            summary = text[:1000]
+
+        doc_type = _infer_doc_type(filename)
+        if form_fields.get("doc_type") and form_fields["doc_type"] != "other":
+            doc_type = form_fields["doc_type"]
+
+        identity_signals = {k: v for k, v in signals.items() if v}
+
+        conn.execute("""
+            UPDATE case_documents
+               SET case_id = COALESCE(%s, case_id),
+                   doc_text = %s,
+                   summary = %s,
+                   doc_type = %s,
+                   identity_signals = %s,
+                   match_status = %s,
+                   updated_at = NOW()
+             WHERE id = %s AND firm_id = %s
+        """, (
+            matched_case_id, text, summary, doc_type,
+            json.dumps(identity_signals), match_status, doc_id, firm_id,
+        ))
+
+        if matched_case_id and match_reason:
+            reason_text = f"Email attachment {filename} auto-linked to case via {match_reason}"
+            conn.execute("""
+                INSERT INTO case_notes (firm_id, case_id, note)
+                VALUES (%s, %s, %s)
+                ON CONFLICT DO NOTHING
+            """, (firm_id, matched_case_id, reason_text))
+
+        result["ocr_done"] = True
+        result["case_id"] = matched_case_id
+        result["match_status"] = match_status
+        result["match_reason"] = match_reason
+        logger.info(f"[Vault OCR] Processed attachment id={doc_id} case={matched_case_id} status={match_status}")
+    except Exception as e:
+        logger.warning(f"[Vault OCR] OCR failed for attachment {filename} (doc_id={doc_id}): {e}")
+        result["error"] = str(e)
     return result
 
 
@@ -331,7 +444,7 @@ def process_attachments(
             file_url = _upload_to_storage(file_bytes, firm_id, case_id, ext)
             f["file_url"] = file_url
 
-            conn.execute("""
+            cur = conn.execute("""
                 INSERT INTO case_documents
                     (firm_id, case_id, document_name, source, doc_text,
                      summary, doc_type, language, upload_date, file_url,
@@ -339,6 +452,7 @@ def process_attachments(
                 VALUES (%s, %s, %s, 'email_attachment', '', '', %s, 'en',
                         NOW(), %s, '{}', %s, %s)
                 ON CONFLICT DO NOTHING
+                RETURNING id
             """, (
                 firm_id,
                 case_id,
@@ -348,9 +462,18 @@ def process_attachments(
                 "matched" if case_id else "unmatched",
                 f["content_hash"],
             ))
-            logger.info(f"[Vault] Linked to case {case_id or 'unmatched'}: {f['original_name']}")
+            row = cur.fetchone()
+            doc_id = row["id"] if row else None
+            logger.info(f"[Vault] Linked to case {case_id or 'unmatched'}: {f['original_name']} doc_id={doc_id}")
+
+            if doc_id and EMAIL_OCR_ENABLED:
+                ocr_status = _run_ocr_on_attachment(
+                    firm_id, doc_id, f["original_name"], file_bytes,
+                    case_id, f["content_hash"], conn
+                )
+                f["ocr"] = ocr_status
         except Exception as e:
-            logger.error(f"[Vault] DB insert failed for {f['original_name']}: {e}")
+            logger.error(f"[Vault] DB insert/OCR failed for {f['original_name']}: {e}")
 
     logger.info(
         f"[Vault] {intake_id}: {summary['clean']} clean, "

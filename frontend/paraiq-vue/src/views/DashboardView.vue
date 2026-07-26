@@ -32,6 +32,33 @@
     <!-- Two-column widget row -->
     <div class="dashboard__widgets">
 
+      <!-- VCF Deadline Counts -->
+      <div class="widget">
+        <div class="widget__header">
+          <span class="widget__title">⏰ VCF Deadlines</span>
+          <RouterLink to="/vcf-reports/deadlines" class="widget__link">View all →</RouterLink>
+        </div>
+        <div v-if="vcfDeadlinesLoading" class="widget__loading">Loading…</div>
+        <div v-else class="vcf-deadline-counts">
+          <div class="vcf-count vcf-count--overdue">
+            <span class="vcf-count__value">{{ vcfDeadlineCounts.overdue }}</span>
+            <span class="vcf-count__label">Overdue</span>
+          </div>
+          <div class="vcf-count vcf-count--today">
+            <span class="vcf-count__value">{{ vcfDeadlineCounts.today }}</span>
+            <span class="vcf-count__label">Today</span>
+          </div>
+          <div class="vcf-count vcf-count--week">
+            <span class="vcf-count__value">{{ vcfDeadlineCounts.this_week }}</span>
+            <span class="vcf-count__label">This week</span>
+          </div>
+          <div class="vcf-count vcf-count--later">
+            <span class="vcf-count__value">{{ vcfDeadlineCounts.later }}</span>
+            <span class="vcf-count__label">Later</span>
+          </div>
+        </div>
+      </div>
+
       <!-- Upcoming Deadlines -->
       <div class="widget">
         <div class="widget__header">
@@ -278,6 +305,25 @@ function fmtDeadlineDate(d) {
   return dt.toLocaleDateString('en-US', { month: 'short', day: 'numeric' })
 }
 
+// ── VCF Deadline Counts ───────────────────────────────────────────────────
+const vcfDeadlinesLoading = ref(true)
+const vcfDeadlineCounts   = ref({ overdue: 0, today: 0, this_week: 0, later: 0 })
+
+async function loadVcfDeadlineCounts() {
+  vcfDeadlinesLoading.value = true
+  try {
+    const { data } = await client.get('/vcf/deadlines/dashboard', { _silent: true })
+    const counts = data.counts || data
+    vcfDeadlineCounts.value = {
+      overdue: counts.overdue ?? 0,
+      today: counts.today ?? 0,
+      this_week: counts.this_week ?? 0,
+      later: counts.later ?? 0,
+    }
+  } catch { vcfDeadlineCounts.value = { overdue: 0, today: 0, this_week: 0, later: 0 } }
+  finally { vcfDeadlinesLoading.value = false }
+}
+
 // ── Activity Feed ─────────────────────────────────────────────────────────
 const activityLoading = ref(true)
 const activityFeed    = ref([])
@@ -350,7 +396,7 @@ function fmtTime(ts) {
 }
 
 onMounted(async () => {
-  await Promise.all([loadStats(), loadDeadlines(), loadActivity(), loadHermes()])
+  await Promise.all([loadStats(), loadDeadlines(), loadVcfDeadlineCounts(), loadActivity(), loadHermes()])
 })
 
 // ── Module cards ──────────────────────────────────────────────────────────
@@ -486,6 +532,15 @@ const visibleCards = computed(() => ALL_CARDS.filter(c => !c.gate || g.value[c.g
   .dashboard__widgets { grid-template-columns: 1fr; }
   .widget--wide { grid-column: span 1; }
 }
+
+.vcf-deadline-counts { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+.vcf-count { background: var(--bg-overlay); border: 1px solid var(--border-subtle); border-radius: 8px; padding: 12px; text-align: center; }
+.vcf-count__value { display: block; font-family: var(--font-display); font-size: 24px; font-weight: 300; line-height: 1; margin-bottom: 4px; }
+.vcf-count__label { font-size: 10px; text-transform: uppercase; letter-spacing: 0.06em; color: var(--text-tertiary); }
+.vcf-count--overdue .vcf-count__value { color: #fc8181; }
+.vcf-count--today   .vcf-count__value { color: #ecc94b; }
+.vcf-count--week    .vcf-count__value { color: #48bb78; }
+.vcf-count--later   .vcf-count__value { color: var(--gold); }
 
 /* Automation Spec Widget */
 .autospec-table       { display: flex; flex-direction: column; gap: 4px; margin-top: 4px; }

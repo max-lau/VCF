@@ -424,24 +424,68 @@ def send_reply(
 # ── Manual poll (dev / smoke-test helper) ─────────────────────────────────────
 
 @router.post("/email/poll-now")
-def poll_email_now(
+async def poll_email_now(
     current_user=Depends(get_current_user),
     db: PgConn = Depends(db_dep),
 ):
-    """Trigger an immediate Gmail poll for the current user's connected account."""
+    """Trigger an immediate poll for the current user's first active Gmail or Outlook account."""
     account = _row(db.execute(
-        "SELECT * FROM attorney_email_accounts WHERE attorney_id=%s AND provider='gmail' AND is_active=TRUE ORDER BY created_at DESC LIMIT 1",
+        """SELECT * FROM attorney_email_accounts
+           WHERE attorney_id=%s AND is_active=TRUE
+           ORDER BY CASE provider WHEN 'gmail' THEN 0 ELSE 1 END, created_at DESC
+           LIMIT 1""",
         (current_user["id"],),
     ))
     if not account:
-        raise HTTPException(404, "No active Gmail account connected. Click + Gmail first.")
+        raise HTTPException(404, "No active Gmail or Outlook account connected.")
 
-    from .email_poller import poll_gmail_account
+    provider = account["provider"]
+    import asyncio
     from concurrent.futures import ThreadPoolExecutor
     try:
+        loop = asyncio.get_event_loop()
         with ThreadPoolExecutor(max_workers=1) as executor:
-            executor.submit(poll_gmail_account, account).result(timeout=120)
+            if provider == "gmail":
+                from .email_poller import poll_gmail_account
+                await loop.run_in_executor(executor, poll_gmail_account, account)
+            elif provider == "outlook":
+                from .outlook_poller import poll_outlook_account
+                await loop.run_in_executor(executor, poll_outlook_account, account)
+            else:
+                raise HTTPException(400, f"Unsupported provider: {provider}")
+    except HTTPException:
+        raise
     except Exception as e:
         logger.error(f"[email/poll-now] failed: {e}")
         raise HTTPException(500, f"Poll failed: {e}")
-    return {"status": "poll_triggered", "account": account["email_address"]}
+
+    # Update last_poll_at in firm_email_settings (best-effort)
+    try:
+        db.execute(
+            """INSERT INTO firm_email_settings (firm_id, updated_at)
+               VALUES (%s, NOW())
+               ON CONFLICT (firm_id) DO UPDATE SET updated_at = NOW()""",
+            (current_user.get("firm_id", "default"),)
+        )
+    except Exception as e:
+        logger.debug(f"[email/poll-now] could not update last_poll_at: {e}")
+
+    return {"status": "poll_triggered", "provider": provider, "account": account["email_address"]}
+
+
+@router.get("/email/poll-status")
+def get_poll_status(current_user=Depends(get_current_user), db: PgConn = Depends(db_dep)):
+    """Return last poll time and next scheduled interval."""
+    settings = _row(db.execute(
+        "SELECT * FROM firm_email_settings WHERE firm_id=%s",
+        (current_user.get("firm_id", "default"),)
+    ))
+    last_poll_at = settings.get("updated_at") if settings else None
+    interval_active = int(os.getenv("EMAIL_POLL_INTERVAL_ACTIVE", 300))
+    interval_quiet = int(os.getenv("EMAIL_POLL_INTERVAL_QUIET", 1800))
+    return {
+        "last_poll_at": last_poll_at.isoformat() if last_poll_at else None,
+        "next_poll_in_seconds": interval_active,
+        "interval_active_seconds": interval_active,
+        "interval_quiet_seconds": interval_quiet,
+    }

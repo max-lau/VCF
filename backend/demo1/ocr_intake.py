@@ -1161,6 +1161,28 @@ def document_inbox(
             if d.get(f) and isinstance(d[f], str):
                 try: d[f] = json.loads(d[f])
                 except (json.JSONDecodeError, TypeError): pass
+
+        signals = d.get("identity_signals") or {}
+        if isinstance(signals, str):
+            try: signals = json.loads(signals)
+            except (json.JSONDecodeError, TypeError): signals = {}
+        suggested_cases = []
+        if signals.get("name"):
+            case_id, _, reason = find_case_by_identity(firm_id, signals)
+            if case_id:
+                with get_conn(firm_id) as _conn:
+                    case_row = _conn.execute(
+                        "SELECT id, case_number, client_name FROM cases WHERE id = %s AND firm_id = %s AND deleted = FALSE",
+                        (case_id, firm_id)
+                    ).fetchone()
+                if case_row:
+                    suggested_cases.append({
+                        "case_id": case_row["id"],
+                        "case_number": case_row["case_number"],
+                        "client_name": case_row["client_name"],
+                        "reason": reason,
+                    })
+        d["suggested_cases"] = suggested_cases[:3]
         docs.append(d)
     return {"success": True, "count": len(docs), "documents": docs}
 
@@ -1207,6 +1229,58 @@ def assign_inbox_document(
 
     return {"success": True, "document_id": doc_id, "case_id": case_id,
             "case_number": case["case_number"], "match_status": "manual"}
+
+
+@router.post("/inbox/{doc_id}/auto-assign")
+def auto_assign_inbox_document(
+    doc_id: int,
+    request: Request,
+):
+    """Accept the top suggested case for an unmatched document."""
+    firm_id = getattr(request.state, "firm_id", "default")
+
+    with get_conn(firm_id) as conn:
+        doc = conn.execute(
+            "SELECT scan_id, identity_signals FROM case_documents WHERE id = %s AND firm_id = %s",
+            (doc_id, firm_id)
+        ).fetchone()
+        if not doc:
+            raise HTTPException(status_code=404, detail="Document not found")
+
+        signals = doc["identity_signals"] or {}
+        if isinstance(signals, str):
+            try: signals = json.loads(signals)
+            except (json.JSONDecodeError, TypeError): signals = {}
+
+        if not signals.get("name"):
+            raise HTTPException(status_code=400, detail="No identity signals to match")
+
+        case_id, _, reason = find_case_by_identity(firm_id, signals)
+        if not case_id:
+            raise HTTPException(status_code=404, detail="No matching case found")
+
+        case = conn.execute(
+            "SELECT id, case_number FROM cases WHERE id = %s AND firm_id = %s AND deleted = FALSE",
+            (case_id, firm_id)
+        ).fetchone()
+        if not case:
+            raise HTTPException(status_code=404, detail="Matching case not found")
+
+        conn.execute(
+            """UPDATE case_documents
+               SET case_id = %s, match_status = 'manual', updated_at = %s
+               WHERE id = %s""",
+            (case_id, datetime.now(timezone.utc).isoformat(), doc_id)
+        )
+        if doc["scan_id"]:
+            conn.execute(
+                "UPDATE intake_scans SET case_id = %s WHERE id = %s",
+                (case_id, doc["scan_id"])
+            )
+        conn.commit()
+
+    return {"success": True, "document_id": doc_id, "case_id": case_id,
+            "case_number": case["case_number"], "match_status": "manual", "reason": reason}
 
 
 @router.get("/supported-languages")

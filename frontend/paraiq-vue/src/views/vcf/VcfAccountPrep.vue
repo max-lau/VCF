@@ -120,14 +120,27 @@
     <!-- STEP 2 · Generate -->
     <section class="card">
       <h2 class="card__title">2 · Generate prep sheet</h2>
+      <div v-if="showSyncedBanner" class="banner banner--green">
+        VCF account already {{ prepStatus === 'verified' ? 'verified' : 'created' }}
+        <span v-if="caseVcfStatus">· case status: {{ caseVcfStatus }}</span>
+      </div>
       <label class="check">
         <input type="checkbox" v-model="demoMode" />
         Demo mode — synthesize security-question answers
         <span class="check__hint">(real clients: confirm answers with the client, then uncheck)</span>
       </label>
-      <button class="btn btn--gold" :disabled="busy || !client.first_name" @click="generate">
-        {{ busy === 'prep' ? 'Generating…' : 'Generate prep sheet' }}
-      </button>
+      <div class="generate-actions">
+        <button class="btn btn--gold" :disabled="isGenerateDisabled" @click="generate">
+          {{ busy === 'prep' ? 'Generating…' : 'Generate prep sheet' }}
+        </button>
+        <button
+          v-if="showSyncedBanner"
+          class="btn btn--ghost"
+          @click="createOverride = true"
+        >
+          Create new prep sheet
+        </button>
+      </div>
     </section>
 
     <!-- STEP 3 · Copy-paste sheet -->
@@ -171,6 +184,7 @@
 <script setup>
 import { computed, h, onMounted, reactive, ref, watch } from 'vue'
 import { useRoute } from 'vue-router'
+import apiClient from '@/api/client'
 
 /* Inline copy-row component (kept local; promote to components/ if reused) */
 const CopyRow = {
@@ -219,6 +233,10 @@ const extractWarnings = ref([])
 const prep = ref(null)
 const prepId = ref(null)
 const status = ref('')
+const prepStatus = ref(null)
+const caseVcfStatus = ref(null)
+const caseVcfAccountCreated = ref(false)
+const createOverride = ref(false)
 const copied = reactive(new Set())
 const nameOrder = ref('given_first')
 
@@ -297,6 +315,16 @@ const clientFields = [
 const route = useRoute()
 const caseId = computed(() => route.query.case_id ? Number(route.query.case_id) : null)
 
+const isGenerateDisabled = computed(() => {
+  if (busy.value) return true
+  if (!client.value.first_name) return true
+  if (createOverride.value) return false
+  return prepStatus.value === 'account_created' || prepStatus.value === 'verified'
+})
+const showSyncedBanner = computed(() =>
+  !createOverride.value && (prepStatus.value === 'account_created' || prepStatus.value === 'verified')
+)
+
 async function loadCase() {
   const id = effectiveCaseId.value
   if (!id) return
@@ -320,6 +348,53 @@ async function loadCase() {
     client.value = mapped
   } catch (e) {
     console.error('[VcfAccountPrep] loadCase failed:', e)
+  }
+}
+
+async function loadPrepStatus() {
+  const id = caseId.value
+  if (!id) return
+  try {
+    const { data } = await apiClient.get(`/vcf/cases/${id}/prep-status`, { _silent: true })
+    prepStatus.value = data.status || null
+    prepId.value = data.prep_id || null
+    caseVcfStatus.value = data.case_vcf_status || null
+    caseVcfAccountCreated.value = !!data.case_vcf_account_created
+    if (data.status === 'ready') {
+      await loadExistingPrep(id)
+    }
+  } catch (e) {
+    console.error('[VcfAccountPrep] loadPrepStatus failed:', e)
+  }
+}
+
+async function loadExistingPrep(id) {
+  try {
+    const { data } = await apiClient.get('/vcf/prep', { params: { case_id: id }, _silent: true })
+    const preps = data.preps || []
+    const latest = preps[0]
+    if (latest?.id) {
+      prepId.value = latest.id
+      await loadPrepById(latest.id)
+    }
+  } catch (e) {
+    console.error('[VcfAccountPrep] loadExistingPrep failed:', e)
+  }
+}
+
+async function loadPrepById(id) {
+  try {
+    const { data } = await apiClient.get(`/vcf/prep/${id}`, { _silent: true })
+    if (!data.success) return
+    prepStatus.value = data.status || prepStatus.value
+    prep.value = {
+      account: data.prep.account_information,
+      security_questions: data.prep.security_questions,
+      demo_or_synth: data.demo_mode,
+    }
+    status.value = data.status || 'ready'
+  } catch (e) {
+    console.error('[VcfAccountPrep] loadPrepById failed:', e)
   }
 }
 
@@ -348,6 +423,7 @@ function applyNameOrder() {
 
 onMounted(() => {
   loadCase()
+  if (caseId.value) loadPrepStatus()
   if (!caseId.value) loadCases()
 })
 
@@ -480,6 +556,7 @@ async function useScan(id) {
 async function generate() {
   busy.value = 'prep'
   copied.clear()
+  createOverride.value = false
   try {
     const r = await api('/vcf/prep', {
       method: 'POST',
@@ -536,6 +613,9 @@ async function markCreated() {
       }),
     })
     status.value = 'account_created'
+    prepStatus.value = 'account_created'
+    caseVcfAccountCreated.value = true
+    caseVcfStatus.value = 'registered'
   } catch (e) {
     alert(`Status update failed: ${e.message || e}`)
   } finally { busy.value = '' }
@@ -585,6 +665,10 @@ async function markCreated() {
   border-radius: 8px; padding: 8px 12px; display: flex; gap: 8px; flex-wrap: wrap; }
 .banner { border: 1px solid rgba(230,90,90,.5); color: #e67a7a; font-size: 12px;
   border-radius: 8px; padding: 8px 12px; margin-bottom: 14px; letter-spacing: .04em; }
+.banner--green { border-color: rgba(62,207,142,.5); color: #3ecf8e; background: rgba(62,207,142,.08); }
+.generate-actions { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+.btn--ghost { background: transparent; border-color: var(--border-dim); color: var(--text-tertiary); }
+.btn--ghost:hover { border-color: var(--gold); color: var(--gold); }
 
 .sheet__head { display: flex; justify-content: space-between; align-items: baseline; }
 .progress { font-size: 12px; color: var(--gold); }

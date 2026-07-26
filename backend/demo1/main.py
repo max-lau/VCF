@@ -343,6 +343,30 @@ async def startup_event():
             _poller_tasks.add(task)
             task.add_done_callback(_poller_tasks.discard)
         app.state.poller_tasks = _poller_tasks
+
+        # 4. Daily VCF deadline notification scheduler (8 AM America/New_York)
+        async def _deadline_scheduler():
+            from datetime import datetime, time, timedelta
+            import pytz
+            tz = pytz.timezone("America/New_York")
+            while True:
+                now = datetime.now(tz)
+                target = datetime.combine(now.date(), time(8, 0), tzinfo=tz)
+                if now >= target:
+                    target += timedelta(days=1)
+                wait_seconds = (target - now).total_seconds()
+                logging.info(f"[Deadline Scheduler] Next run at {target.isoformat()} (in {wait_seconds:.0f}s)")
+                await asyncio.sleep(wait_seconds)
+                try:
+                    from backend.demo1.vcf_deadlines import notify_upcoming_deadlines
+                    await notify_upcoming_deadlines(days_ahead=7, firm_id=FIRM_ID)
+                    logging.info("[Deadline Scheduler] notify_upcoming_deadlines completed")
+                except Exception as exc:
+                    logging.warning(f"[Deadline Scheduler] notify_upcoming_deadlines failed: {exc}")
+
+        deadline_task = asyncio.create_task(_deadline_scheduler())
+        _poller_tasks.add(deadline_task)
+        deadline_task.add_done_callback(_poller_tasks.discard)
     # 3. Scheduler
     # global _scheduler
     # _scheduler = start_scheduler(app)

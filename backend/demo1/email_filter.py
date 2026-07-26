@@ -49,6 +49,8 @@ VCF_KEYWORDS = [
     "biopsy", "oncology", "treatment records", "disability",
     "claim", "claim number", "claimant", "exposure zone",
     "certified condition", "presence proof", "award determination",
+    "osimertinib", "tagrisso", "egfr", "biomarker",
+    "chemotherapy", "radiation", "immunotherapy", "genomic",
 ]
 
 # Medical/financial terms commonly found in intake attachments
@@ -58,6 +60,8 @@ MEDICAL_ATTACHMENT_TERMS = [
     "imaging", "ct", "mri", "x-ray", "xray", "pet", "ultrasound", "ekg",
     "prescription", "pharmacy", "medication", "treatment", "diagnosis",
     "statement", "invoice", "bill", "receipt", " medicare ", " medicaid ",
+    "osimertinib", "tagrisso", "egfr", "biomarker",
+    "chemotherapy", "radiation", "immunotherapy", "genomic",
 ]
 
 DEFAULT_TRUSTED_DOMAINS = [
@@ -207,6 +211,19 @@ class EmailFilterEngine:
         )
         entities["dates"] = dates[:10]
         if dates: score += 5
+
+        # Boost trusted medical/VCF senders with medical attachments to intake threshold.
+        domain = msg.from_address.split("@")[-1].lower() if "@" in msg.from_address else ""
+        is_trusted_sender = (
+            domain in self._client_domains or
+            any(domain == trusted or domain.endswith("." + trusted) for trusted in self._trusted_domains) or
+            any(re.search(pattern, domain) for pattern in TRUSTED_DOMAIN_PATTERNS)
+        )
+        has_medical_attachment = any(term in attachment_text for term in MEDICAL_ATTACHMENT_TERMS)
+        if is_trusted_sender and has_medical_attachment and score < 70:
+            score = 70
+            entities["vcf_keywords"].append("trusted_medical_sender_boost")
+
         return score, matched_case_id, entities
 
     def _stage3_spam_filter(self, msg: EmailMessage) -> tuple:

@@ -20,6 +20,10 @@ const filterFrom   = ref('')
 const connectingGmail   = ref(false)
 const connectingOutlook = ref(false)
 const disconnecting     = ref(null)
+const lastPollAt        = ref(null)
+const nextPollInSeconds = ref(0)
+const pollingNow        = ref(false)
+const runningOcr        = ref(false)
 
 const scoreColor = (score) => {
   if (score >= 70) return '#10B981'
@@ -44,6 +48,12 @@ const providerColor = (p) => p === 'gmail' ? '#EA4335' : '#0078D4'
 const providerBg    = (p) => p === 'gmail' ? '#2A0A0A' : '#0A1428'
 
 const fmtDate  = (d) => d ? new Date(d).toLocaleString('en-US', { month:'short', day:'numeric', hour:'2-digit', minute:'2-digit' }) : '—'
+const ocrStatusBadge = (s) => ({
+  linked:    { label:'Linked',    color:'#10B981', bg:'#052E20' },
+  matched:   { label:'Linked',    color:'#10B981', bg:'#052E20' },
+  unmatched: { label:'Unmatched', color:'#F59E0B', bg:'#2D1F06' },
+  error:     { label:'OCR Error', color:'#EF4444', bg:'#2A0A0A' },
+}[s] || { label: s || 'Unknown', color:'#64748B', bg:'#1E293B' })
 const fromName = (addr) => addr?.replace(/<.*>/, '').replace(/"/g, '').trim() || addr
 
 const displayItems = computed(() => {
@@ -51,6 +61,27 @@ const displayItems = computed(() => {
   if (activeTab.value === 'review')  return logItems.value.filter(i => i.routing_decision === 'review')
   if (activeTab.value === 'discard') return logItems.value.filter(i => i.routing_decision === 'discard')
   return logItems.value
+})
+
+const attachmentList = computed(() => {
+  if (!selectedItem.value) return []
+  const raw = selectedItem.value.attachments
+  if (Array.isArray(raw) && raw.length) {
+    return raw.map(a => ({
+      name: a.name || a.filename || a.original_name || 'Attachment',
+      status: (a.ocr_status || a.match_status || (a.case_id ? 'linked' : 'unmatched')).toLowerCase(),
+      caseId: a.case_id || a.caseId,
+      documentId: a.document_id || a.id,
+      error: a.error,
+    }))
+  }
+  return (selectedItem.value.attachment_names || []).map(name => ({
+    name,
+    status: selectedItem.value.case_id ? 'linked' : 'unmatched',
+    caseId: selectedItem.value.case_id,
+    documentId: null,
+    error: null,
+  }))
 })
 
 async function fetchAccounts() {
@@ -71,6 +102,34 @@ async function fetchLog() {
     const { data } = await client.get('/email/log?limit=100')
     logItems.value = data.items || []; logTotal.value = data.total || 0
   } catch { logItems.value = [] }
+}
+async function fetchPollStatus() {
+  try {
+    const { data } = await client.get('/email/poll-status', { _silent: true })
+    lastPollAt.value = data.last_poll_at || null
+    nextPollInSeconds.value = data.next_poll_in_seconds || 0
+  } catch {}
+}
+async function pollNow() {
+  pollingNow.value = true
+  try {
+    await client.post('/email/poll-now')
+    lastPollAt.value = new Date().toISOString()
+    await Promise.all([fetchIntake(), fetchLog(), fetchPollStatus()])
+  } catch (e) {
+    console.error('[EmailInbox] poll-now failed:', e)
+  } finally { pollingNow.value = false }
+}
+async function runOcr() {
+  if (!selectedItem.value?.id) return
+  runningOcr.value = true
+  try {
+    await client.post('/email/poll-now')
+    await fetchDetail(selectedItem.value.id)
+    await Promise.all([fetchIntake(), fetchLog()])
+  } catch (e) {
+    console.error('[EmailInbox] run OCR failed:', e)
+  } finally { runningOcr.value = false }
 }
 async function connectGmail() {
   connectingGmail.value = true
@@ -140,7 +199,7 @@ function cancelReply() {
 
 onMounted(async () => {
   await fetchAccounts()
-  await Promise.all([fetchIntake(), fetchLog()])
+  await Promise.all([fetchIntake(), fetchLog(), fetchPollStatus()])
 })
 
 const tabs = [
@@ -175,6 +234,16 @@ const tabs = [
             >✕</button>
           </div>
           <span v-if="!accounts.length" class="no-account">No email connected</span>
+        </div>
+        <!-- Poll now -->
+        <div class="poll-wrap">
+          <button class="btn-poll" @click="pollNow" :disabled="pollingNow">
+            {{ pollingNow ? '⟳ Polling…' : 'Poll now' }}
+          </button>
+          <span class="poll-status" :class="{ polling: pollingNow }">
+            <span class="poll-dot" :class="{ live: pollingNow }" />
+            {{ lastPollAt ? `Last polled ${fmtDate(lastPollAt)}` : 'Not polled yet' }}
+          </span>
         </div>
         <!-- Connect buttons -->
         <div class="connect-btns">
@@ -333,21 +402,36 @@ const tabs = [
         </div>
 
         <!-- Attachments -->
-        <div v-if="selectedItem.attachment_names?.length" class="detail-section">
-          <div class="section-label">Attachments ({{ selectedItem.attachment_names.length }})</div>
-          <div class="entity-chips">
-            <span v-for="name in selectedItem.attachment_names" :key="name" class="entity-chip case" title="Saved to case documents">
-              📎 {{ name }}
-            </span>
+        <div v-if="attachmentList.length" class="detail-section">
+          <div class="section-label">
+            Attachments ({{ attachmentList.length }})
+            <button class="btn-ocr" @click="runOcr" :disabled="runningOcr">
+              {{ runningOcr ? '⟳ Running OCR…' : 'Run OCR' }}
+            </button>
           </div>
-          <router-link
-            v-if="selectedItem.case_id"
-            :to="`/matters/${selectedItem.case_id}`"
-            class="bl-link"
-            style="margin-top:8px;display:inline-block;"
-          >
-            View in case binder →
-          </router-link>
+          <div class="attachment-list">
+            <div v-for="att in attachmentList" :key="att.name" class="attachment-row">
+              <div class="attachment-main">
+                <span class="attachment-name">📎 {{ att.name }}</span>
+                <span class="badge"
+                  :style="{ color: ocrStatusBadge(att.status).color, background: ocrStatusBadge(att.status).bg }">
+                  {{ ocrStatusBadge(att.status).label }}
+                </span>
+              </div>
+              <div v-if="att.error" class="attachment-error">{{ att.error }}</div>
+              <div class="attachment-links">
+                <router-link v-if="att.caseId" :to="`/matters/${att.caseId}`" class="bl-link">
+                  View case →
+                </router-link>
+                <router-link v-else-if="att.documentId" :to="`/document-inbox?highlight=${att.documentId}`" class="bl-link">
+                  Document inbox →
+                </router-link>
+                <router-link v-else to="/document-inbox" class="bl-link">
+                  Document inbox →
+                </router-link>
+              </div>
+            </div>
+          </div>
         </div>
 
         <!-- Reply compose panel -->
@@ -505,4 +589,25 @@ const tabs = [
 .toast-enter-from, .toast-leave-to { opacity: 0; transform: translateX(-50%) translateY(6px); }
 .bl-link { color: var(--gold, #d4af37); font-size: .8rem; text-decoration: none; }
 .bl-link:hover { text-decoration: underline; }
+
+.poll-wrap { display:flex; flex-direction:column; align-items:flex-end; gap:4px; }
+.btn-poll { background:#12151D; border:1px solid #3B82F6; color:#3B82F6; border-radius:6px; padding:7px 12px; font-size:11px; cursor:pointer; font-family:inherit; font-weight:700; }
+.btn-poll:hover:not(:disabled) { background:#1D3557; }
+.btn-poll:disabled { opacity:.5; cursor:not-allowed; }
+.poll-status { font-size:10px; color:#64748B; display:flex; align-items:center; gap:5px; }
+.poll-status.polling { color:#3B82F6; }
+.poll-dot { width:6px; height:6px; border-radius:50%; background:#64748B; }
+.poll-dot.live { background:#3B82F6; animation:pulse 1.2s infinite; }
+@keyframes pulse { 0%{opacity:1} 50%{opacity:.4} 100%{opacity:1} }
+
+.section-label { display:flex; justify-content:space-between; align-items:center; }
+.btn-ocr { background:#12151D; border:1px solid #8B5CF6; color:#8B5CF6; border-radius:4px; padding:3px 10px; font-size:10px; cursor:pointer; font-family:inherit; }
+.btn-ocr:hover:not(:disabled) { background:#1E1040; }
+.btn-ocr:disabled { opacity:.5; cursor:not-allowed; }
+.attachment-list { display:flex; flex-direction:column; gap:8px; }
+.attachment-row { background:#0B0E14; border:1px solid #1E2530; border-radius:6px; padding:10px 12px; }
+.attachment-main { display:flex; align-items:center; gap:10px; flex-wrap:wrap; }
+.attachment-name { font-size:11px; color:#94A3B8; }
+.attachment-error { font-size:10px; color:#EF4444; margin-top:6px; }
+.attachment-links { margin-top:6px; }
 </style>

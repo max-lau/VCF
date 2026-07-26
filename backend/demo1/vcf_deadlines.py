@@ -3,8 +3,11 @@ from pydantic import BaseModel
 from backend.demo1.pg import get_conn
 from backend.demo1.auth import get_current_firm_id
 from datetime import date, datetime, timedelta
+import logging
+import os
 
 router = APIRouter()
+logger = logging.getLogger(__name__)
 
 
 class DeadlineBody(BaseModel):
@@ -14,10 +17,35 @@ class DeadlineBody(BaseModel):
 
 
 def _send_deadline_reminder(firm_id: str, deadline: dict, days_left: int):
-    """Placeholder for notification channel (email/Slack/in-app)."""
-    # TODO: wire to notifications_router / email / Slack once channel is chosen.
-    print(f"[VCF deadline reminder] {days_left} days left: {deadline['deadline_type']} "
-          f"for claim #{deadline['case_number']} ({deadline['client_name']})")
+    """Create an in-app notification and optionally log an email alert."""
+    case_id = deadline["case_id"]
+    deadline_type = deadline["deadline_type"]
+    due_date = deadline["due_date"]
+    case_number = deadline.get("case_number", "Unknown")
+    client_name = deadline.get("client_name", "Unknown")
+
+    urgency = "overdue" if days_left < 0 else "today" if days_left == 0 else f"in {days_left} day{'s' if days_left != 1 else ''}"
+    title = f"VCF deadline {urgency}: {deadline_type}"
+    body = (f"{deadline_type} for {client_name} (claim #{case_number}) is due {urgency} "
+            f"({due_date}).")
+    link = f"/matters/{case_id}"
+
+    try:
+        with get_conn(firm_id) as conn:
+            conn.execute(
+                """INSERT INTO notifications (firm_id, type, title, body, link)
+                   VALUES (%s, %s, %s, %s, %s)""",
+                (firm_id, "vcf_deadline", title, body, link)
+            )
+    except Exception as e:
+        logger.warning(f"[VCF deadlines] Could not create in-app notification: {e}")
+
+    notify_email = os.getenv("VCF_DEADLINE_NOTIFY_EMAIL")
+    if notify_email:
+        logger.info(f"[VCF deadlines] Would email {notify_email}: {title} — {body}")
+
+    print(f"[VCF deadline reminder] {days_left} days left: {deadline_type} "
+          f"for claim #{case_number} ({client_name})")
 
 
 @router.post("/vcf/deadlines/notify", tags=["VCF Deadlines"])
@@ -128,5 +156,51 @@ async def create_case_deadline(
             return {"success": True, "deadline": dict(row)}
     except HTTPException:
         raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.get("/vcf/deadlines/dashboard", tags=["VCF Deadlines"])
+async def get_deadlines_dashboard(firm_id: str = Depends(get_current_firm_id)):
+    """Return VCF deadline counts by urgency."""
+    try:
+        with get_conn(firm_id) as conn:
+            today = date.today()
+            week_end = today + timedelta(days=7)
+
+            overdue = conn.execute(
+                """SELECT COUNT(*) AS n FROM vcf_deadlines
+                   WHERE firm_id = %s AND status = 'pending' AND due_date < %s""",
+                (firm_id, today)
+            ).fetchone()["n"]
+
+            today_count = conn.execute(
+                """SELECT COUNT(*) AS n FROM vcf_deadlines
+                   WHERE firm_id = %s AND status = 'pending' AND due_date = %s""",
+                (firm_id, today)
+            ).fetchone()["n"]
+
+            this_week = conn.execute(
+                """SELECT COUNT(*) AS n FROM vcf_deadlines
+                   WHERE firm_id = %s AND status = 'pending'
+                     AND due_date > %s AND due_date <= %s""",
+                (firm_id, today, week_end)
+            ).fetchone()["n"]
+
+            later = conn.execute(
+                """SELECT COUNT(*) AS n FROM vcf_deadlines
+                   WHERE firm_id = %s AND status = 'pending' AND due_date > %s""",
+                (firm_id, week_end)
+            ).fetchone()["n"]
+
+        return {
+            "success": True,
+            "counts": {
+                "overdue": overdue,
+                "today": today_count,
+                "this_week": this_week,
+                "later": later,
+            }
+        }
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))

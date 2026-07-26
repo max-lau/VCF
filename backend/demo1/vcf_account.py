@@ -40,7 +40,7 @@ import os
 import re
 import secrets
 import string
-from datetime import datetime, timezone
+from datetime import date, datetime, timedelta, timezone
 from typing import Optional
 
 from fastapi import APIRouter, HTTPException, Request
@@ -592,6 +592,15 @@ def list_preps(request: Request, case_id: Optional[int] = None, limit: int = 50)
     return {"success": True, "count": len(rows), "preps": [dict(r) for r in rows]}
 
 
+def _vcf_status_can_advance_to(current: str | None, target: str) -> bool:
+    """Only move cases.vcf_status forward if it is not already past target."""
+    if not current:
+        return True
+    order = {"pending": 0, "intake": 1, "registered": 2, "submitted": 3,
+             "under_review": 4, "award_determination": 5, "disbursed": 6, "closed": 7}
+    return order.get(current, 0) <= order.get(target, 0)
+
+
 @router.patch("/prep/{prep_id}/status")
 def update_status(prep_id: int, body: StatusUpdate, request: Request):
     allowed = {"draft", "ready", "account_created", "verified", "abandoned"}
@@ -600,11 +609,94 @@ def update_status(prep_id: int, body: StatusUpdate, request: Request):
     firm_id = getattr(request.state, "firm_id", "default")
     from backend.demo1.pg import get_conn
     with get_conn(firm_id) as conn:
+        prep = conn.execute(
+            "SELECT id, case_id, client_name, status FROM vcf_account_prep WHERE id=%s AND firm_id=%s",
+            (prep_id, firm_id),
+        ).fetchone()
+        if not prep:
+            raise HTTPException(404, "Prep sheet not found")
+
         conn.execute(
             """UPDATE vcf_account_prep
                SET status=%s, vcf_username=COALESCE(%s, vcf_username), updated_at=NOW()
                WHERE id=%s AND firm_id=%s""",
             (body.status, body.vcf_username, prep_id, firm_id),
         )
+
+        if body.status in {"account_created", "verified"} and prep["case_id"]:
+            case_id = prep["case_id"]
+            case = conn.execute(
+                "SELECT id, case_number, vcf_status FROM cases WHERE id=%s AND firm_id=%s AND deleted = FALSE",
+                (case_id, firm_id),
+            ).fetchone()
+            if case:
+                new_vcf_status = "registered"
+                if _vcf_status_can_advance_to(case.get("vcf_status"), new_vcf_status):
+                    vcf_status_value = new_vcf_status
+                else:
+                    vcf_status_value = case["vcf_status"]
+
+                conn.execute(
+                    """UPDATE cases
+                       SET vcf_account_created = TRUE,
+                           vcf_status = COALESCE(%s, vcf_status),
+                           updated_at = NOW()
+                       WHERE id=%s AND firm_id=%s""",
+                    (vcf_status_value, case_id, firm_id),
+                )
+
+                username = body.vcf_username or "(unknown)"
+                note = (
+                    f"VCF account marked {body.status} for {prep['client_name'] or 'claimant'} "
+                    f"(username: {username})."
+                )
+                conn.execute(
+                    "INSERT INTO case_notes (firm_id, case_id, note) VALUES (%s,%s,%s)",
+                    (firm_id, case_id, note),
+                )
+
+                due = datetime.now(timezone.utc).date() + timedelta(days=30)
+                conn.execute(
+                    """INSERT INTO vcf_deadlines
+                       (firm_id, case_id, deadline_type, due_date, status, description)
+                       VALUES (%s, %s, %s, %s, 'pending', %s)
+                       ON CONFLICT DO NOTHING""",
+                    (firm_id, case_id, "verify_portal_access", due,
+                     "Confirm claimant can log in to VCF portal within 30 days."),
+                )
+
         conn.commit()
     return {"success": True, "prep_id": prep_id, "status": body.status}
+
+
+@router.get("/cases/{case_id}/prep-status")
+def get_case_prep_status(case_id: int, request: Request):
+    """Return the latest prep sheet status for a case."""
+    firm_id = getattr(request.state, "firm_id", "default")
+    from backend.demo1.pg import get_conn
+    with get_conn(firm_id) as conn:
+        row = conn.execute(
+            """SELECT id, status, vcf_username, client_name, created_at, updated_at
+               FROM vcf_account_prep
+               WHERE firm_id=%s AND case_id=%s
+               ORDER BY updated_at DESC LIMIT 1""",
+            (firm_id, case_id),
+        ).fetchone()
+        case = conn.execute(
+            "SELECT id, vcf_account_created, vcf_status FROM cases WHERE id=%s AND firm_id=%s AND deleted = FALSE",
+            (case_id, firm_id),
+        ).fetchone()
+    if not row:
+        raise HTTPException(404, "No prep sheet found for this case")
+    return {
+        "success": True,
+        "case_id": case_id,
+        "prep_id": row["id"],
+        "status": row["status"],
+        "vcf_username": row["vcf_username"],
+        "client_name": row["client_name"],
+        "created_at": row["created_at"],
+        "updated_at": row["updated_at"],
+        "case_vcf_account_created": case["vcf_account_created"] if case else None,
+        "case_vcf_status": case["vcf_status"] if case else None,
+    }

@@ -1,10 +1,6 @@
 <script setup>
 import { ref, computed, onMounted } from 'vue'
-import axios from 'axios'
-
-const token   = () => localStorage.getItem('paraiq_token')
-const firmId  = () => localStorage.getItem('paraiq_firm_id') || 'default'
-const authHdr = () => ({ Authorization: 'Bearer ' + token() })
+import client from '@/api/client'
 
 const docs        = ref([])
 const loading     = ref(true)
@@ -16,7 +12,7 @@ const caseQuery   = ref('')
 async function fetchInbox() {
   loading.value = true
   try {
-    const { data } = await axios.get('/intake/inbox', { headers: authHdr() })
+    const { data } = await client.get('/intake/inbox', { _silent: true })
     docs.value = data.documents || []
   } catch { docs.value = [] }
   finally { loading.value = false }
@@ -24,7 +20,7 @@ async function fetchInbox() {
 
 async function fetchCases() {
   try {
-    const { data } = await axios.get('/cases/search?limit=100', { headers: authHdr() })
+    const { data } = await client.get('/cases/search?limit=100', { _silent: true })
     cases.value = data.results || data.cases || []
   } catch { cases.value = [] }
 }
@@ -52,7 +48,7 @@ function cancelAssign() {
 async function assignDoc(doc, c) {
   assigning.value[doc.id] = true
   try {
-    await axios.post(`/intake/inbox/${doc.id}/assign`, { case_id: c.id }, { headers: authHdr() })
+    await client.post(`/intake/inbox/${doc.id}/assign`, { case_id: c.id })
     await fetchInbox()
     showAssign.value = null
   } catch (e) {
@@ -60,6 +56,28 @@ async function assignDoc(doc, c) {
   } finally {
     assigning.value[doc.id] = false
   }
+}
+
+async function autoAssign(doc) {
+  assigning.value[doc.id] = true
+  try {
+    const { data } = await client.post(`/intake/inbox/${doc.id}/auto-assign`)
+    if (data.success) await fetchInbox()
+    else alert('Auto-assign failed')
+  } catch (e) {
+    alert('Auto-assign failed: ' + (e.response?.data?.detail || e.message))
+  } finally {
+    assigning.value[doc.id] = false
+  }
+}
+
+function reasonLabel(reason) {
+  const map = {
+    'name+dob': 'Name + DOB',
+    'name+ssn': 'Name + SSN',
+    'name_unique': 'Unique name match',
+  }
+  return map[reason] || (reason || 'Suggested match')
 }
 
 function docName(doc) {
@@ -78,7 +96,7 @@ function signalSummary(doc) {
 
 function fileLink(doc) {
   if (!doc.file_url) return null
-  return `/intake/file/${doc.file_url}?token=${token()}`
+  return `/intake/file/${doc.file_url}?token=${localStorage.getItem('paraiq_token') || ''}`
 }
 
 function fmtDate(d) {
@@ -127,6 +145,19 @@ onMounted(() => {
             <td class="doc-name">
               <span>{{ docName(doc) }}</span>
               <div v-if="doc.summary" class="doc-summary dim">{{ doc.summary.slice(0, 120) }}</div>
+              <div v-if="doc.suggested_cases?.length" class="suggestions">
+                <div class="suggestions__title">Suggested cases</div>
+                <div v-for="s in doc.suggested_cases.slice(0, 3)" :key="s.case_id" class="suggestion">
+                  <span class="suggestion__name">{{ s.client_name }}</span>
+                  <span class="suggestion__num">{{ s.case_number }}</span>
+                  <span class="suggestion__reason">{{ reasonLabel(s.reason) }}</span>
+                  <button
+                    class="btn-gold sm suggestion__accept"
+                    :disabled="assigning[doc.id]"
+                    @click.stop="autoAssign(doc)"
+                  >Accept</button>
+                </div>
+              </div>
             </td>
             <td><span class="type-pill">{{ doc.doc_type || '—' }}</span></td>
             <td class="dim">{{ signalSummary(doc) }}</td>
@@ -183,4 +214,11 @@ onMounted(() => {
 .case-row__name { color: var(--text-primary); font-weight: 500; }
 .case-row__num  { color: var(--text-muted); font-size: 0.8rem; font-family: var(--font-mono); }
 .sm { font-size: 0.75rem; padding: 0.3rem 0.6rem; }
+.suggestions { margin-top: 0.6rem; padding: 0.5rem 0.6rem; background: var(--bg-overlay, rgba(255,255,255,.03)); border: 1px solid var(--border-subtle); border-radius: 6px; }
+.suggestions__title { font-size: 0.7rem; text-transform: uppercase; letter-spacing: 0.05em; color: var(--text-tertiary); margin-bottom: 0.35rem; }
+.suggestion { display: flex; align-items: center; gap: 0.5rem; flex-wrap: wrap; font-size: 0.8rem; padding: 0.25rem 0; }
+.suggestion__name { color: var(--text-primary); font-weight: 500; }
+.suggestion__num { color: var(--gold); font-family: var(--font-mono); }
+.suggestion__reason { color: var(--text-tertiary); font-size: 0.7rem; }
+.suggestion__accept { margin-left: auto; }
 </style>
