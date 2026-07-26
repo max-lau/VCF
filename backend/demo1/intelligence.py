@@ -1,10 +1,9 @@
 """
-intelligence.py  --  ParaIQ Case Intelligence Engine
+intelligence.py  --  ACP-VCF Case Intelligence Engine
 =====================================================
-Three proactive AI features:
+Proactive AI features for claims processing:
   1. Contradiction Engine  -- auto-scan every time a new document is uploaded
-  2. AI Case Brief         -- one-click 2-page structured legal memo via Claude
-  3. Deadline Radar        -- surface upcoming dates across all open cases
+  2. Deadline Radar        -- surface upcoming dates across all open cases
 """
 
 import json
@@ -17,9 +16,7 @@ from typing import Optional
 
 import anthropic
 from backend.demo1.observability.tracer import trace_claude_call
-from backend.demo1.ab_testing.variants import assign_variant, build_brief_prompt, EXPERIMENT_ID
-from backend.demo1.ab_testing.logger import log_experiment_result
-from backend.demo1.ai_citation_monitor import verify_citations
+
 from dotenv import load_dotenv
 
 load_dotenv()
@@ -202,115 +199,7 @@ def mark_reviewed(contradiction_id: int):
 
 
 # ─────────────────────────────────────────────────────────────────────────────
-# FEATURE 2: AI CASE BRIEF
-# ─────────────────────────────────────────────────────────────────────────────
-
-def generate_case_brief(case_id: int, firm_id: str = "default") -> dict:
-    """
-    Aggregates all case data (documents, timeline, notes, risk scores)
-    and generates a 2-page structured legal memo via Claude Sonnet.
-    Saves the brief to case_briefs table and returns the dict.
-    """
-    with _get_db(firm_id) as conn:
-        case = conn.execute("SELECT * FROM cases WHERE id=%s", (case_id,)).fetchone()
-        if not case:
-            raise ValueError(f"Case {case_id} not found")
-
-        docs = conn.execute(
-            """SELECT document_name, doc_text, summary, risk_score,
-                      events_json, entities_json
-               FROM case_documents WHERE case_id=%s ORDER BY upload_date ASC""",
-            (case_id,)
-        ).fetchall()
-
-        notes = conn.execute(
-            "SELECT note, author FROM case_notes WHERE case_id=%s ORDER BY created_at ASC",
-            (case_id,)
-        ).fetchall()
-
-    doc_blocks, all_events, all_entities, risk_scores = [], [], [], []
-    for d in docs:
-        snippet = d["summary"] or (d["doc_text"] or "")[:400]
-        doc_blocks.append(f"* {d['document_name']}: {snippet}")
-        if d["risk_score"]:
-            risk_scores.append(d["risk_score"])
-        if d["events_json"]:
-            try:
-                all_events.extend(json.loads(d["events_json"])[:5])
-            except (json.JSONDecodeError, KeyError, TypeError, ValueError) as e:
-                logger.debug(f"[intelligence] events_json parse failed for doc {d.get('document_name')}: {e}")
-        if d["entities_json"]:
-            try:
-                all_entities.extend(
-                    e.get("text", "") for e in json.loads(d["entities_json"])[:5]
-                )
-            except (json.JSONDecodeError, KeyError, TypeError, ValueError) as e:
-                logger.debug(f"[intelligence] entities_json parse failed for doc {d.get('document_name')}: {e}")
-
-    avg_risk     = round(sum(risk_scores) / len(risk_scores), 1) if risk_scores else "N/A"
-    notes_text   = "\n".join(f"* [{n['author']}] {n['note']}" for n in notes) or "None."
-    doc_context  = "\n".join(doc_blocks[:8])
-    events_ctx   = json.dumps(all_events[:8], indent=2) if all_events else "None extracted yet."
-    entities_str = ", ".join(set(filter(None, all_entities)))[:300] or "None identified."
-    today_str    = datetime.now().strftime("%B %d, %Y")
-    risk_json    = json.dumps(avg_risk)
-
-    # A/B test: deterministic variant assignment per case_id
-    variant = assign_variant(case_id, EXPERIMENT_ID)
-    prompt  = build_brief_prompt(
-        variant=variant,
-        case=dict(case),
-        doc_context=doc_context,
-        events_ctx=events_ctx,
-        notes_text=notes_text,
-        entities_str=entities_str,
-        avg_risk=risk_json,
-        today_str=today_str,
-    )
-
-    import time as _time
-    _t0 = _time.time()
-    msg, _tid = trace_claude_call(
-        client=_get_client(),
-        name=f"matter_intelligence_{variant.value}",
-        model="claude-sonnet-4-6",
-        max_tokens=2000,
-        messages=[{"role": "user", "content": prompt}],
-        tags=["paraiq", "sonnet", "intelligence", variant.value]
-    )
-    _latency_ms = (_time.time() - _t0) * 1000
-    log_experiment_result(
-        experiment_id=EXPERIMENT_ID,
-        case_id=case_id,
-        variant=variant,
-        input_tokens=msg.usage.input_tokens,
-        output_tokens=msg.usage.output_tokens,
-        latency_ms=_latency_ms,
-        output_text=msg.content[0].text,
-        trace_id=_tid,
-    )
-    raw = msg.content[0].text.strip()
-    raw = re.sub(r'^```json\s*', '', raw)
-    raw = re.sub(r'^```\s*',     '', raw)
-    raw = re.sub(r'\s*```$',     '', raw)
-    brief = json.loads(raw)
-    try:
-        _brief_text = " ".join(
-            s.get("content", "") for s in brief.get("sections", {}).values()
-        )
-        brief["citation_verification"] = verify_citations(_brief_text)
-    except Exception as _e:
-        logger.warning(f"[intelligence] citation verification failed: {_e}")
-        brief["citation_verification"] = {"overall_status": "check_failed", "error": str(_e)}
-
-    with _get_db(firm_id) as conn:
-        conn.execute("INSERT INTO case_briefs (firm_id, case_id, brief_json) VALUES (%s,%s,%s)",
-                     (firm_id, case_id, json.dumps(brief)))
-    return brief
-
-
-# ─────────────────────────────────────────────────────────────────────────────
-# FEATURE 3: DEADLINE RADAR
+# FEATURE 2: DEADLINE RADAR
 # ─────────────────────────────────────────────────────────────────────────────
 
 _MONTHS = {

@@ -18,7 +18,6 @@ Endpoints:
   POST   /cases/{case_id}/timeline/extract - AI timeline extraction
   GET    /cases/{case_id}/contradictions - list contradictions
   PATCH  /cases/{case_id}/contradictions/{c_id}/review - mark reviewed
-  POST   /cases/{case_id}/brief         - generate AI brief
 """
 
 import json
@@ -34,7 +33,7 @@ from backend.demo1.auth import get_current_firm_id, get_current_user
 from backend.demo1.pg import get_conn
 from backend.demo1.intelligence import (
     run_case_contradiction_scan, get_case_contradictions,
-    mark_reviewed, generate_case_brief,
+    mark_reviewed,
 )
 from pydantic import BaseModel
 
@@ -718,7 +717,7 @@ async def extract_timeline_ai(
 
 # ══════════════════════════════════════════════════════════════════════════════
 # INTELLIGENCE ENGINE ENDPOINTS
-# Note: get_case_contradictions / mark_reviewed / generate_case_brief
+# Note: get_case_contradictions / mark_reviewed
 # are in intelligence.py which still uses SQLite — migrate separately.
 # ══════════════════════════════════════════════════════════════════════════════
 
@@ -739,29 +738,6 @@ async def review_contradiction(case_id: int, c_id: int):
     return {"success": True}
 
 
-@router.get("/{case_id}/brief")
-async def get_case_brief(case_id: int, firm_id: str = Depends(get_current_firm_id)):
-    """Return the most recent stored brief for a case, or 404 if none generated yet."""
-    with get_conn(firm_id) as conn:
-        row = conn.execute(
-            "SELECT brief_json FROM case_briefs WHERE case_id=%s ORDER BY generated_at DESC LIMIT 1",
-            (case_id,)).fetchone()
-    if not row:
-        raise HTTPException(status_code=404, detail="No brief found for this case")
-    b = row["brief_json"]
-    return json.loads(b) if isinstance(b, str) else b
-
-@router.post("/{case_id}/brief")
-async def case_brief(case_id: int, firm_id: str = Depends(get_current_firm_id)):
-    try:
-        brief = generate_case_brief(case_id, firm_id=firm_id)
-        return {"success": True, "case_id": case_id, "brief": brief}
-    except HTTPException:
-        raise
-    except Exception as exc:
-        logger.error(f"[case_management] Brief generation failed for case {case_id}: {exc}")
-        raise HTTPException(status_code=500,
-                            detail="Brief generation failed. Please try again.")
 
 # ── Case Binder ───────────────────────────────────────────────────────────────
 @router.get("/{case_id}/binder")

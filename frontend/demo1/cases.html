@@ -132,25 +132,6 @@
     .contr-empty{color:#475569;font-size:13px;padding:1.5rem;text-align:center;background:#1e293b;border-radius:8px;border:1px dashed #334155}
     .contr-footer{display:flex;justify-content:flex-end;margin-top:10px}
 
-    /* ── AI Case Brief modal ───────────────────────────────────────── */
-    .brief-modal-overlay{display:none;position:fixed;inset:0;background:rgba(0,0,0,.7);z-index:1000;overflow-y:auto;padding:2rem}
-    .brief-modal-overlay.open{display:flex;justify-content:center;align-items:flex-start}
-    .brief-modal{background:#0f172a;border:1px solid #334155;border-radius:14px;width:100%;max-width:780px;overflow:hidden}
-    .brief-modal-header{background:#1e293b;padding:16px 20px;display:flex;align-items:center;justify-content:space-between;border-bottom:1px solid #334155}
-    .brief-modal-title{font-size:15px;font-weight:700;color:#f1f5f9}
-    .brief-modal-meta{font-size:11px;color:#64748b;margin-top:2px}
-    .brief-close{background:none;border:none;color:#64748b;font-size:18px;cursor:pointer;padding:4px 8px;border-radius:6px}
-    .brief-close:hover{background:#334155;color:#f1f5f9}
-    .brief-body{padding:20px;display:flex;flex-direction:column;gap:16px}
-    .brief-section{background:#1e293b;border:1px solid #334155;border-radius:8px;padding:14px 16px}
-    .brief-section-title{font-size:11px;font-weight:800;text-transform:uppercase;letter-spacing:.12em;color:#7c3aed;margin-bottom:8px}
-    .brief-section-content{font-size:13px;color:#cbd5e1;line-height:1.7;white-space:pre-line}
-    .brief-risk-badge{display:inline-block;font-size:11px;font-weight:700;padding:3px 10px;border-radius:8px;background:rgba(251,146,60,.2);color:#fb923c;margin-top:4px}
-    .brief-actions{padding:16px 20px;border-top:1px solid #334155;display:flex;gap:10px;justify-content:flex-end}
-    .brief-gen-btn{background:linear-gradient(135deg,#7c3aed,#6d28d9);color:#fff;border:none;border-radius:8px;padding:8px 18px;font-size:13px;font-weight:700;cursor:pointer;display:flex;align-items:center;gap:6px;transition:opacity .2s}
-    .brief-gen-btn:disabled{opacity:.5;cursor:not-allowed}
-    .brief-gen-btn:hover:not(:disabled){opacity:.85}
-
     /* ── Deadline Calendar panel ───────────────────────────────────── */
     @keyframes deadlinePulse{
       0%,100%{box-shadow:inset 3px 0 0 #ef4444;}
@@ -226,7 +207,6 @@
     .wall-dot.document{background:#3b82f6}
     .wall-dot.timeline_event{background:#06b6d4}
     .wall-dot.note{background:#f59e0b}
-    .wall-dot.brief{background:#10b981}
     .wall-dot.default{background:#475569}
     .wall-content{flex:1;background:#0f172a;border:1px solid #1e293b;border-radius:8px;padding:10px 14px;min-width:0}
     .wall-date{font-size:10px;color:#475569;margin-bottom:3px}
@@ -236,7 +216,6 @@
     .badge-doc{background:rgba(59,130,246,.2);color:#60a5fa}
     .badge-event{background:rgba(6,182,212,.2);color:#22d3ee}
     .badge-note{background:rgba(245,158,11,.2);color:#fbbf24}
-    .badge-brief{background:rgba(16,185,129,.2);color:#34d399}
     .badge-case{background:rgba(124,58,237,.2);color:#a78bfa}
     .wall-empty{color:#475569;font-size:13px;text-align:center;padding:2rem}
 
@@ -352,7 +331,6 @@
           <button class="wall-filter" onclick="wallFilter('document',this)">&#128196; Docs</button>
           <button class="wall-filter" onclick="wallFilter('timeline_event',this)">&#128336; Events</button>
           <button class="wall-filter" onclick="wallFilter('note',this)">&#128221; Notes</button>
-          <button class="wall-filter" onclick="wallFilter('brief',this)">&#9889; Briefs</button>
         </div>
         <div class="wall-feed" id="wallFeed">
           <div class="wall-empty">Loading matter dossier…</div>
@@ -360,11 +338,6 @@
       </div>
 
       <div class="tab-pane" id="pane-overview">
-        <div style="display:flex;justify-content:flex-end;margin-bottom:12px">
-          <button class="brief-gen-btn" id="briefBtn" onclick="openBriefModal()">
-            &#9889; Generate AI Case Brief
-          </button>
-        </div>
         <div class="export-panel">
           <div class="export-panel-title">&#128196; One-Click Professional Output</div>
           <div class="export-btns">
@@ -884,63 +857,6 @@ loadCases().then(() => {
   if (p) openCase(parseInt(p));
 });
 
-// ── AI Case Brief ────────────────────────────────────────────────────────────
-async function openBriefModal(){
-  if(!currentCaseId) return;
-  const modal=document.getElementById("briefModal");
-  const body=document.getElementById("briefBody");
-  const btn=document.getElementById("briefBtn");
-  modal.classList.add("open");
-  btn.disabled=true; btn.innerHTML="Generating...";
-  const dlBtn=document.getElementById("briefDlBtn");
-  if(dlBtn){dlBtn.style.display="none";}
-  const genMsg=document.getElementById("briefGenMsg");
-  if(genMsg){genMsg.style.display="inline-block";}
-  body.innerHTML='<div style="text-align:center;padding:2rem;color:#64748b"><div style="font-size:32px;margin-bottom:12px">&#9889;</div><div style="font-size:14px;font-weight:600;color:#f1f5f9;margin-bottom:6px">Generating Case Brief...</div><div style="font-size:12px">Claude is reading all documents, notes, and risk scores</div></div>';
-  try{
-    const r=await fetch(API+"/cases/"+currentCaseId+"/brief",{method:"POST",headers:H});
-    const d=await r.json();
-    if(!r.ok) throw new Error(d.detail||"Unknown error");
-    const rs=d.brief.risk_score;
-    const rc=typeof rs==="number"?(rs>=7?"#f87171":rs>=4?"#fb923c":"#4ade80"):"#94a3b8";
-    const secs=d.brief.sections||{};
-    const escB=s=>String(s||"").replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;");
-    body.innerHTML=Object.entries(secs).map(([k,s])=>`
-      <div class="brief-section">
-        <div class="brief-section-title">${s.title||k}</div>
-        <div class="brief-section-content">${escB(s.content||"")}</div>
-        ${k==="risk"&&rs!==undefined?`<span style="display:inline-block;font-size:11px;font-weight:700;padding:3px 10px;border-radius:8px;background:rgba(124,58,237,.2);color:#a78bfa;margin-top:6px">Risk Score: ${rs}/10</span>`:""}
-      </div>`).join("");
-    document.getElementById("briefModalTitle").textContent=(d.brief.case_number||"")+" — AI Case Brief";
-    document.getElementById("briefModalMeta").textContent="Generated "+(d.brief.generated_at||"")+" · ParaIQ / Claude Sonnet";
-  }catch(e){
-    body.innerHTML='<div style="color:#f87171;padding:1.5rem;text-align:center"><strong>Generation failed</strong><br><span style="font-size:12px">'+e.message+'</span></div>';
-  }finally{
-    btn.disabled=false;btn.innerHTML="&#9889; Generate AI Case Brief";
-    const dlBtn2=document.getElementById("briefDlBtn");
-    if(dlBtn2){dlBtn2.style.display="inline-block";}
-    const genMsg2=document.getElementById("briefGenMsg");
-    if(genMsg2){genMsg2.style.display="none";}
-  }
-}
-function closeBriefModal(){document.getElementById("briefModal").classList.remove("open");}
-function downloadBriefPdf(){
-  if(!currentCaseId) return;
-  const btn=document.getElementById("briefDlBtn");
-  btn.textContent="Preparing..."; btn.disabled=true;
-  const url=API+"/export/brief/"+currentCaseId;
-  fetch(url,{headers:H}).then(r=>{
-    if(!r.ok) throw new Error("No brief yet — generate one first");
-    return r.blob();
-  }).then(blob=>{
-    const a=document.createElement("a");
-    a.href=URL.createObjectURL(blob);
-    a.download="ParaIQ_Brief_"+currentCaseId+".pdf";
-    a.click();
-  }).catch(e=>toast(e.message))
-  .finally(()=>{btn.textContent="⬇ Download PDF";btn.disabled=false;});
-}
-
 // ── Contradiction Engine UI ───────────────────────────────────────────────────
 async function loadContradictions(){
   if(!currentCaseId) return;
@@ -983,34 +899,6 @@ async function markReviewed(cId){
 </script>
 <script src="paraiq-sidebar-v3.js"></script>
 <script src="paraiq-persist.js"></script>
-
-<!-- ── AI Case Brief modal ── -->
-<div class="brief-modal-overlay" id="briefModal" onclick="if(event.target===this)closeBriefModal()">
-  <div class="brief-modal">
-    <div class="brief-modal-header">
-      <div>
-        <div class="brief-modal-title" id="briefModalTitle">AI Case Brief</div>
-        <div class="brief-modal-meta" id="briefModalMeta">Generated by ParaIQ · Claude Sonnet</div>
-      </div>
-      <button class="brief-close" onclick="closeBriefModal()">&#x2715;</button>
-    </div>
-    <div class="brief-body" id="briefBody">
-      <div style="text-align:center;padding:2rem;color:#64748b">
-        <div style="font-size:32px;margin-bottom:12px">&#9889;</div>
-        <div style="font-size:14px;font-weight:600;color:#f1f5f9;margin-bottom:6px">Generating Case Brief…</div>
-        <div style="font-size:12px">Claude is reading all documents, notes, and risk scores</div>
-      </div>
-    </div>
-    <div class="brief-actions">
-      <span id="briefGenMsg" style="display:none;font-size:12px;color:#94a3b8;font-style:italic;align-self:center">
-        &#9889; Please wait, PDF is generating&hellip;</span>
-      <button class="btn-sm" id="briefDlBtn" onclick="downloadBriefPdf()"
-        style="background:#7c3aed;color:#fff;border-color:#7c3aed">&#11015; Download PDF</button>
-      <button class="btn-sm" onclick="closeBriefModal()">Close</button>
-    </div>
-  </div>
-</div>
-
 
 <script>
 function toggleCalendar() {
@@ -1129,8 +1017,7 @@ function renderWall() {
     case_opened:    ['case',  'Case Opened'],
     document:       ['doc',   'Document'],
     timeline_event: ['event', 'Event'],
-    note:           ['note',  'Note'],
-    brief:          ['brief', 'AI Brief']
+    note:           ['note',  'Note']
   };
 
   feed.innerHTML = _wallItems.map(function(item) {
