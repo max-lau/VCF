@@ -26,10 +26,29 @@ WHERE id NOT IN (
 );
 
 -- 3. Add unique constraints so ON CONFLICT can dedupe future inserts.
-ALTER TABLE intake_scans
-    ADD CONSTRAINT IF NOT EXISTS unique_intake_scans_firm_hash
-    UNIQUE (firm_id, content_hash);
+-- PostgreSQL does not support ADD CONSTRAINT IF NOT EXISTS, so we guard
+-- with an explicit existence check.
+DO $$
+BEGIN
+    IF NOT EXISTS (
+        SELECT 1 FROM information_schema.table_constraints
+        WHERE constraint_schema = 'public'
+          AND table_name = 'intake_scans'
+          AND constraint_name = 'unique_intake_scans_firm_hash'
+    ) THEN
+        ALTER TABLE intake_scans
+            ADD CONSTRAINT unique_intake_scans_firm_hash
+            UNIQUE (firm_id, content_hash);
+    END IF;
 
-ALTER TABLE case_documents
-    ADD CONSTRAINT IF NOT EXISTS unique_case_documents_firm_hash
-    UNIQUE (firm_id, content_hash);
+    IF NOT EXISTS (
+        SELECT 1 FROM information_schema.table_constraints
+        WHERE constraint_schema = 'public'
+          AND table_name = 'case_documents'
+          AND constraint_name = 'unique_case_documents_firm_hash'
+    ) THEN
+        ALTER TABLE case_documents
+            ADD CONSTRAINT unique_case_documents_firm_hash
+            UNIQUE (firm_id, content_hash);
+    END IF;
+END $$;
