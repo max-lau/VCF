@@ -10,6 +10,10 @@ function spaBypass(req) {
   if (url.startsWith('/intake/file/')) {
     return null
   }
+  // Vite dev-server assets must be served by Vite, not proxied to the backend
+  if (url.startsWith('/assets/')) {
+    return url
+  }
   const accept = req.headers?.accept || ''
   if (accept.includes('text/html')) {
     return '/index.html'
@@ -61,6 +65,14 @@ export default defineConfig({
         bypass: spaBypass
       },
       '/email': {
+        target: 'http://127.0.0.1:5003',
+        changeOrigin: true,
+        bypass: spaBypass
+      },
+      // Catch-all for any other SPA route (document-inbox, vcf-account-prep,
+      // batch-intake, esign, etc.). HTML navigation requests get index.html;
+      // everything else falls through to the dev server.
+      '^/.*': {
         target: 'http://127.0.0.1:5003',
         changeOrigin: true,
         bypass: spaBypass

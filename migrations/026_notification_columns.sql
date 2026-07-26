@@ -35,6 +35,18 @@ BEGIN
 END $$;
 
 -- Backfill legacy rows so the router can still render them.
-UPDATE notifications SET title = COALESCE(title, message), body = COALESCE(body, message) WHERE title IS NULL OR body IS NULL;
+-- Only backfill from the old `message` column if it still exists.
+DO $$
+BEGIN
+    IF EXISTS (
+        SELECT 1 FROM information_schema.columns
+        WHERE table_schema = 'public' AND table_name = 'notifications' AND column_name = 'message'
+    ) THEN
+        UPDATE notifications
+           SET title = COALESCE(title, message),
+               body = COALESCE(body, message)
+         WHERE title IS NULL OR body IS NULL;
+    END IF;
+END $$;
 
 CREATE INDEX IF NOT EXISTS idx_notifications_type ON notifications(firm_id, type, created_at DESC);

@@ -451,7 +451,7 @@ def process_attachments(
                      identity_signals, match_status, content_hash)
                 VALUES (%s, %s, %s, 'email_attachment', '', '', %s, 'en',
                         NOW(), %s, '{}', %s, %s)
-                ON CONFLICT DO NOTHING
+                ON CONFLICT (firm_id, content_hash) DO NOTHING
                 RETURNING id
             """, (
                 firm_id,
