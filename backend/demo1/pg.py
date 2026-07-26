@@ -183,6 +183,7 @@ def make_tenant_middleware():
     class TenantMiddleware(BaseHTTPMiddleware):
         async def dispatch(self, request: Request, call_next):
             firm_id = "default"
+            user_id = None
             auth = request.headers.get("Authorization", "")
             if auth.startswith("Bearer "):
                 try:
@@ -190,9 +191,11 @@ def make_tenant_middleware():
                         auth[7:], SECRET, algorithms=["HS256"]
                     )
                     firm_id = payload.get("firm_id") or "default"
+                    user_id = int(payload["sub"]) if payload.get("sub") else None
                 except Exception:
                     pass
             request.state.firm_id = firm_id
+            request.state.user_id = user_id
             return await call_next(request)
 
     return TenantMiddleware
