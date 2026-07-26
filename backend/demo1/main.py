@@ -163,17 +163,19 @@ M2M_PREFIXES = ("/intake/scan", "/discovery/process/ocr/", "/media/transcribe/di
 # index.html without a JWT. This replaces the broad "Accept: text/html" bypass
 # that allowed unauthenticated access to API endpoints such as /cases/{id}.
 _SPA_EXACT = {
-    "/", "/intake", "/batch-intake", "/matters", "/claims",
+    "/", "/intake", "/batch-intake", "/matters", "/matters/new", "/claims",
     "/vcf-account-prep", "/vcf-deadlines", "/vcf-reports",
     "/email-inbox", "/documents", "/document-inbox",
-    "/dashboard", "/admin", "/reports", "/communications",
-    "/correspondence", "/login", "/super-admin", "/profile", "/settings",
+    "/dashboard", "/admin", "/admin/users", "/admin/audit",
+    "/reports", "/communications", "/correspondence",
+    "/login", "/super-admin", "/super-admin/monitor",
+    "/profile", "/settings",
     "/calendar", "/contacts", "/esign", "/exports", "/ai-config",
-    "/audit-log", "/users", "/client-portal",
+    "/audit-log", "/users", "/portal",
 }
 _SPA_PARAM_RE = re.compile(
-    r"^/(matters|claims|vcf-account-prep|vcf-deadlines|documents|reports|"
-    r"communications|correspondence|client-portal|users)/[^/]+(/|$)"
+    r"^/(matters|claims|vcf-account-prep|documents|reports|"
+    r"communications|correspondence)/[^/]+(/|$)"
 )
 
 
