@@ -83,7 +83,9 @@ async function redactPdf() {
     findings.value = data.findings || []
     presidioOk.value = data.presidio_available
 
-    if (data.download_url) {
+    if (data.redaction_id) {
+      redactedPdfUrl.value = fileUrlWithToken(`/redact/${data.redaction_id}/preview`)
+    } else if (data.download_url) {
       redactedPdfUrl.value = fileUrlWithToken(data.download_url)
     }
     await fetchFiles()
@@ -236,7 +238,7 @@ onMounted(() => {
             </div>
             <div class="pdf-preview-col">
               <div class="col-label">Redacted file</div>
-              <iframe v-if="redactedPdfUrl" :src="redactedPdfUrl" class="pdf-frame" type="application/pdf"></iframe>
+              <iframe v-if="redactedPdfUrl" :key="redactedPdfUrl" :src="redactedPdfUrl" class="pdf-frame" type="application/pdf"></iframe>
               <div v-else class="pdf-frame pdf-frame--empty">Redacted preview will appear here…</div>
             </div>
           </div>

@@ -849,6 +849,30 @@ async def download_redacted_file(request: Request, redaction_id: str):
     if not re.match(r"^[a-zA-Z0-9_-]+$", redaction_id):
         raise HTTPException(400, "Invalid redaction ID")
 
+    row = _get_redaction_file(redaction_id)
+    return FileResponse(
+        path=str(row["file_path"]),
+        filename=row["filename"],
+        media_type=_media_type_for_filename(row["filename"]),
+    )
+
+
+@router.get("/{redaction_id}/preview")
+async def preview_redacted_file(request: Request, redaction_id: str):
+    """Serve a redacted file inline for iframe preview."""
+    if not re.match(r"^[a-zA-Z0-9_-]+$", redaction_id):
+        raise HTTPException(400, "Invalid redaction ID")
+
+    row = _get_redaction_file(redaction_id)
+    return FileResponse(
+        path=str(row["file_path"]),
+        filename=row["filename"],
+        media_type=_media_type_for_filename(row["filename"]),
+        content_disposition_type="inline",
+    )
+
+
+def _get_redaction_file(redaction_id: str):
     with get_conn("default") as conn:
         row = conn.execute(
             "SELECT file_path, filename FROM redactions WHERE id = %s",
@@ -859,8 +883,4 @@ async def download_redacted_file(request: Request, redaction_id: str):
     fpath = Path(row["file_path"])
     if not fpath.exists():
         raise HTTPException(404, "File no longer exists on disk")
-    return FileResponse(
-        path=str(fpath),
-        filename=row["filename"],
-        media_type=_media_type_for_filename(row["filename"]),
-    )
+    return {"file_path": fpath, "filename": row["filename"]}

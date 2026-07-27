@@ -28,7 +28,7 @@ from starlette.responses import Response
 logger = logging.getLogger(__name__)
 
 # Paths that must be frameable (PDF previews/downloads inside the app).
-_FRAMEABLE_PATH_REGEX = re.compile(r"^/redact/document/|^/redact/[a-zA-Z0-9_-]{6,24}/download$")
+_FRAMEABLE_PATH_REGEX = re.compile(r"^/redact/document/|^/redact/[a-zA-Z0-9_-]{6,24}/(download|preview)$")
 
 # ── Configurable CSP directives ───────────────────────────────────────────────
 
