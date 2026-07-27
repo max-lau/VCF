@@ -85,7 +85,6 @@ async function onPdfFile(e) {
 async function redactPdf() {
   if (!tempId.value) return
   loading.value = true; error.value = null; currentPdfId.value = null
-  if (redactedPdfUrl.value) URL.revokeObjectURL(redactedPdfUrl.value)
   redactedPdfUrl.value = null
   try {
     const { data } = await client.post(
@@ -96,15 +95,9 @@ async function redactPdf() {
     findings.value = data.findings || []
     presidioOk.value = data.presidio_available
 
-    // Load redacted file as blob for side-by-side preview
-    if (currentPdfId.value) {
-      const res = await fetch(`/redact/${currentPdfId.value}/download`, {
-        headers: { 'Authorization': `Bearer ${localStorage.getItem('paraiq_token')}` }
-      })
-      if (res.ok) {
-        const blob = await res.blob()
-        redactedPdfUrl.value = URL.createObjectURL(blob)
-      }
+    // Use the signed URL returned by the backend for the iframe preview.
+    if (data.download_url) {
+      redactedPdfUrl.value = data.download_url
     }
     await fetchFiles()
   } catch(e) {
@@ -112,8 +105,8 @@ async function redactPdf() {
   } finally { loading.value = false }
 }
 
-function downloadPdf(id) {
-  window.open(`/redact/${id}/download`, '_blank')
+function downloadPdf(url) {
+  window.open(url, '_blank')
 }
 
 async function deleteFile(id) {
@@ -233,7 +226,7 @@ onMounted(fetchFiles)
 
       <div v-if="currentPdfId" class="success-msg">
         ✓ Redaction complete —
-        <button class="link-btn" @click="downloadPdf(currentPdfId)">Download redacted file</button>
+        <button class="link-btn" @click="downloadPdf(redactedPdfUrl)">Download redacted file</button>
       </div>
 
       <div v-if="findings.length && tab === 'pdf'" class="findings-summary">
@@ -253,7 +246,7 @@ onMounted(fetchFiles)
               <td class="bold">{{ f.filename || `File #${f.redaction_id}` }}</td>
               <td class="dim">{{ fmtDate(f.created_at) }}</td>
               <td class="dim">{{ f.style || '—' }}</td>
-              <td><button class="action-btn" @click="downloadPdf(f.redaction_id)">↓ Download</button></td>
+              <td><button class="action-btn" @click="downloadPdf(f.download_url)">↓ Download</button></td>
               <td><button class="action-btn action-btn--del" @click="deleteFile(f.redaction_id)">✕</button></td>
             </tr>
           </tbody>

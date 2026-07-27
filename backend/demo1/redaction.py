@@ -20,8 +20,9 @@ import uuid
 import json
 import re
 import logging
+import jwt as pyjwt
 from pathlib import Path
-from datetime import datetime, timezone
+from datetime import datetime, timezone, timedelta
 
 from backend.demo1.pg import get_conn
 from backend.demo1.ai_client import get_client
@@ -41,6 +42,46 @@ TEMP_MAX_AGE_HOURS = 24
 
 MAX_TEXT_LEN = 25_000
 MAX_FILE_SIZE = 20 * 1024 * 1024  # 20 MB
+
+
+def _redaction_secret() -> str:
+    return os.environ.get("JWT_SECRET_KEY") or os.environ.get("SECRET_KEY", "change_me")
+
+
+def _sign_file_access_token(firm_id: str, user_id: int, file_id: str, file_type: str) -> str:
+    """Short-lived signed token for iframe-friendly file URLs."""
+    return pyjwt.encode(
+        {
+            "firm_id": firm_id,
+            "user_id": user_id,
+            "file_id": file_id,
+            "file_type": file_type,
+            "exp": datetime.now(timezone.utc) + timedelta(hours=1),
+        },
+        _redaction_secret(),
+        algorithm="HS256",
+    )
+
+
+def _verify_file_access_token(token: str) -> dict:
+    return pyjwt.decode(token, _redaction_secret(), algorithms=["HS256"])
+
+
+def _auth_or_token(request: Request) -> tuple[str, int]:
+    """Authenticate via JWT header (tenant middleware) or signed access_token query param."""
+    user_id = getattr(request.state, "user_id", None)
+    firm_id = getattr(request.state, "firm_id", None)
+    if user_id and firm_id:
+        return firm_id, user_id
+
+    token = request.query_params.get("access_token")
+    if token:
+        try:
+            payload = _verify_file_access_token(token)
+            return payload["firm_id"], payload["user_id"]
+        except Exception:
+            pass
+    raise HTTPException(status_code=401, detail="Authentication required")
 
 
 def init_redaction_table():
@@ -400,7 +441,7 @@ def _find_temp_file(firm_id: str, temp_id: str) -> Path | None:
     return matches[0] if matches else None
 
 
-def _process_redaction_file(content: bytes, fname: str, threshold: float, style: str, use_claude: bool, firm_id: str):
+def _process_redaction_file(content: bytes, fname: str, threshold: float, style: str, use_claude: bool, firm_id: str, user_id: int):
     """Shared redaction pipeline: extract, redact, generate output file, persist record."""
     text = _extract_text_from_bytes(content, fname)
     if not text.strip():
@@ -443,6 +484,7 @@ def _process_redaction_file(content: bytes, fname: str, threshold: float, style:
         out_path.unlink(missing_ok=True)
         raise HTTPException(500, "Failed to save redaction record.")
 
+    access_token = _sign_file_access_token(firm_id, user_id, rec_id, "redacted")
     return {
         "redacted_text": redacted,
         "redacted_preview": redacted[:1000],
@@ -452,7 +494,8 @@ def _process_redaction_file(content: bytes, fname: str, threshold: float, style:
         "total_redactions": len(findings),
         "confidence_score": confidence,
         "redaction_id": rec_id,
-        "download_url": f"/redact/{rec_id}/download",
+        "download_url": f"/redact/{rec_id}/download?access_token={access_token}",
+        "access_token": access_token,
         "filename": out_name,
         "size_kb": size_kb,
         "categories_found": list({f["category"] for f in findings}),
@@ -502,7 +545,7 @@ async def redact_text_endpoint(request: Request, req: RedactTextRequest):
 @router.post("/upload-temp")
 async def upload_temp_redaction_file(request: Request, file: UploadFile = File(...)):
     """Stage a file on the server so the original can be previewed from a same-origin URL."""
-    _require_auth(request)
+    user_id = _require_auth(request)
     firm_id = _get_firm_id(request)
 
     content = await file.read()
@@ -517,17 +560,30 @@ async def upload_temp_redaction_file(request: Request, file: UploadFile = File(.
     dest = _temp_dir_for_firm(firm_id) / f"{temp_id}_{safe_fname}"
     dest.write_bytes(content)
 
+    access_token = _sign_file_access_token(firm_id, user_id, temp_id, "original")
     return {
         "temp_id": temp_id,
         "filename": fname,
-        "original_url": f"/redact/temp/{temp_id}/original",
+        "original_url": f"/redact/temp/{temp_id}/original?access_token={access_token}",
+        "access_token": access_token,
     }
 
 
 @router.get("/temp/{temp_id}/original")
 async def serve_temp_original(request: Request, temp_id: str):
-    _require_auth(request)
-    firm_id = _get_firm_id(request)
+    firm_id, user_id = _auth_or_token(request)
+
+    # If using a token, verify it matches the requested temp_id
+    token = request.query_params.get("access_token")
+    if token:
+        try:
+            payload = _verify_file_access_token(token)
+            if payload.get("file_id") != temp_id or payload.get("file_type") != "original":
+                raise HTTPException(401, "Invalid access token")
+        except HTTPException:
+            raise
+        except Exception:
+            raise HTTPException(401, "Invalid access token")
 
     fpath = _find_temp_file(firm_id, temp_id)
     if not fpath:
@@ -549,7 +605,7 @@ async def redact_pdf(
     style: str = Query("label"),
     use_claude: bool = Query(True),
 ):
-    _require_auth(request)
+    user_id = _require_auth(request)
     firm_id = _get_firm_id(request)
     style = _normalize_style(style)
 
@@ -558,7 +614,7 @@ async def redact_pdf(
         raise HTTPException(413, f"File too large. Max size is {MAX_FILE_SIZE // (1024*1024)} MB.")
 
     fname = file.filename or "document"
-    return _process_redaction_file(content, fname, threshold, style, use_claude, firm_id)
+    return _process_redaction_file(content, fname, threshold, style, use_claude, firm_id, user_id)
 
 
 @router.post("/pdf-from-temp/{temp_id}")
@@ -569,7 +625,7 @@ async def redact_pdf_from_temp(
     style: str = Query("label"),
     use_claude: bool = Query(True),
 ):
-    _require_auth(request)
+    user_id = _require_auth(request)
     firm_id = _get_firm_id(request)
     style = _normalize_style(style)
 
@@ -579,12 +635,12 @@ async def redact_pdf_from_temp(
 
     content = fpath.read_bytes()
     fname = fpath.name[len(temp_id) + 1:]
-    return _process_redaction_file(content, fname, threshold, style, use_claude, firm_id)
+    return _process_redaction_file(content, fname, threshold, style, use_claude, firm_id, user_id)
 
 
 @router.get("/files")
 async def list_redacted_files(request: Request):
-    _require_auth(request)
+    user_id = _require_auth(request)
     firm_id = _get_firm_id(request)
     with get_conn(firm_id) as conn:
         rows = conn.execute(
@@ -595,6 +651,7 @@ async def list_redacted_files(request: Request):
     files = []
     for r in rows:
         if (STORAGE_DIR / r["filename"]).exists():
+            token = _sign_file_access_token(firm_id, user_id, r["id"], "redacted")
             files.append({
                 "id": r["id"],
                 "redaction_id": r["id"],
@@ -602,7 +659,8 @@ async def list_redacted_files(request: Request):
                 "style": r["style"],
                 "size_kb": r["size_kb"],
                 "created_at": str(r["created_at"]),
-                "download_url": f"/redact/{r['id']}/download",
+                "download_url": f"/redact/{r['id']}/download?access_token={token}",
+                "access_token": token,
             })
     return {"files": files}
 
@@ -634,7 +692,7 @@ async def delete_redacted_file(request: Request, redaction_id: str):
 
 @router.post("/case-document/{doc_id}")
 async def redact_case_document(doc_id: int, request: Request, use_claude: bool = Query(True)):
-    _require_auth(request)
+    user_id = _require_auth(request)
     firm_id = _get_firm_id(request)
 
     with get_conn(firm_id) as conn:
@@ -678,11 +736,13 @@ async def redact_case_document(doc_id: int, request: Request, use_claude: bool =
              datetime.now(timezone.utc).isoformat()),
         )
 
+    access_token = _sign_file_access_token(firm_id, user_id, rec_id, "redacted")
     categories_found = list({f["category"] for f in findings})
     return {
         "success": True,
         "redaction_id": rec_id,
-        "download_url": f"/redact/{rec_id}/download",
+        "download_url": f"/redact/{rec_id}/download?access_token={access_token}",
+        "access_token": access_token,
         "filename": out_name,
         "total_redactions": len(findings),
         "categories_found": categories_found,
@@ -693,10 +753,21 @@ async def redact_case_document(doc_id: int, request: Request, use_claude: bool =
 
 @router.get("/{redaction_id}/download")
 async def download_redacted_file(request: Request, redaction_id: str):
-    _require_auth(request)
-    firm_id = _get_firm_id(request)
+    firm_id, user_id = _auth_or_token(request)
     if not re.match(r"^[a-zA-Z0-9_-]+$", redaction_id):
         raise HTTPException(400, "Invalid redaction ID")
+
+    # If using a token, verify it matches the requested redaction_id
+    token = request.query_params.get("access_token")
+    if token:
+        try:
+            payload = _verify_file_access_token(token)
+            if payload.get("file_id") != redaction_id or payload.get("file_type") != "redacted":
+                raise HTTPException(401, "Invalid access token")
+        except HTTPException:
+            raise
+        except Exception:
+            raise HTTPException(401, "Invalid access token")
 
     with get_conn(firm_id) as conn:
         row = conn.execute(
