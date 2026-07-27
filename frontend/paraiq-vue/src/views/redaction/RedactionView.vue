@@ -53,9 +53,17 @@ async function fetchVaultDocs() {
   }
 }
 
+function fileUrlWithToken(path) {
+  if (!path) return null
+  const token = localStorage.getItem('paraiq_token')
+  if (!token) return path
+  const sep = path.includes('?') ? '&' : '?'
+  return `${path}${sep}token=${encodeURIComponent(token)}`
+}
+
 function selectDoc(doc) {
   selectedDoc.value = doc
-  originalPdfUrl.value = doc?.original_url || null
+  originalPdfUrl.value = fileUrlWithToken(doc?.original_url)
   redactedPdfUrl.value = null
   currentPdfId.value = null
   findings.value = []
@@ -76,7 +84,7 @@ async function redactPdf() {
     presidioOk.value = data.presidio_available
 
     if (data.download_url) {
-      redactedPdfUrl.value = data.download_url
+      redactedPdfUrl.value = fileUrlWithToken(data.download_url)
     }
     await fetchFiles()
   } catch(e) {
@@ -86,7 +94,7 @@ async function redactPdf() {
 
 function downloadPdf(url) {
   if (!url) return
-  window.open(url, '_blank')
+  window.open(fileUrlWithToken(url), '_blank')
 }
 
 async function deleteFile(id) {
