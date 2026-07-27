@@ -39,6 +39,10 @@
         <NavItem to="/exports"      icon="download"  label="Exports" />
       </NavGroup>
 
+      <NavGroup label="AI Tools">
+        <NavItem to="/medical-nlp" icon="stethoscope" label="Medical NLP" />
+      </NavGroup>
+
       <NavGroup label="Client Portal">
         <NavItem to="/portal" icon="users" label="Client Portal" />
       </NavGroup>

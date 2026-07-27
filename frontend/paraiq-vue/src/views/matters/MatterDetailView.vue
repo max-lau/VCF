@@ -189,6 +189,21 @@ function fmtDateTime(d) {
   if (!d) return '—'
   return new Date(d).toLocaleString('en-US', { month:'short', day:'numeric', hour:'2-digit', minute:'2-digit' })
 }
+function fmtTime(d) {
+  if (!d) return '—'
+  return new Date(d).toLocaleTimeString('en-US', { hour:'2-digit', minute:'2-digit' })
+}
+const STAGE_COLORS = {
+  intake: '#718096',
+  document_gathering: '#4a7cf7',
+  vcf_account_created: '#9f7aea',
+  claim_submitted: '#48bb78',
+  review: '#f6ad55',
+  approved: '#48bb78',
+  denied: '#fc8181',
+  closed: '#a0aec0',
+}
+function stageColor(s) { return STAGE_COLORS[s] || '#c9a84c' }
 function fmtSize(b) {
   if (!b) return '—'
   return b < 1_048_576 ? (b/1024).toFixed(1)+' KB' : (b/1_048_576).toFixed(1)+' MB'
@@ -677,19 +692,28 @@ function fmtMoney(v) {
       <div v-else-if="activeTab === 'stage-history'" class="mod-pane">
         <div v-if="loadingVcf" class="state-msg">Loading stage history…</div>
         <div v-else-if="!stageHistory.length" class="empty-tab"><div class="empty-tab__icon">📈</div><div class="empty-tab__title">No stage transitions yet</div></div>
-        <div v-else class="table-wrap">
-          <table class="piq-table">
-            <thead><tr><th>Date</th><th>From</th><th>To</th><th>By</th><th>Note</th></tr></thead>
-            <tbody>
-              <tr v-for="h in stageHistory" :key="h.id">
-                <td class="dim nowrap">{{ fmtDate(h.created_at) }}</td>
-                <td>{{ h.from_stage || '—' }}</td>
-                <td>{{ h.to_stage }}</td>
-                <td class="dim">{{ h.changed_by }}</td>
-                <td class="doc-name">{{ h.note || '—' }}</td>
-              </tr>
-            </tbody>
-          </table>
+        <div v-else class="stage-timeline">
+          <div v-for="(h, idx) in stageHistory" :key="h.id" class="stage-card">
+            <div class="stage-date-col">
+              <div class="stage-date">{{ fmtDate(h.created_at) }}</div>
+              <div class="stage-time dim sm">{{ fmtTime(h.created_at) }}</div>
+            </div>
+            <div class="stage-dot-line">
+              <div class="stage-dot" :style="{ background: stageColor(h.to_stage) }"></div>
+              <div v-if="idx !== stageHistory.length - 1" class="stage-line"></div>
+            </div>
+            <div class="stage-body">
+              <div class="stage-chips">
+                <span v-if="h.from_stage" class="stage-chip stage-chip--from">{{ h.from_stage }}</span>
+                <span v-if="h.from_stage" class="stage-arrow">→</span>
+                <span class="stage-chip stage-chip--to" :style="{ borderColor: stageColor(h.to_stage), color: stageColor(h.to_stage) }">{{ h.to_stage }}</span>
+              </div>
+              <div class="stage-meta">
+                <span class="dim sm">by {{ h.changed_by || 'system' }}</span>
+              </div>
+              <div v-if="h.note" class="stage-note">{{ h.note }}</div>
+            </div>
+          </div>
         </div>
       </div>
 
@@ -1064,5 +1088,23 @@ function fmtMoney(v) {
 .disb-summary__row { display: flex; justify-content: space-between; padding: 0.5rem 0; font-size: 0.9rem; color: var(--text-secondary); border-bottom: 1px solid var(--border); }
 .disb-summary__row--net { font-size: 1.25rem; font-weight: 700; color: var(--green); border-bottom: none; padding-top: 1rem; }
 .disb-status { display: flex; align-items: center; margin-top: 1.5rem; padding-top: 1rem; border-top: 1px solid var(--border); }
+
+/* Stage History — kanban-chip timeline */
+.stage-timeline { display: flex; flex-direction: column; gap: 0; padding: 0.5rem 0; }
+.stage-card { display: flex; gap: 1rem; padding: 0.75rem 0; align-items: flex-start; }
+.stage-date-col { width: 90px; flex-shrink: 0; text-align: right; padding-top: 0.35rem; }
+.stage-date { font-size: 0.82rem; font-weight: 600; color: var(--text-primary); }
+.stage-time { font-size: 0.72rem; margin-top: 0.15rem; }
+.stage-dot-line { position: relative; width: 22px; display: flex; flex-direction: column; align-items: center; flex-shrink: 0; }
+.stage-dot { width: 14px; height: 14px; border-radius: 50%; border: 3px solid var(--bg-card); box-shadow: 0 0 0 2px var(--border); margin-top: 0.45rem; }
+.stage-line { flex: 1; width: 2px; background: var(--border); min-height: 40px; margin: 4px 0; }
+.stage-body { flex: 1; background: var(--bg-card); border: 1px solid var(--border); border-radius: 12px; padding: 1rem 1.1rem; min-width: 0; }
+.stage-chips { display: flex; align-items: center; gap: 0.5rem; flex-wrap: wrap; margin-bottom: 0.35rem; }
+.stage-chip { display: inline-flex; align-items: center; padding: 0.35rem 0.8rem; border-radius: 999px; font-size: 0.78rem; font-weight: 700; text-transform: capitalize; border: 2px solid transparent; }
+.stage-chip--from { background: rgba(255,255,255,0.06); color: var(--text-secondary); border-color: var(--border); }
+.stage-chip--to { background: rgba(255,255,255,0.08); border-width: 2px; }
+.stage-arrow { color: var(--text-muted); font-size: 0.85rem; }
+.stage-meta { margin-bottom: 0.4rem; }
+.stage-note { font-size: 0.85rem; color: var(--text-secondary); line-height: 1.5; padding-top: 0.4rem; border-top: 1px dashed var(--border); margin-top: 0.4rem; }
 
 </style>

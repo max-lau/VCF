@@ -27,6 +27,7 @@ const BatchIntakeView    = () => import('@/views/intake/BatchIntakeView.vue')
 const EsignView          = () => import('@/views/esign/EsignView.vue')
 const ClientPortalManage = () => import('@/views/portal/ClientPortalManageView.vue')
 const CommunicationsView = () => import('@/views/communications/CommunicationsView.vue')
+const MedicalNlpView     = () => import('@/views/medical-nlp/MedicalNlpView.vue')
 const RedactionView      = () => import('@/views/redaction/RedactionView.vue')
 const AuditLogView       = () => import('@/views/audit/AuditLogView.vue')
 const UsersView          = () => import('@/views/admin/UsersView.vue')
@@ -163,6 +164,11 @@ const routes = [
         name: 'ai_config',
         component: AiConfigView,
         meta: { module: 'ai_config' },
+      },
+      {
+        path: 'medical-nlp',
+        name: 'medical_nlp',
+        component: MedicalNlpView,
       },
 
       // ── Client Portal ─────────────────────────────────────────────

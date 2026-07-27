@@ -46,6 +46,7 @@ from backend.demo1.vcf_account import router as vcf_account_router, init_vcf_acc
 from backend.demo1.vcf_workflow import router as vcf_workflow_router
 from backend.demo1.communications import router as communications_router
 from backend.demo1.vcf_reports import router as vcf_reports_router
+from backend.demo1.medical_nlp import router as medical_nlp_router
 import os
 import json
 import logging
@@ -156,7 +157,7 @@ _SPA_EXACT = {
     "/login", "/super-admin", "/super-admin/monitor",
     "/profile", "/settings",
     "/calendar", "/contacts", "/esign", "/exports", "/ai-config",
-    "/audit-log", "/users", "/portal",
+    "/audit-log", "/users", "/portal", "/medical-nlp",
 }
 _SPA_PARAM_RE = re.compile(
     r"^/(matters|claims|vcf-account-prep|documents|reports|"
@@ -409,6 +410,7 @@ app.include_router(vcf_account_router, prefix="/vcf", tags=["VCF Account Prep"])
 app.include_router(vcf_workflow_router, tags=["VCF Workflow"])
 app.include_router(communications_router)
 app.include_router(vcf_reports_router)
+app.include_router(medical_nlp_router, tags=["Medical NLP"])
 
 # ── Phase 1: AI Infrastructure Endpoints ─────────────────────────────────────
 
