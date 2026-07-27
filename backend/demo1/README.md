@@ -1,120 +1,63 @@
-\# Demo 1 — NLP Text Analyzer
+# VCFClaimsIQ Backend (`backend/demo1/`)
 
+FastAPI backend for the VCFClaimsIQ administrative claims platform.
 
+---
 
-Analyzes any text and returns sentiment, named entities, key phrases, tone,
+## Run locally
 
-and a plain language summary. Built to demonstrate core NLP pipeline skills.
+```powershell
+# From repository root
+cd C:\vcf
+. venv/Scripts/activate
+python -m uvicorn backend.demo1.main:app --host 0.0.0.0 --port 5003
+```
 
+The API will be available at `http://localhost:5003`.
 
+---
 
-\## What it does
+## Module map
 
+| Module | File | Purpose |
+|---|---|---|
+| App factory | `main.py` | Middleware, router mounts, startup table init |
+| Claims | `case_management.py` | Claim CRUD, case binder, document linking |
+| OCR Intake | `ocr_intake.py` | Scan upload, Claude Vision OCR, auto case-matching |
+| Email Intake | `email_intake.py` | Gmail/Outlook OAuth, polling, attachment ingestion |
+| VCF Account Prep | `vcf_account.py` | Prep-sheet generation, security answers, dedicated VCF emails |
+| VCF Deadlines | `vcf_deadlines.py` | Deadline tracking and notifications |
+| VCF Disbursements | `vcf_disbursements.py` | Award, lien, fee, net-to-claimant calc |
+| Communications | `communications.py` | Unified comms log per claim |
+| Medical NLP | `medical_nlp.py` | BioClinicalBERT / scispaCy clinical analysis |
+| Redaction | `redaction.py` | Vault-only PII redaction with inline preview |
+| Security headers | `security_headers.py` | OWASP headers, CSP frame exemptions |
+| Auth | `auth.py` | JWT issue/validate, password hashing, token blocklist |
+| Database | `pg.py` | Postgres connection helper |
 
+---
 
-| Feature | Description | NLP concept |
+## Key API patterns
 
-|---------|-------------|-------------|
+- All routes (except public login/register/health) require a JWT in the `Authorization: Bearer <token>` header or a `?token=<jwt>` query parameter for capability URLs.
+- `firm_id` is extracted from the JWT and applied to every tenant query.
+- File storage uses Supabase Storage (`vcf-documents` bucket) with local-disk fallback.
 
-| Sentiment | Positive / negative / neutral / mixed + confidence score | Text classification |
+---
 
-| Named entities | People, orgs, locations, dates, money | NER |
+## Environment variables
 
-| Key phrases | Important terms ranked by relevance | Keyword extraction |
-
-| Tone | Analytical, confident, tentative, etc. | Multi-label classification |
-
-| Summary | 2-sentence plain English summary | Abstractive summarization |
-
-| Statistics | Word count, sentence count, readability score | Linguistic features |
-
-
-
-\## API
-
-
-
-
-
-POST http://localhost:8000/analyze
-
-Content-Type: application/json
-
-{ "text": "Your text here..." }
-
-
-
-\## Running locally
-
-
+See `.env.example` for the full list. Key variables:
 
 ```bash
-
-uvicorn backend.demo1.main:app --reload --port 8000
-
+DATABASE_URL=postgresql://...
+ANTHROPIC_API_KEY=...
+JWT_SECRET_KEY=...
+VCF_PREP_ENC_KEY=...
+SUPABASE_URL=...
+SUPABASE_SERVICE_KEY=...
+GMAIL_CLIENT_ID=...
+GMAIL_CLIENT_SECRET=...
+VCF_DEDICATED_EMAIL_DOMAIN=wawvcf.com
+VCF_DEDICATED_EMAIL_PREFIX=vcfclaim
 ```
-
-
-
-\## Sample output
-
-
-
-Input: Apple Inc. reported record quarterly revenue of $123.9 billion...
-
-
-
-```json
-
-{
-
-&#x20; "sentiment": {
-
-&#x20;   "label": "positive",
-
-&#x20;   "score": 0.78,
-
-&#x20;   "explanation": "Strong revenue figures and praised performance drive positive tone"
-
-&#x20; },
-
-&#x20; "entities": \[
-
-&#x20;   { "text": "Apple Inc.", "type": "ORG" },
-
-&#x20;   { "text": "Tim Cook", "type": "PERSON" },
-
-&#x20;   { "text": "$123.9 billion", "type": "MONEY" },
-
-&#x20;   { "text": "China", "type": "GPE" }
-
-&#x20; ],
-
-&#x20; "keywords": \[
-
-&#x20;   { "word": "revenue", "importance": "high" },
-
-&#x20;   { "word": "supply chain", "importance": "high" },
-
-&#x20;   { "word": "iPhone 15", "importance": "medium" }
-
-&#x20; ],
-
-&#x20; "tone": \["analytical", "cautious"],
-
-&#x20; "summary": "Apple reported record Q1 revenue driven by strong iPhone sales in Asia.
-
-&#x20;             Supply chain risks in Taiwan may affect future output."
-
-}
-
-```
-
-
-
-
-
-
-
-
-
