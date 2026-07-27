@@ -285,6 +285,102 @@ def _redact_text(text: str, threshold: float, style: str, use_claude: bool, firm
     return redacted, findings, confidence
 
 
+# ── PDF helpers ───────────────────────────────────────────────────────────────
+def _extract_text_from_bytes(content: bytes, fname: str) -> str:
+    """Best-effort text extraction from PDF, TXT, or DOCX bytes."""
+    lower = fname.lower()
+    if lower.endswith(".pdf"):
+        try:
+            import fitz
+            with fitz.open(stream=content, filetype="pdf") as doc:
+                return "\n".join(page.get_text() for page in doc)
+        except Exception as e:
+            logger.warning(f"[redaction] fitz extraction failed: {e}")
+        try:
+            import pdfplumber
+            import io
+            with pdfplumber.open(io.BytesIO(content)) as pdf:
+                return "\n".join(p.extract_text() or "" for p in pdf.pages)
+        except Exception as e:
+            logger.warning(f"[redaction] pdfplumber extraction failed: {e}")
+        return content.decode("utf-8", errors="ignore")
+    return content.decode("utf-8", errors="ignore")
+
+
+def _create_text_pdf(text: str, out_path: Path):
+    """Fallback: create a simple PDF containing redacted plain text."""
+    import fitz
+    doc = fitz.open()
+    page = doc.new_page(width=612, height=792)
+    text_area = fitz.Rect(72, 72, 612 - 72, 792 - 72)
+    page.insert_textbox(text_area, text, fontsize=10, fontname="helv", color=(0, 0, 0))
+    doc.save(str(out_path))
+    doc.close()
+
+
+def _create_redacted_pdf(original_content: bytes, fname: str, findings: list, style: str, out_path: Path):
+    """Build a redacted PDF. For PDF inputs we overlay redaction annotations; otherwise fall back to a text PDF."""
+    if not fname.lower().endswith(".pdf"):
+        # Non-PDF input: produce a simple PDF of the redacted text
+        redacted_text = "\n".join(f"[{f.get('category', 'PII')}]" if f.get("text") else "" for f in findings)  # placeholder; caller supplies real text
+        _create_text_pdf(redacted_text, out_path)
+        return
+
+    import fitz
+    try:
+        doc = fitz.open(stream=original_content, filetype="pdf")
+    except Exception as e:
+        logger.error(f"[redaction] Could not open PDF for redaction: {e}")
+        raise
+
+    label_fn = STYLE_REPLACE.get(style, STYLE_REPLACE["label"])
+
+    for page in doc:
+        applied_any = False
+        for f in findings:
+            text = f.get("text", "")
+            if not text or len(text) < 2:
+                continue
+            try:
+                rects = page.search_for(text)
+            except Exception:
+                continue
+            if not rects:
+                continue
+            for rect in rects:
+                if style in ("redact", "black"):
+                    page.add_redact_annot(rect, fill=(0, 0, 0))
+                elif style == "white":
+                    page.add_redact_annot(rect, fill=(1, 1, 1))
+                else:
+                    # label or highlight: replace with labelled text on a light gold background
+                    page.add_redact_annot(
+                        rect,
+                        text=label_fn(f.get("category", "PII")),
+                        fontname="helv",
+                        fontsize=min(10, max(6, int(rect.height) - 1)) if rect.height > 6 else 6,
+                        fill=(1, 0.95, 0.8),
+                        text_color=(0.5, 0.3, 0),
+                    )
+                applied_any = True
+        if applied_any:
+            try:
+                page.apply_redactions()
+            except Exception as e:
+                logger.warning(f"[redaction] apply_redactions failed on a page: {e}")
+
+    doc.save(str(out_path), garbage=4, deflate=True)
+    doc.close()
+
+
+def _media_type_for_filename(filename: str) -> str:
+    if filename.lower().endswith(".pdf"):
+        return "application/pdf"
+    if filename.lower().endswith(".docx"):
+        return "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+    return "text/plain"
+
+
 # ── Request models ────────────────────────────────────────────────────────────
 class RedactTextRequest(BaseModel):
     text: str = Field(..., min_length=1, max_length=MAX_TEXT_LEN)
@@ -329,7 +425,7 @@ async def redact_pdf(
     file: UploadFile = File(...),
     threshold: float = Query(0.5, ge=0.0, le=1.0),
     style: str = Query("label"),
-    use_claude: bool = Query(False),
+    use_claude: bool = Query(True),
 ):
     _require_auth(request)
     firm_id = _get_firm_id(request)
@@ -339,24 +435,13 @@ async def redact_pdf(
     if len(content) > MAX_FILE_SIZE:
         raise HTTPException(413, f"File too large. Max size is {MAX_FILE_SIZE // (1024*1024)} MB.")
 
-    text = ""
     fname = file.filename or "document"
 
-    if fname.lower().endswith(".pdf"):
-        try:
-            import fitz
-            doc = fitz.open(stream=content, filetype="pdf")
-            text = "\n".join(page.get_text() for page in doc)
-        except ImportError:
-            try:
-                import pdfplumber
-                import io
-                with pdfplumber.open(io.BytesIO(content)) as pdf:
-                    text = "\n".join(p.extract_text() or "" for p in pdf.pages)
-            except ImportError:
-                text = content.decode("utf-8", errors="ignore")
-    else:
-        text = content.decode("utf-8", errors="ignore")
+    try:
+        text = _extract_text_from_bytes(content, fname)
+    except Exception as e:
+        logger.error(f"[redaction] Extraction failed: {e}")
+        raise HTTPException(400, f"Could not extract text from file: {e}")
 
     if not text.strip():
         raise HTTPException(400, "No text could be extracted from the file")
@@ -371,21 +456,39 @@ async def redact_pdf(
 
     rec_id = str(uuid.uuid4())[:8]
     base = os.path.splitext(fname)[0]
-    out_name = f"{base}_redacted_{rec_id}.txt"
+    is_pdf = fname.lower().endswith(".pdf")
+    out_name = f"{base}_redacted_{rec_id}.{'pdf' if is_pdf else 'txt'}"
     out_path = STORAGE_DIR / out_name
-    out_path.write_text(redacted, encoding="utf-8")
-    size_kb = round(out_path.stat().st_size / 1024, 2)
 
-    with get_conn(firm_id) as conn:
-        conn.execute(
-            """INSERT INTO redactions
-               (id, firm_id, filename, original_filename, size_kb, style,
-                total_redactions, confidence_score, file_path, created_at)
-               VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)""",
-            (rec_id, firm_id, out_name, fname, size_kb, style,
-             len(findings), confidence, str(out_path),
-             datetime.now(timezone.utc).isoformat()),
-        )
+    try:
+        if is_pdf:
+            _create_redacted_pdf(content, fname, findings, style, out_path)
+        else:
+            out_path.write_text(redacted, encoding="utf-8")
+        size_kb = round(out_path.stat().st_size / 1024, 2)
+    except Exception as e:
+        logger.error(f"[redaction] Redacted file generation failed: {e}")
+        # Final fallback: plain text
+        out_name = f"{base}_redacted_{rec_id}.txt"
+        out_path = STORAGE_DIR / out_name
+        out_path.write_text(redacted, encoding="utf-8")
+        size_kb = round(out_path.stat().st_size / 1024, 2)
+
+    try:
+        with get_conn(firm_id) as conn:
+            conn.execute(
+                """INSERT INTO redactions
+                   (id, firm_id, filename, original_filename, size_kb, style,
+                    total_redactions, confidence_score, file_path, created_at)
+                   VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)""",
+                (rec_id, firm_id, out_name, fname, size_kb, style,
+                 len(findings), confidence, str(out_path),
+                 datetime.now(timezone.utc).isoformat()),
+            )
+    except Exception as e:
+        logger.error(f"[redaction] DB insert failed: {e}")
+        out_path.unlink(missing_ok=True)
+        raise HTTPException(500, "Failed to save redaction record.")
 
     categories_found = list({f["category"] for f in findings})
     return {
@@ -532,4 +635,8 @@ async def download_redacted_file(request: Request, redaction_id: str):
     fpath = Path(row["file_path"])
     if not fpath.exists():
         raise HTTPException(404, "File no longer exists on disk")
-    return FileResponse(path=str(fpath), filename=row["filename"], media_type="text/plain")
+    return FileResponse(
+        path=str(fpath),
+        filename=row["filename"],
+        media_type=_media_type_for_filename(row["filename"]),
+    )

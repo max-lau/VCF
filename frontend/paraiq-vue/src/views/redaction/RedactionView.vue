@@ -2,20 +2,22 @@
 import { ref, onMounted, computed } from 'vue'
 import client from '@/api/client'
 
-const tab          = ref('text')
-const inputText    = ref('')
-const redacted     = ref('')
-const findings     = ref([])
-const pdfFile      = ref(null)
-const pdfFileInput = ref(null)
-const threshold    = ref(0.5)
-const style        = ref('label')
-const useClaude    = ref(true)
-const loading      = ref(false)
-const error        = ref(null)
-const files        = ref([])
-const currentPdfId = ref(null)
-const presidioOk   = ref(null)
+const tab             = ref('text')
+const inputText       = ref('')
+const redacted        = ref('')
+const findings        = ref([])
+const pdfFile         = ref(null)
+const pdfFileInput    = ref(null)
+const originalPdfUrl  = ref(null)
+const redactedPdfUrl  = ref(null)
+const threshold       = ref(0.5)
+const style           = ref('label')
+const useClaude       = ref(true)
+const loading         = ref(false)
+const error           = ref(null)
+const files           = ref([])
+const currentPdfId    = ref(null)
+const presidioOk      = ref(null)
 
 const MAX_FILE_SIZE = 20 * 1024 * 1024
 
@@ -47,15 +49,22 @@ function onPdfFile(e) {
   if (f && f.size > MAX_FILE_SIZE) {
     error.value = 'File too large. Max size is 20 MB.'
     pdfFile.value = null
+    originalPdfUrl.value = null
     return
   }
   pdfFile.value = f || null
+  if (originalPdfUrl.value) URL.revokeObjectURL(originalPdfUrl.value)
+  originalPdfUrl.value = f ? URL.createObjectURL(f) : null
+  redactedPdfUrl.value = null
+  currentPdfId.value = null
   error.value = null
 }
 
 async function redactPdf() {
   if (!pdfFile.value) return
   loading.value = true; error.value = null; currentPdfId.value = null
+  if (redactedPdfUrl.value) URL.revokeObjectURL(redactedPdfUrl.value)
+  redactedPdfUrl.value = null
   try {
     const fd = new FormData()
     fd.append('file', pdfFile.value)
@@ -68,6 +77,17 @@ async function redactPdf() {
     redacted.value = data.redacted_preview || ''
     findings.value = data.findings || []
     presidioOk.value = data.presidio_available
+
+    // Load redacted file as blob for side-by-side preview
+    if (currentPdfId.value) {
+      const res = await fetch(`/redact/${currentPdfId.value}/download`, {
+        headers: { 'Authorization': `Bearer ${localStorage.getItem('paraiq_token')}` }
+      })
+      if (res.ok) {
+        const blob = await res.blob()
+        redactedPdfUrl.value = URL.createObjectURL(blob)
+      }
+    }
     await fetchFiles()
   } catch(e) {
     error.value = e.response?.data?.detail || 'PDF redaction failed'
@@ -166,7 +186,7 @@ onMounted(fetchFiles)
     <!-- PDF tab -->
     <div v-if="tab === 'pdf'" class="panel">
       <div class="drop-zone" :class="{ 'has-file': pdfFile }"
-        @dragover.prevent @drop.prevent="e => { pdfFile = e.dataTransfer.files[0] }"
+        @dragover.prevent @drop.prevent="e => { const f = e.dataTransfer.files[0]; if (f) { pdfFile = f; onPdfFile({ target: { files: [f] } }) } }"
         @click="pdfFileInput.click()">
         <input ref="pdfFileInput" type="file" accept=".pdf,.txt,.docx" style="display:none" @change="onPdfFile"/>
         <div class="drop-zone__icon">↑</div>
@@ -178,9 +198,29 @@ onMounted(fetchFiles)
           {{ loading ? 'Processing…' : 'Redact File' }}
         </button>
       </div>
+
+      <!-- Side-by-side PDF preview -->
+      <div v-if="originalPdfUrl || redactedPdfUrl" class="pdf-preview-row">
+        <div class="pdf-preview-col">
+          <div class="col-label">Original file</div>
+          <iframe v-if="originalPdfUrl" :src="originalPdfUrl" class="pdf-frame" type="application/pdf"></iframe>
+          <div v-else class="pdf-frame pdf-frame--empty">Original preview unavailable</div>
+        </div>
+        <div class="pdf-preview-col">
+          <div class="col-label">Redacted file</div>
+          <iframe v-if="redactedPdfUrl" :src="redactedPdfUrl" class="pdf-frame" type="application/pdf"></iframe>
+          <div v-else class="pdf-frame pdf-frame--empty">Redacted preview will appear here…</div>
+        </div>
+      </div>
+
       <div v-if="currentPdfId" class="success-msg">
         ✓ Redaction complete —
         <button class="link-btn" @click="downloadPdf(currentPdfId)">Download redacted file</button>
+      </div>
+
+      <div v-if="findings.length && tab === 'pdf'" class="findings-summary">
+        {{ findings.length }} PII finding{{ findings.length !== 1 ? 's' : '' }} detected
+        <span v-if="findings.some(f => f.source === 'claude')" class="dim sm">(Claude-enhanced)</span>
       </div>
     </div>
 
@@ -244,6 +284,11 @@ onMounted(fetchFiles)
 .drop-zone__title { color: var(--text-primary); font-size: .9rem; font-weight: 500; margin-bottom: .2rem; }
 .drop-zone__sub   { color: var(--text-muted); font-size: .75rem; }
 .submit-row { display: flex; justify-content: flex-end; margin-top: .75rem; }
+
+.pdf-preview-row { display: grid; grid-template-columns: 1fr 1fr; gap: 1rem; margin-top: 1rem; }
+.pdf-preview-col { display: flex; flex-direction: column; gap: .5rem; min-height: 420px; }
+.pdf-frame { flex: 1; width: 100%; min-height: 400px; border: 1px solid var(--border); border-radius: 6px; background: var(--bg-raised, #0d0d1a); }
+.pdf-frame--empty { display: flex; align-items: center; justify-content: center; color: var(--text-muted); font-style: italic; font-size: .875rem; }
 
 .piq-btn-gold { background: var(--gold); border: none; border-radius: 6px; color: #000; cursor: pointer; font-size: .875rem; font-weight: 600; padding: .55rem 1.4rem; transition: opacity .2s; }
 .piq-btn-gold:hover:not(:disabled) { opacity: .85; }
