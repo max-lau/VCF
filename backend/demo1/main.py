@@ -37,6 +37,7 @@ from dotenv import load_dotenv
 from backend.demo1.database import init_db, query_analyses
 import anthropic
 from backend.demo1.intelligence import get_deadline_radar
+from backend.demo1.contradiction import clean_json
 from backend.demo1.vcf_deadlines import router as vcf_deadlines_router
 from backend.demo1.vcf_disbursements import router as vcf_disbursements_router
 from backend.demo1.vcf_account import router as vcf_account_router, init_vcf_account_table

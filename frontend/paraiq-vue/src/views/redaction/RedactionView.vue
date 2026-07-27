@@ -1,46 +1,77 @@
 <script setup>
-import { ref, onMounted } from 'vue'
+import { ref, onMounted, computed } from 'vue'
 import client from '@/api/client'
 
-const tab         = ref('text')
-const inputText   = ref('')
-const redacted    = ref('')
-const pdfFile     = ref(null)
-const pdfFileInput= ref(null)
-const threshold   = ref(0.5)
-const style       = ref('black')
-const useClaude   = ref(false)
-const loading     = ref(false)
-const error       = ref(null)
-const files       = ref([])
-const currentPdfId= ref(null)
+const tab          = ref('text')
+const inputText    = ref('')
+const redacted     = ref('')
+const findings     = ref([])
+const pdfFile      = ref(null)
+const pdfFileInput = ref(null)
+const threshold    = ref(0.5)
+const style        = ref('label')
+const useClaude    = ref(true)
+const loading      = ref(false)
+const error        = ref(null)
+const files        = ref([])
+const currentPdfId = ref(null)
+const presidioOk   = ref(null)
+
+const MAX_FILE_SIZE = 20 * 1024 * 1024
+
+const styleLabel = computed(() => {
+  const labels = { label: 'Label [CATEGORY]', black: 'Black box', white: 'White out', highlight: 'Highlight [[CATEGORY]]' }
+  return labels[style.value] || style.value
+})
 
 async function redactText() {
   if (!inputText.value.trim()) return
-  loading.value = true; error.value = null
+  loading.value = true; error.value = null; redacted.value = ''; findings.value = []
   try {
-    const { data } = await client.post('/redact/text', { text: inputText.value })
-    redacted.value = data.redacted_text || data.text || JSON.stringify(data)
-  } catch(e) { error.value = e.response?.data?.detail || 'Redaction failed' }
-  finally { loading.value = false }
+    const { data } = await client.post('/redact/text', {
+      text: inputText.value,
+      threshold: threshold.value,
+      style: style.value,
+      use_claude: useClaude.value,
+    })
+    redacted.value = data.redacted_text || ''
+    findings.value = data.findings || []
+    presidioOk.value = data.presidio_available
+  } catch(e) {
+    error.value = e.response?.data?.detail || 'Redaction failed'
+  } finally { loading.value = false }
 }
 
-function onPdfFile(e) { pdfFile.value = e.target.files[0] || null }
+function onPdfFile(e) {
+  const f = e.target.files?.[0]
+  if (f && f.size > MAX_FILE_SIZE) {
+    error.value = 'File too large. Max size is 20 MB.'
+    pdfFile.value = null
+    return
+  }
+  pdfFile.value = f || null
+  error.value = null
+}
 
 async function redactPdf() {
   if (!pdfFile.value) return
-  loading.value = true; error.value = null
+  loading.value = true; error.value = null; currentPdfId.value = null
   try {
     const fd = new FormData()
     fd.append('file', pdfFile.value)
     const { data } = await client.post(
       `/redact/pdf?threshold=${threshold.value}&style=${style.value}&use_claude=${useClaude.value}`,
-      fd
+      fd,
+      { headers: { 'Content-Type': 'multipart/form-data' } }
     )
-    currentPdfId.value = data.id || data.file_id || null
+    currentPdfId.value = data.redaction_id || null
+    redacted.value = data.redacted_preview || ''
+    findings.value = data.findings || []
+    presidioOk.value = data.presidio_available
     await fetchFiles()
-  } catch(e) { error.value = e.response?.data?.detail || 'PDF redaction failed' }
-  finally { loading.value = false }
+  } catch(e) {
+    error.value = e.response?.data?.detail || 'PDF redaction failed'
+  } finally { loading.value = false }
 }
 
 function downloadPdf(id) {
@@ -56,7 +87,7 @@ async function deleteFile(id) {
 async function fetchFiles() {
   try {
     const { data } = await client.get('/redact/files')
-    files.value = data.files || data || []
+    files.value = data.files || []
   } catch { files.value = [] }
 }
 
@@ -73,7 +104,10 @@ onMounted(fetchFiles)
     <div class="mod__header">
       <div>
         <h1 class="mod__title">Redaction</h1>
-        <p class="mod__sub">Automated PII and privilege redaction</p>
+        <p class="mod__sub">
+          Automated PII and privilege redaction for safe external sharing.
+          <span v-if="presidioOk === false" class="fallback-badge">Claude-only mode — Presidio not installed</span>
+        </p>
       </div>
     </div>
 
@@ -85,6 +119,26 @@ onMounted(fetchFiles)
     </div>
 
     <div v-if="error" class="err-msg">{{ error }}</div>
+
+    <!-- Shared options -->
+    <div class="options-row">
+      <label class="opt-label">Threshold
+        <input type="range" v-model.number="threshold" min="0" max="1" step="0.05" style="width:120px"/>
+        <span class="opt-val">{{ threshold }}</span>
+      </label>
+      <label class="opt-label">Style
+        <select v-model="style" class="piq-select">
+          <option value="label">Label [CATEGORY]</option>
+          <option value="black">Black box</option>
+          <option value="white">White out</option>
+          <option value="highlight">Highlight</option>
+        </select>
+      </label>
+      <label class="opt-label checkbox">
+        <input type="checkbox" v-model="useClaude"/>
+        Use Claude AI
+      </label>
+    </div>
 
     <!-- Text tab -->
     <div v-if="tab === 'text'" class="panel">
@@ -98,48 +152,35 @@ onMounted(fetchFiles)
           </button>
         </div>
         <div class="col-block">
-          <div class="col-label">Redacted output</div>
+          <div class="col-label">Redacted output — {{ styleLabel }}</div>
           <div class="redacted-box" v-if="redacted">{{ redacted }}</div>
           <div class="redacted-box redacted-box--empty" v-else>Redacted text will appear here…</div>
+          <div v-if="findings.length" class="findings-summary">
+            {{ findings.length }} finding{{ findings.length !== 1 ? 's' : '' }}
+            <span v-if="findings.some(f => f.source === 'claude')" class="dim sm">(Claude-enhanced)</span>
+          </div>
         </div>
       </div>
     </div>
 
     <!-- PDF tab -->
     <div v-if="tab === 'pdf'" class="panel">
-      <div class="options-row">
-        <label class="opt-label">Threshold
-          <input type="range" v-model.number="threshold" min="0" max="1" step="0.05" style="width:120px"/>
-          <span class="opt-val">{{ threshold }}</span>
-        </label>
-        <label class="opt-label">Style
-          <select v-model="style" class="piq-select">
-            <option value="black">Black box</option>
-            <option value="white">White out</option>
-            <option value="highlight">Highlight</option>
-          </select>
-        </label>
-        <label class="opt-label checkbox">
-          <input type="checkbox" v-model="useClaude"/>
-          Use Claude AI
-        </label>
-      </div>
       <div class="drop-zone" :class="{ 'has-file': pdfFile }"
         @dragover.prevent @drop.prevent="e => { pdfFile = e.dataTransfer.files[0] }"
         @click="pdfFileInput.click()">
-        <input ref="pdfFileInput" type="file" accept=".pdf" style="display:none" @change="onPdfFile"/>
+        <input ref="pdfFileInput" type="file" accept=".pdf,.txt,.docx" style="display:none" @change="onPdfFile"/>
         <div class="drop-zone__icon">↑</div>
-        <div class="drop-zone__title">{{ pdfFile ? pdfFile.name : 'Drop PDF here or click to upload' }}</div>
-        <div class="drop-zone__sub">PDF files only</div>
+        <div class="drop-zone__title">{{ pdfFile ? pdfFile.name : 'Drop file here or click to upload' }}</div>
+        <div class="drop-zone__sub">PDF, TXT, DOCX · max 20 MB</div>
       </div>
       <div class="submit-row">
         <button class="piq-btn-gold" :disabled="loading || !pdfFile" @click="redactPdf">
-          {{ loading ? 'Processing…' : 'Redact PDF' }}
+          {{ loading ? 'Processing…' : 'Redact File' }}
         </button>
       </div>
       <div v-if="currentPdfId" class="success-msg">
         ✓ Redaction complete —
-        <button class="link-btn" @click="downloadPdf(currentPdfId)">Download redacted PDF</button>
+        <button class="link-btn" @click="downloadPdf(currentPdfId)">Download redacted file</button>
       </div>
     </div>
 
@@ -150,12 +191,12 @@ onMounted(fetchFiles)
         <table class="piq-table">
           <thead><tr><th>File</th><th>Date</th><th>Style</th><th>Download</th><th></th></tr></thead>
           <tbody>
-            <tr v-for="f in files" :key="f.id">
-              <td class="bold">{{ f.filename || f.file_name || `File #${f.id}` }}</td>
+            <tr v-for="f in files" :key="f.redaction_id">
+              <td class="bold">{{ f.filename || `File #${f.redaction_id}` }}</td>
               <td class="dim">{{ fmtDate(f.created_at) }}</td>
               <td class="dim">{{ f.style || '—' }}</td>
-              <td><button class="action-btn" @click="downloadPdf(f.id)">↓ Download</button></td>
-              <td><button class="action-btn action-btn--del" @click="deleteFile(f.id)">✕</button></td>
+              <td><button class="action-btn" @click="downloadPdf(f.redaction_id)">↓ Download</button></td>
+              <td><button class="action-btn action-btn--del" @click="deleteFile(f.redaction_id)">✕</button></td>
             </tr>
           </tbody>
         </table>
@@ -170,6 +211,7 @@ onMounted(fetchFiles)
 .mod__header { margin-bottom: 1.25rem; }
 .mod__title { font-family: var(--font-display); font-size: 1.6rem; color: var(--gold); margin: 0; }
 .mod__sub   { color: var(--text-muted); font-size: 0.85rem; margin: 0.25rem 0 0; }
+.fallback-badge { display: inline-block; margin-left: .5rem; padding: .15rem .5rem; border-radius: 4px; background: rgba(246,173,85,.15); color: #f6ad55; font-size: .72rem; font-weight: 600; }
 
 .tab-bar { display: flex; gap: .5rem; margin-bottom: 1.25rem; border-bottom: 1px solid var(--border); padding-bottom: .75rem; }
 .tab-btn { background: none; border: 1px solid transparent; border-radius: 6px; color: var(--text-muted); cursor: pointer; font-size: .875rem; padding: .4rem .9rem; transition: all .15s; }
@@ -181,6 +223,12 @@ onMounted(fetchFiles)
 .success-msg { color: #48bb78; font-size: .875rem; margin-top: .75rem; }
 .link-btn { background: none; border: none; color: var(--gold); cursor: pointer; font-size: .875rem; text-decoration: underline; }
 
+.options-row { display: flex; align-items: center; gap: 1.5rem; flex-wrap: wrap; margin-bottom: 1rem; padding: .75rem 1rem; background: var(--bg-card); border: 1px solid var(--border); border-radius: 8px; }
+.opt-label { display: flex; align-items: center; gap: .5rem; font-size: .8rem; color: var(--text-muted); }
+.opt-label.checkbox { gap: .4rem; cursor: pointer; }
+.opt-val { color: var(--gold); font-weight: 600; min-width: 30px; }
+.piq-select { background: var(--bg-card); border: 1px solid var(--border); border-radius: 6px; color: var(--text-primary); font-size: .8rem; padding: .3rem .6rem; }
+
 .two-col { display: grid; grid-template-columns: 1fr 1fr; gap: 1rem; }
 .col-block { display: flex; flex-direction: column; gap: .5rem; }
 .col-label { font-size: .72rem; color: var(--text-muted); font-weight: 600; letter-spacing: .05em; text-transform: uppercase; }
@@ -188,12 +236,7 @@ onMounted(fetchFiles)
 .piq-textarea:focus { border-color: var(--gold); outline: none; }
 .redacted-box { background: var(--bg-raised, #0d0d1a); border: 1px solid var(--border); border-radius: 6px; flex: 1; font-size: .875rem; line-height: 1.6; min-height: 200px; padding: .75rem; white-space: pre-wrap; word-break: break-word; color: var(--text-primary); }
 .redacted-box--empty { color: var(--text-muted); font-style: italic; }
-
-.options-row { display: flex; align-items: center; gap: 1.5rem; flex-wrap: wrap; margin-bottom: 1rem; }
-.opt-label { display: flex; align-items: center; gap: .5rem; font-size: .8rem; color: var(--text-muted); }
-.opt-label.checkbox { gap: .4rem; cursor: pointer; }
-.opt-val { color: var(--gold); font-weight: 600; min-width: 30px; }
-.piq-select { background: var(--bg-card); border: 1px solid var(--border); border-radius: 6px; color: var(--text-primary); font-size: .8rem; padding: .3rem .6rem; }
+.findings-summary { font-size: .78rem; color: var(--text-muted); }
 
 .drop-zone { background: var(--bg-card); border: 2px dashed var(--border); border-radius: 10px; cursor: pointer; padding: 2rem; text-align: center; transition: border-color .15s; }
 .drop-zone:hover, .drop-zone.has-file { border-color: var(--gold); }
