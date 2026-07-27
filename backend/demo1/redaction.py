@@ -44,8 +44,29 @@ MAX_FILE_SIZE = 20 * 1024 * 1024  # 20 MB
 
 
 def init_redaction_table():
-    """No-op — table exists in Supabase Postgres."""
-    print("[Redaction] DB table initialized [OK]")
+    """Ensure the redactions table exists (idempotent safety net)."""
+    try:
+        with get_conn("default") as conn:
+            conn.execute("""
+                CREATE TABLE IF NOT EXISTS redactions (
+                    id                TEXT PRIMARY KEY,
+                    firm_id           TEXT NOT NULL DEFAULT 'default',
+                    filename          TEXT,
+                    original_filename TEXT,
+                    size_kb           REAL,
+                    style             TEXT,
+                    total_redactions  INTEGER,
+                    confidence_score  REAL,
+                    file_path         TEXT,
+                    created_at        TIMESTAMPTZ NOT NULL DEFAULT NOW()
+                )
+            """)
+            conn.execute(
+                "CREATE INDEX IF NOT EXISTS idx_redactions_firm ON redactions(firm_id, created_at DESC)"
+            )
+        print("[Redaction] DB table initialized [OK]")
+    except Exception as e:
+        print(f"[Redaction] DB table init warning: {e}")
 
 
 # ── Auth helper ───────────────────────────────────────────────────────────────
