@@ -56,7 +56,7 @@ Do NOT use markdown. Do NOT use backticks. Do NOT add any explanation.
 Start your response with {{ and end with }}.
 
 Text:
-"""{text[:4000] if len(text) <= 4000 else text[:4000] + "... [TRUNCATED]"}"""
+{text[:4000] if len(text) <= 4000 else text[:4000] + '... [TRUNCATED]'}
 
 Return exactly this structure:
 {{
