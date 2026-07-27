@@ -312,10 +312,11 @@ onMounted(() => {
 
 .submit-row { display: flex; justify-content: space-between; align-items: center; gap: 1rem; margin-top: .75rem; }
 
+/* Vault picker : original : redacted = 1 : 2 : 2 */
 .pdf-workspace { display: flex; gap: 1rem; min-height: 520px; }
-.pdf-preview-wrap { flex: 1; display: flex; flex-direction: column; min-width: 0; }
+.pdf-preview-wrap { flex: 4; display: flex; flex-direction: column; min-width: 0; }
 
-.doc-picker { width: 320px; flex-shrink: 0; border: 1px solid var(--border); border-radius: 8px; background: var(--bg-card); display: flex; flex-direction: column; max-height: 620px; transition: width .2s; }
+.doc-picker { flex: 1; min-width: 220px; max-width: 280px; border: 1px solid var(--border); border-radius: 8px; background: var(--bg-card); display: flex; flex-direction: column; max-height: 620px; transition: flex .2s; }
 .doc-picker.collapsed { width: 42px; }
 .doc-picker__header { display: flex; align-items: center; justify-content: space-between; padding: .65rem .8rem; border-bottom: 1px solid var(--border); cursor: pointer; user-select: none; }
 .doc-picker__header .col-label { margin: 0; }
