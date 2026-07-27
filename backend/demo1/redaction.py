@@ -35,6 +35,10 @@ _HERE = Path(__file__).parent
 STORAGE_DIR = Path(os.getenv("REDACTION_STORAGE_DIR", str(_HERE / "storage" / "redactions")))
 STORAGE_DIR.mkdir(parents=True, exist_ok=True)
 
+TEMP_UPLOAD_DIR = Path(os.getenv("REDACTION_TEMP_DIR", str(_HERE / "storage" / "redaction_uploads")))
+TEMP_UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
+TEMP_MAX_AGE_HOURS = 24
+
 MAX_TEXT_LEN = 25_000
 MAX_FILE_SIZE = 20 * 1024 * 1024  # 20 MB
 
@@ -381,6 +385,82 @@ def _media_type_for_filename(filename: str) -> str:
     return "text/plain"
 
 
+def _temp_dir_for_firm(firm_id: str) -> Path:
+    safe = re.sub(r"[^a-zA-Z0-9_-]", "_", firm_id)
+    d = TEMP_UPLOAD_DIR / safe
+    d.mkdir(parents=True, exist_ok=True)
+    return d
+
+
+def _find_temp_file(firm_id: str, temp_id: str) -> Path | None:
+    if not re.match(r"^[a-zA-Z0-9_-]+$", temp_id):
+        return None
+    d = _temp_dir_for_firm(firm_id)
+    matches = [f for f in d.iterdir() if f.is_file() and f.name.startswith(f"{temp_id}_")]
+    return matches[0] if matches else None
+
+
+def _process_redaction_file(content: bytes, fname: str, threshold: float, style: str, use_claude: bool, firm_id: str):
+    """Shared redaction pipeline: extract, redact, generate output file, persist record."""
+    text = _extract_text_from_bytes(content, fname)
+    if not text.strip():
+        raise HTTPException(400, "No text could be extracted from the file")
+
+    redacted, findings, confidence = _redact_text(text, threshold, style, use_claude, firm_id)
+
+    rec_id = str(uuid.uuid4())[:8]
+    base = os.path.splitext(fname)[0]
+    is_pdf = fname.lower().endswith(".pdf")
+    out_name = f"{base}_redacted_{rec_id}.{'pdf' if is_pdf else 'txt'}"
+    out_path = STORAGE_DIR / out_name
+
+    try:
+        if is_pdf:
+            _create_redacted_pdf(content, fname, findings, style, out_path)
+        else:
+            out_path.write_text(redacted, encoding="utf-8")
+        size_kb = round(out_path.stat().st_size / 1024, 2)
+    except Exception as e:
+        logger.error(f"[redaction] Redacted file generation failed: {e}")
+        out_name = f"{base}_redacted_{rec_id}.txt"
+        out_path = STORAGE_DIR / out_name
+        out_path.write_text(redacted, encoding="utf-8")
+        size_kb = round(out_path.stat().st_size / 1024, 2)
+
+    try:
+        with get_conn(firm_id) as conn:
+            conn.execute(
+                """INSERT INTO redactions
+                   (id, firm_id, filename, original_filename, size_kb, style,
+                    total_redactions, confidence_score, file_path, created_at)
+                   VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)""",
+                (rec_id, firm_id, out_name, fname, size_kb, style,
+                 len(findings), confidence, str(out_path),
+                 datetime.now(timezone.utc).isoformat()),
+            )
+    except Exception as e:
+        logger.error(f"[redaction] DB insert failed: {e}")
+        out_path.unlink(missing_ok=True)
+        raise HTTPException(500, "Failed to save redaction record.")
+
+    return {
+        "redacted_text": redacted,
+        "redacted_preview": redacted[:1000],
+        "original_text": text[:500] + ("..." if len(text) > 500 else ""),
+        "findings": findings,
+        "text_findings": findings,
+        "total_redactions": len(findings),
+        "confidence_score": confidence,
+        "redaction_id": rec_id,
+        "download_url": f"/redact/{rec_id}/download",
+        "filename": out_name,
+        "size_kb": size_kb,
+        "categories_found": list({f["category"] for f in findings}),
+        "pages_processed": 1,
+        "presidio_available": _check_presidio(),
+    }
+
+
 # ── Request models ────────────────────────────────────────────────────────────
 class RedactTextRequest(BaseModel):
     text: str = Field(..., min_length=1, max_length=MAX_TEXT_LEN)
@@ -419,6 +499,48 @@ async def redact_text_endpoint(request: Request, req: RedactTextRequest):
     }
 
 
+@router.post("/upload-temp")
+async def upload_temp_redaction_file(request: Request, file: UploadFile = File(...)):
+    """Stage a file on the server so the original can be previewed from a same-origin URL."""
+    _require_auth(request)
+    firm_id = _get_firm_id(request)
+
+    content = await file.read()
+    if len(content) > MAX_FILE_SIZE:
+        raise HTTPException(413, f"File too large. Max size is {MAX_FILE_SIZE // (1024*1024)} MB.")
+    if not content:
+        raise HTTPException(400, "Empty file")
+
+    temp_id = str(uuid.uuid4())[:12]
+    fname = file.filename or "document"
+    safe_fname = re.sub(r"[^a-zA-Z0-9._-]", "_", fname)
+    dest = _temp_dir_for_firm(firm_id) / f"{temp_id}_{safe_fname}"
+    dest.write_bytes(content)
+
+    return {
+        "temp_id": temp_id,
+        "filename": fname,
+        "original_url": f"/redact/temp/{temp_id}/original",
+    }
+
+
+@router.get("/temp/{temp_id}/original")
+async def serve_temp_original(request: Request, temp_id: str):
+    _require_auth(request)
+    firm_id = _get_firm_id(request)
+
+    fpath = _find_temp_file(firm_id, temp_id)
+    if not fpath:
+        raise HTTPException(404, "Temp file not found")
+
+    original_name = fpath.name[len(temp_id) + 1:]
+    return FileResponse(
+        path=str(fpath),
+        filename=original_name,
+        media_type=_media_type_for_filename(original_name),
+    )
+
+
 @router.post("/pdf")
 async def redact_pdf(
     request: Request,
@@ -436,77 +558,28 @@ async def redact_pdf(
         raise HTTPException(413, f"File too large. Max size is {MAX_FILE_SIZE // (1024*1024)} MB.")
 
     fname = file.filename or "document"
+    return _process_redaction_file(content, fname, threshold, style, use_claude, firm_id)
 
-    try:
-        text = _extract_text_from_bytes(content, fname)
-    except Exception as e:
-        logger.error(f"[redaction] Extraction failed: {e}")
-        raise HTTPException(400, f"Could not extract text from file: {e}")
 
-    if not text.strip():
-        raise HTTPException(400, "No text could be extracted from the file")
+@router.post("/pdf-from-temp/{temp_id}")
+async def redact_pdf_from_temp(
+    request: Request,
+    temp_id: str,
+    threshold: float = Query(0.5, ge=0.0, le=1.0),
+    style: str = Query("label"),
+    use_claude: bool = Query(True),
+):
+    _require_auth(request)
+    firm_id = _get_firm_id(request)
+    style = _normalize_style(style)
 
-    try:
-        redacted, findings, confidence = _redact_text(text, threshold, style, use_claude, firm_id)
-    except HTTPException:
-        raise
-    except Exception as e:
-        logger.error(f"[redaction] Redaction error: {e}")
-        raise HTTPException(500, "Redaction failed. Please try again.")
+    fpath = _find_temp_file(firm_id, temp_id)
+    if not fpath:
+        raise HTTPException(404, "Temp file not found")
 
-    rec_id = str(uuid.uuid4())[:8]
-    base = os.path.splitext(fname)[0]
-    is_pdf = fname.lower().endswith(".pdf")
-    out_name = f"{base}_redacted_{rec_id}.{'pdf' if is_pdf else 'txt'}"
-    out_path = STORAGE_DIR / out_name
-
-    try:
-        if is_pdf:
-            _create_redacted_pdf(content, fname, findings, style, out_path)
-        else:
-            out_path.write_text(redacted, encoding="utf-8")
-        size_kb = round(out_path.stat().st_size / 1024, 2)
-    except Exception as e:
-        logger.error(f"[redaction] Redacted file generation failed: {e}")
-        # Final fallback: plain text
-        out_name = f"{base}_redacted_{rec_id}.txt"
-        out_path = STORAGE_DIR / out_name
-        out_path.write_text(redacted, encoding="utf-8")
-        size_kb = round(out_path.stat().st_size / 1024, 2)
-
-    try:
-        with get_conn(firm_id) as conn:
-            conn.execute(
-                """INSERT INTO redactions
-                   (id, firm_id, filename, original_filename, size_kb, style,
-                    total_redactions, confidence_score, file_path, created_at)
-                   VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)""",
-                (rec_id, firm_id, out_name, fname, size_kb, style,
-                 len(findings), confidence, str(out_path),
-                 datetime.now(timezone.utc).isoformat()),
-            )
-    except Exception as e:
-        logger.error(f"[redaction] DB insert failed: {e}")
-        out_path.unlink(missing_ok=True)
-        raise HTTPException(500, "Failed to save redaction record.")
-
-    categories_found = list({f["category"] for f in findings})
-    return {
-        "redacted_text": redacted,
-        "redacted_preview": redacted[:1000],
-        "original_text": text[:500] + ("..." if len(text) > 500 else ""),
-        "findings": findings,
-        "text_findings": findings,
-        "total_redactions": len(findings),
-        "confidence_score": confidence,
-        "redaction_id": rec_id,
-        "download_url": f"/redact/{rec_id}/download",
-        "filename": out_name,
-        "size_kb": size_kb,
-        "categories_found": categories_found,
-        "pages_processed": 1,
-        "presidio_available": _check_presidio(),
-    }
+    content = fpath.read_bytes()
+    fname = fpath.name[len(temp_id) + 1:]
+    return _process_redaction_file(content, fname, threshold, style, use_claude, firm_id)
 
 
 @router.get("/files")

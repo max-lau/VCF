@@ -10,6 +10,7 @@ const pdfFile         = ref(null)
 const pdfFileInput    = ref(null)
 const originalPdfUrl  = ref(null)
 const redactedPdfUrl  = ref(null)
+const tempId          = ref(null)
 const threshold       = ref(0.5)
 const style           = ref('label')
 const useClaude       = ref(true)
@@ -44,34 +45,51 @@ async function redactText() {
   } finally { loading.value = false }
 }
 
-function onPdfFile(e) {
+async function onPdfFile(e) {
   const f = e.target.files?.[0]
   if (f && f.size > MAX_FILE_SIZE) {
     error.value = 'File too large. Max size is 20 MB.'
     pdfFile.value = null
     originalPdfUrl.value = null
+    tempId.value = null
     return
   }
   pdfFile.value = f || null
   if (originalPdfUrl.value) URL.revokeObjectURL(originalPdfUrl.value)
-  originalPdfUrl.value = f ? URL.createObjectURL(f) : null
+  if (redactedPdfUrl.value) URL.revokeObjectURL(redactedPdfUrl.value)
+  originalPdfUrl.value = null
   redactedPdfUrl.value = null
+  tempId.value = null
   currentPdfId.value = null
   error.value = null
+
+  if (!f) return
+  // Stage file on the backend so the original can be served from a same-origin URL.
+  loading.value = true
+  try {
+    const fd = new FormData()
+    fd.append('file', f)
+    const { data } = await client.post('/redact/upload-temp', fd, {
+      headers: { 'Content-Type': 'multipart/form-data' }
+    })
+    tempId.value = data.temp_id
+    originalPdfUrl.value = data.original_url
+  } catch (e) {
+    error.value = e.response?.data?.detail || 'Failed to stage file for preview'
+    pdfFile.value = null
+  } finally {
+    loading.value = false
+  }
 }
 
 async function redactPdf() {
-  if (!pdfFile.value) return
+  if (!tempId.value) return
   loading.value = true; error.value = null; currentPdfId.value = null
   if (redactedPdfUrl.value) URL.revokeObjectURL(redactedPdfUrl.value)
   redactedPdfUrl.value = null
   try {
-    const fd = new FormData()
-    fd.append('file', pdfFile.value)
     const { data } = await client.post(
-      `/redact/pdf?threshold=${threshold.value}&style=${style.value}&use_claude=${useClaude.value}`,
-      fd,
-      { headers: { 'Content-Type': 'multipart/form-data' } }
+      `/redact/pdf-from-temp/${tempId.value}?threshold=${threshold.value}&style=${style.value}&use_claude=${useClaude.value}`
     )
     currentPdfId.value = data.redaction_id || null
     redacted.value = data.redacted_preview || ''
@@ -194,7 +212,7 @@ onMounted(fetchFiles)
         <div class="drop-zone__sub">PDF, TXT, DOCX · max 20 MB</div>
       </div>
       <div class="submit-row">
-        <button class="piq-btn-gold" :disabled="loading || !pdfFile" @click="redactPdf">
+        <button class="piq-btn-gold" :disabled="loading || !tempId" @click="redactPdf">
           {{ loading ? 'Processing…' : 'Redact File' }}
         </button>
       </div>
