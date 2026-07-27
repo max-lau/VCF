@@ -19,12 +19,16 @@ Usage in main.py:
 """
 
 import os
+import re
 import logging
 from starlette.middleware.base import BaseHTTPMiddleware
 from starlette.requests import Request
 from starlette.responses import Response
 
 logger = logging.getLogger(__name__)
+
+# Paths that must be frameable (PDF previews/downloads inside the app).
+_FRAMEABLE_PATH_REGEX = re.compile(r"^/redact/document/|^/redact/[a-zA-Z0-9_-]{6,24}/download$")
 
 # ── Configurable CSP directives ───────────────────────────────────────────────
 
@@ -68,9 +72,14 @@ class SecurityHeadersMiddleware(BaseHTTPMiddleware):
 
     async def dispatch(self, request: Request, call_next):
         response: Response = await call_next(request)
+        path = request.url.path
+        allow_framing = bool(_FRAMEABLE_PATH_REGEX.match(path))
 
         # --- Content-Security-Policy ---
         csp = os.getenv("PARAIQ_CSP", _DEFAULT_CSP)
+        if allow_framing:
+            # Keep the rest of the CSP but allow same-origin framing for PDF previews.
+            csp = csp.replace("frame-ancestors 'none'", "frame-ancestors 'self'")
         response.headers["Content-Security-Policy"] = csp
 
         # --- HSTS (only for HTTPS or when behind a TLS-terminating proxy) ---
@@ -85,6 +94,8 @@ class SecurityHeadersMiddleware(BaseHTTPMiddleware):
 
         # --- Static security headers ---
         for key, value in _SECURITY_HEADERS.items():
+            if allow_framing and key in ("X-Frame-Options",):
+                continue
             response.headers.setdefault(key, value)
 
         return response
