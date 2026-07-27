@@ -14,6 +14,7 @@ from fastapi import APIRouter, HTTPException, Request
 from pydantic import BaseModel
 
 from backend.demo1.ai_client import get_client
+from backend.demo1 import medical_bert
 
 logger = logging.getLogger(__name__)
 router = APIRouter()
@@ -41,6 +42,30 @@ def _clean_json(raw: str) -> str:
 class MedicalNlpInput(BaseModel):
     text: str
     case_id: int | None = None
+    use_local_bert: bool = True
+
+
+def _merge_conditions(claude_conditions: list, bert_conditions: list) -> list:
+    """Merge Claude and BioClinicalBERT condition lists, deduplicating by name."""
+    merged = {}
+    for c in claude_conditions:
+        name = c.get("name", "").lower().strip()
+        if name:
+            merged[name] = c
+    for c in bert_conditions:
+        name = c.get("name", "").lower().strip()
+        if not name:
+            continue
+        if name in merged:
+            # Boost relevance if both sources agree
+            existing = merged[name]
+            existing["relevance"] = round(max(existing.get("relevance", 0), c.get("relevance", 0)) + 0.05, 3)
+            existing["relevance"] = min(existing["relevance"], 1.0)
+            if "source" in existing and existing["source"] != c.get("source"):
+                existing["source"] = "claude+bert"
+        else:
+            merged[name] = c
+    return sorted(merged.values(), key=lambda x: x.get("relevance", 0), reverse=True)
 
 
 @router.post("/medical-nlp/analyze")
@@ -48,6 +73,17 @@ def analyze_medical_text(body: MedicalNlpInput, request: Request):
     text = (body.text or "").strip()
     if len(text) < 20:
         raise HTTPException(status_code=400, detail="Text too short (minimum 20 characters)")
+    if len(text) > 4000:
+        text = text[:4000]
+
+    bert_conditions = []
+    bert_available = False
+    if body.use_local_bert:
+        try:
+            bert_conditions = medical_bert.extract_medical_conditions(text)
+            bert_available = True
+        except Exception as e:
+            logger.warning(f"[MedicalNLP] Local BERT extraction failed: {e}")
 
     prompt = f"""Analyze the following medical text or questionnaire excerpt for a 9/11 VCF claim.
 
@@ -56,7 +92,7 @@ Do NOT use markdown. Do NOT use backticks. Do NOT add any explanation.
 Start your response with {{ and end with }}.
 
 Text:
-{text[:4000] if len(text) <= 4000 else text[:4000] + '... [TRUNCATED]'}
+{text}
 
 Return exactly this structure:
 {{
@@ -102,10 +138,25 @@ Rules:
         parsed.setdefault("claim_relevance", 0)
         parsed.setdefault("conditions", [])
         parsed.setdefault("follow_up", [])
-        parsed.setdefault("source", "claude-medical-nlp")
+
+        # Merge in local BERT conditions
+        if bert_conditions:
+            parsed["conditions"] = _merge_conditions(parsed["conditions"], bert_conditions)
+
+        parsed["source"] = "claude+bert" if bert_available else "claude-medical-nlp"
+        parsed["bert_available"] = bert_available
         return parsed
     except json.JSONDecodeError as e:
         logger.warning(f"[MedicalNLP] JSON parse error: {e}")
+        # Fallback: return BERT-only results if Claude JSON parse fails
+        if bert_conditions:
+            return {
+                "claim_relevance": 0.6,
+                "conditions": bert_conditions,
+                "follow_up": ["Review local BERT findings with an attorney."],
+                "source": "bioclinicalbert-only",
+                "bert_available": True,
+            }
         raise HTTPException(status_code=500, detail="AI response could not be parsed. Please try again.")
     except Exception as e:
         logger.error(f"[MedicalNLP] Analysis failed: {e}")

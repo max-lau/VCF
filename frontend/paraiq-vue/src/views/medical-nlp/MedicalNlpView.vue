@@ -2,11 +2,12 @@
 import { ref, onMounted } from 'vue'
 import axios from 'axios'
 
-const inputText = ref('')
-const result    = ref(null)
-const history   = ref([])
-const analyzing = ref(false)
-const error     = ref('')
+const inputText    = ref('')
+const result       = ref(null)
+const history      = ref([])
+const analyzing    = ref(false)
+const error        = ref('')
+const useLocalBert = ref(true)
 
 function authHdr() {
   return { Authorization: `Bearer ${localStorage.getItem('paraiq_token')}` }
@@ -19,7 +20,7 @@ async function analyze() {
   error.value = ''
   try {
     const { data } = await axios.post('/medical-nlp/analyze',
-      { text: inputText.value },
+      { text: inputText.value, use_local_bert: useLocalBert.value },
       { headers: authHdr() }
     )
     result.value = data
@@ -83,6 +84,10 @@ onMounted(() => {
           {{ analyzing ? 'Analyzing…' : '▶ Analyze Conditions' }}
         </button>
         <button class="btn-secondary" @click="inputText = ''; result = null; error = ''">Clear</button>
+        <label class="bert-toggle">
+          <input type="checkbox" v-model="useLocalBert" />
+          <span>Use local BioClinicalBERT</span>
+        </label>
       </div>
 
       <div v-if="result" class="result-panel">
@@ -90,7 +95,10 @@ onMounted(() => {
           <div class="result-badge" :style="{ background: relevanceColor(result.claim_relevance)+'22', color: relevanceColor(result.claim_relevance) }">
             Claim relevance {{ pct(result.claim_relevance) }}%
           </div>
-          <div class="result-source dim sm">via {{ result.source }}</div>
+          <div class="result-source dim sm">
+            via {{ result.source }}
+            <span v-if="result.bert_available === false" class="bert-offline"> · local BERT offline</span>
+          </div>
         </div>
 
         <div v-if="result.conditions?.length" class="conditions-list">
@@ -169,6 +177,9 @@ onMounted(() => {
 .btn-gold:disabled { opacity: .45; cursor: not-allowed; }
 .btn-secondary { background: transparent; border: 1px solid var(--border); border-radius: 6px; color: var(--text-muted); cursor: pointer; font-size: 0.85rem; padding: 0.5rem 1rem; transition: all .15s; }
 .btn-secondary:hover { background: var(--bg-raised); color: var(--text-primary); }
+.bert-toggle { display: inline-flex; align-items: center; gap: 0.4rem; margin-left: auto; font-size: 0.8rem; color: var(--text-muted); cursor: pointer; }
+.bert-toggle input { accent-color: var(--gold); }
+.bert-offline { color: #f6ad55; font-weight: 600; }
 .sm  { font-size: 0.78rem; }
 .dim { color: var(--text-muted); }
 </style>
