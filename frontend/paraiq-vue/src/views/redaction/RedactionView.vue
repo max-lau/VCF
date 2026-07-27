@@ -6,11 +6,12 @@ const tab             = ref('text')
 const inputText       = ref('')
 const redacted        = ref('')
 const findings        = ref([])
-const pdfFile         = ref(null)
-const pdfFileInput    = ref(null)
 const originalPdfUrl  = ref(null)
 const redactedPdfUrl  = ref(null)
-const tempId          = ref(null)
+const selectedDoc     = ref(null)
+const vaultDocs       = ref([])
+const pickerOpen      = ref(true)
+const docFilter       = ref('')
 const threshold       = ref(0.5)
 const style           = ref('label')
 const useClaude       = ref(true)
@@ -19,8 +20,6 @@ const error           = ref(null)
 const files           = ref([])
 const currentPdfId    = ref(null)
 const presidioOk      = ref(null)
-
-const MAX_FILE_SIZE = 20 * 1024 * 1024
 
 const styleLabel = computed(() => {
   const labels = { label: 'Label [CATEGORY]', black: 'Black box', white: 'White out', highlight: 'Highlight [[CATEGORY]]' }
@@ -45,57 +44,37 @@ async function redactText() {
   } finally { loading.value = false }
 }
 
-async function onPdfFile(e) {
-  const f = e.target.files?.[0]
-  if (f && f.size > MAX_FILE_SIZE) {
-    error.value = 'File too large. Max size is 20 MB.'
-    pdfFile.value = null
-    originalPdfUrl.value = null
-    tempId.value = null
-    return
-  }
-  pdfFile.value = f || null
-  if (originalPdfUrl.value) URL.revokeObjectURL(originalPdfUrl.value)
-  if (redactedPdfUrl.value) URL.revokeObjectURL(redactedPdfUrl.value)
-  originalPdfUrl.value = null
-  redactedPdfUrl.value = null
-  tempId.value = null
-  currentPdfId.value = null
-  error.value = null
-
-  if (!f) return
-  // Stage file on the backend so the original can be served from a same-origin URL.
-  loading.value = true
+async function fetchVaultDocs() {
   try {
-    const fd = new FormData()
-    fd.append('file', f)
-    const { data } = await client.post('/redact/upload-temp', fd, {
-      headers: { 'Content-Type': 'multipart/form-data' }
-    })
-    tempId.value = data.temp_id
-    originalPdfUrl.value = data.original_url
+    const { data } = await client.get('/redact/documents')
+    vaultDocs.value = data.documents || []
   } catch (e) {
-    error.value = e.response?.data?.detail || 'Failed to stage file for preview'
-    pdfFile.value = null
-  } finally {
-    loading.value = false
+    vaultDocs.value = []
   }
 }
 
+function selectDoc(doc) {
+  selectedDoc.value = doc
+  originalPdfUrl.value = doc?.original_url || null
+  redactedPdfUrl.value = null
+  currentPdfId.value = null
+  findings.value = []
+  error.value = null
+}
+
 async function redactPdf() {
-  if (!tempId.value) return
+  if (!selectedDoc.value) return
   loading.value = true; error.value = null; currentPdfId.value = null
   redactedPdfUrl.value = null
   try {
     const { data } = await client.post(
-      `/redact/pdf-from-temp/${tempId.value}?threshold=${threshold.value}&style=${style.value}&use_claude=${useClaude.value}`
+      `/redact/case-document/${selectedDoc.value.id}?threshold=${threshold.value}&style=${style.value}&use_claude=${useClaude.value}`
     )
     currentPdfId.value = data.redaction_id || null
     redacted.value = data.redacted_preview || ''
     findings.value = data.findings || []
     presidioOk.value = data.presidio_available
 
-    // Use the signed URL returned by the backend for the iframe preview.
     if (data.download_url) {
       redactedPdfUrl.value = data.download_url
     }
@@ -106,6 +85,7 @@ async function redactPdf() {
 }
 
 function downloadPdf(url) {
+  if (!url) return
   window.open(url, '_blank')
 }
 
@@ -127,7 +107,10 @@ function fmtDate(d) {
   return new Date(d).toLocaleDateString('en-US', { month:'short', day:'numeric', year:'numeric' })
 }
 
-onMounted(fetchFiles)
+onMounted(() => {
+  fetchFiles()
+  fetchVaultDocs()
+})
 </script>
 
 <template>
@@ -195,43 +178,71 @@ onMounted(fetchFiles)
     </div>
 
     <!-- PDF tab -->
-    <div v-if="tab === 'pdf'" class="panel">
-      <div class="drop-zone" :class="{ 'has-file': pdfFile }"
-        @dragover.prevent @drop.prevent="e => { const f = e.dataTransfer.files[0]; if (f) { pdfFile = f; onPdfFile({ target: { files: [f] } }) } }"
-        @click="pdfFileInput.click()">
-        <input ref="pdfFileInput" type="file" accept=".pdf,.txt,.docx" style="display:none" @change="onPdfFile"/>
-        <div class="drop-zone__icon">↑</div>
-        <div class="drop-zone__title">{{ pdfFile ? pdfFile.name : 'Drop file here or click to upload' }}</div>
-        <div class="drop-zone__sub">PDF, TXT, DOCX · max 20 MB</div>
-      </div>
-      <div class="submit-row">
-        <button class="piq-btn-gold" :disabled="loading || !tempId" @click="redactPdf">
-          {{ loading ? 'Processing…' : 'Redact File' }}
-        </button>
-      </div>
-
-      <!-- Side-by-side PDF preview -->
-      <div v-if="originalPdfUrl || redactedPdfUrl" class="pdf-preview-row">
-        <div class="pdf-preview-col">
-          <div class="col-label">Original file</div>
-          <iframe v-if="originalPdfUrl" :src="originalPdfUrl" class="pdf-frame" type="application/pdf"></iframe>
-          <div v-else class="pdf-frame pdf-frame--empty">Original preview unavailable</div>
+    <div v-if="tab === 'pdf'" class="panel pdf-panel">
+      <div class="pdf-workspace">
+        <!-- Document picker (right side) -->
+        <div class="doc-picker" :class="{ collapsed: !pickerOpen }">
+          <div class="doc-picker__header" @click="pickerOpen = !pickerOpen">
+            <span class="col-label">Document vault</span>
+            <span class="doc-picker__toggle">{{ pickerOpen ? '›' : '‹' }}</span>
+          </div>
+          <div v-if="pickerOpen" class="doc-picker__body">
+            <input v-model="docFilter" class="doc-picker__search" placeholder="Search files or cases…"/>
+            <div v-if="!vaultDocs.length" class="doc-picker__empty">No documents in the vault yet.<br>Run OCR Intake or Email Intake first.</div>
+            <div v-else class="doc-picker__list">
+              <button
+                v-for="doc in vaultDocs.filter(d => (d.document_name + ' ' + (d.case_number||'') + ' ' + (d.client_name||'')).toLowerCase().includes(docFilter.toLowerCase()))"
+                :key="doc.id"
+                class="doc-picker__item"
+                :class="{ active: selectedDoc?.id === doc.id }"
+                @click="selectDoc(doc)"
+              >
+                <div class="doc-picker__name">{{ doc.document_name }}</div>
+                <div class="doc-picker__meta">
+                  <span v-if="doc.case_number" class="case-chip">{{ doc.case_number }}</span>
+                  <span v-if="doc.client_name">{{ doc.client_name }}</span>
+                  <span v-if="doc.doc_type" class="dim">{{ doc.doc_type }}</span>
+                </div>
+              </button>
+            </div>
+          </div>
         </div>
-        <div class="pdf-preview-col">
-          <div class="col-label">Redacted file</div>
-          <iframe v-if="redactedPdfUrl" :src="redactedPdfUrl" class="pdf-frame" type="application/pdf"></iframe>
-          <div v-else class="pdf-frame pdf-frame--empty">Redacted preview will appear here…</div>
+
+        <!-- Preview area -->
+        <div class="pdf-preview-wrap">
+          <div class="submit-row">
+            <div class="selected-doc">
+              <span v-if="selectedDoc" class="selected-doc__name">{{ selectedDoc.document_name }}</span>
+              <span v-else class="selected-doc__placeholder">Select a document from the vault</span>
+            </div>
+            <button class="piq-btn-gold" :disabled="loading || !selectedDoc" @click="redactPdf">
+              {{ loading ? 'Processing…' : 'Redact File' }}
+            </button>
+          </div>
+
+          <div class="pdf-preview-row">
+            <div class="pdf-preview-col">
+              <div class="col-label">Original file</div>
+              <iframe v-if="originalPdfUrl" :src="originalPdfUrl" class="pdf-frame" type="application/pdf"></iframe>
+              <div v-else class="pdf-frame pdf-frame--empty">Select a vault document to preview the original…</div>
+            </div>
+            <div class="pdf-preview-col">
+              <div class="col-label">Redacted file</div>
+              <iframe v-if="redactedPdfUrl" :src="redactedPdfUrl" class="pdf-frame" type="application/pdf"></iframe>
+              <div v-else class="pdf-frame pdf-frame--empty">Redacted preview will appear here…</div>
+            </div>
+          </div>
+
+          <div v-if="currentPdfId" class="success-msg">
+            ✓ Redaction complete —
+            <button class="link-btn" @click="downloadPdf(redactedPdfUrl)">Download redacted file</button>
+          </div>
+
+          <div v-if="findings.length && tab === 'pdf'" class="findings-summary">
+            {{ findings.length }} PII finding{{ findings.length !== 1 ? 's' : '' }} detected
+            <span v-if="findings.some(f => f.source === 'claude')" class="dim sm">(Claude-enhanced)</span>
+          </div>
         </div>
-      </div>
-
-      <div v-if="currentPdfId" class="success-msg">
-        ✓ Redaction complete —
-        <button class="link-btn" @click="downloadPdf(redactedPdfUrl)">Download redacted file</button>
-      </div>
-
-      <div v-if="findings.length && tab === 'pdf'" class="findings-summary">
-        {{ findings.length }} PII finding{{ findings.length !== 1 ? 's' : '' }} detected
-        <span v-if="findings.some(f => f.source === 'claude')" class="dim sm">(Claude-enhanced)</span>
       </div>
     </div>
 
@@ -289,14 +300,33 @@ onMounted(fetchFiles)
 .redacted-box--empty { color: var(--text-muted); font-style: italic; }
 .findings-summary { font-size: .78rem; color: var(--text-muted); }
 
-.drop-zone { background: var(--bg-card); border: 2px dashed var(--border); border-radius: 10px; cursor: pointer; padding: 2rem; text-align: center; transition: border-color .15s; }
-.drop-zone:hover, .drop-zone.has-file { border-color: var(--gold); }
-.drop-zone__icon  { color: var(--gold); font-size: 1.5rem; margin-bottom: .4rem; opacity: .6; }
-.drop-zone__title { color: var(--text-primary); font-size: .9rem; font-weight: 500; margin-bottom: .2rem; }
-.drop-zone__sub   { color: var(--text-muted); font-size: .75rem; }
-.submit-row { display: flex; justify-content: flex-end; margin-top: .75rem; }
+.submit-row { display: flex; justify-content: space-between; align-items: center; gap: 1rem; margin-top: .75rem; }
 
-.pdf-preview-row { display: grid; grid-template-columns: 1fr 1fr; gap: 1rem; margin-top: 1rem; }
+.pdf-workspace { display: flex; gap: 1rem; min-height: 520px; }
+.pdf-preview-wrap { flex: 1; display: flex; flex-direction: column; min-width: 0; }
+
+.doc-picker { width: 320px; flex-shrink: 0; border: 1px solid var(--border); border-radius: 8px; background: var(--bg-card); display: flex; flex-direction: column; max-height: 620px; transition: width .2s; }
+.doc-picker.collapsed { width: 42px; }
+.doc-picker__header { display: flex; align-items: center; justify-content: space-between; padding: .65rem .8rem; border-bottom: 1px solid var(--border); cursor: pointer; user-select: none; }
+.doc-picker__header .col-label { margin: 0; }
+.doc-picker__toggle { color: var(--gold); font-size: 1.1rem; }
+.doc-picker__body { display: flex; flex-direction: column; flex: 1; overflow: hidden; }
+.doc-picker__search { background: var(--bg-raised, #0d0d1a); border: 1px solid var(--border); border-radius: 6px; color: var(--text-primary); font-size: .8rem; margin: .6rem; padding: .4rem .6rem; }
+.doc-picker__search:focus { border-color: var(--gold); outline: none; }
+.doc-picker__list { flex: 1; overflow-y: auto; padding: 0 .6rem .6rem; }
+.doc-picker__item { width: 100%; text-align: left; background: var(--bg-raised, #0d0d1a); border: 1px solid var(--border); border-radius: 6px; color: var(--text-primary); cursor: pointer; margin-bottom: .4rem; padding: .55rem .65rem; transition: all .15s; }
+.doc-picker__item:hover { border-color: var(--gold); }
+.doc-picker__item.active { border-color: var(--gold); background: rgba(246,173,85,.12); }
+.doc-picker__name { font-size: .85rem; font-weight: 500; line-height: 1.3; word-break: break-word; }
+.doc-picker__meta { display: flex; flex-wrap: wrap; gap: .35rem; align-items: center; margin-top: .25rem; font-size: .72rem; color: var(--text-muted); }
+.case-chip { background: rgba(246,173,85,.15); color: #f6ad55; padding: .05rem .35rem; border-radius: 4px; font-weight: 600; }
+.doc-picker__empty { color: var(--text-muted); font-size: .8rem; padding: 1rem; text-align: center; }
+
+.selected-doc { min-width: 0; }
+.selected-doc__name { color: var(--text-primary); font-weight: 500; font-size: .9rem; }
+.selected-doc__placeholder { color: var(--text-muted); font-size: .85rem; }
+
+.pdf-preview-row { display: grid; grid-template-columns: 1fr 1fr; gap: 1rem; margin-top: 1rem; flex: 1; }
 .pdf-preview-col { display: flex; flex-direction: column; gap: .5rem; min-height: 420px; }
 .pdf-frame { flex: 1; width: 100%; min-height: 400px; border: 1px solid var(--border); border-radius: 6px; background: var(--bg-raised, #0d0d1a); }
 .pdf-frame--empty { display: flex; align-items: center; justify-content: center; color: var(--text-muted); font-style: italic; font-size: .875rem; }

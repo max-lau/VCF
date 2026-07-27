@@ -12,7 +12,7 @@ Uses Presidio Analyzer + Anonymizer when available; falls back to Claude-only
 PII detection when Presidio is not installed.
 """
 from fastapi import APIRouter, HTTPException, Request, UploadFile, File, Query
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, Response
 from pydantic import BaseModel, Field
 from typing import List
 import os
@@ -385,6 +385,46 @@ def _media_type_for_filename(filename: str) -> str:
     return "text/plain"
 
 
+def _supabase_storage_client():
+    """Return a Supabase storage client if credentials are configured."""
+    supabase_url = os.getenv("SUPABASE_URL")
+    supabase_key = os.getenv("SUPABASE_SERVICE_KEY")
+    if not supabase_url or not supabase_key:
+        return None
+    try:
+        from supabase import create_client
+        return create_client(supabase_url, supabase_key)
+    except Exception as e:
+        logger.warning(f"[redaction] Could not create Supabase client: {e}")
+        return None
+
+
+def _fetch_document_bytes(file_url: str) -> bytes:
+    """Fetch original document bytes from Supabase Storage or local disk."""
+    if not file_url:
+        raise HTTPException(404, "Document has no stored file")
+
+    # Local file path fallback
+    local_path = Path(file_url)
+    if local_path.is_absolute() and local_path.exists():
+        return local_path.read_bytes()
+
+    # Supabase Storage
+    supabase = _supabase_storage_client()
+    if not supabase:
+        raise HTTPException(500, "Document storage not configured")
+
+    try:
+        res = supabase.storage.from_("vcf-documents").download(file_url)
+        if isinstance(res, bytes):
+            return res
+        # Some Supabase client versions return an object with bytes attribute
+        return bytes(res)
+    except Exception as e:
+        logger.error(f"[redaction] Failed to fetch document {file_url} from storage: {e}")
+        raise HTTPException(404, f"Could not retrieve document from storage: {e}")
+
+
 def _temp_dir_for_firm(firm_id: str) -> Path:
     safe = re.sub(r"[^a-zA-Z0-9_-]", "_", firm_id)
     d = TEMP_UPLOAD_DIR / safe
@@ -646,14 +686,78 @@ async def delete_redacted_file(request: Request, redaction_id: str):
     return {"message": f"'{row['filename']}' securely deleted.", "id": redaction_id}
 
 
-@router.post("/case-document/{doc_id}")
-async def redact_case_document(doc_id: int, request: Request, use_claude: bool = Query(True)):
-    user_id = _require_auth(request)
+@router.get("/documents")
+async def list_redactable_documents(request: Request):
+    """List documents already in the vault (OCR/email intake) that can be redacted."""
+    _require_auth(request)
+    firm_id = _get_firm_id(request)
+
+    with get_conn(firm_id) as conn:
+        rows = conn.execute(
+            """SELECT d.id, d.document_name, d.doc_type, d.file_url, d.upload_date,
+                      d.case_id, c.case_number, c.client_name
+               FROM case_documents d
+               LEFT JOIN cases c ON c.id = d.case_id
+               WHERE d.firm_id = %s AND d.file_url IS NOT NULL AND d.file_url != ''
+               ORDER BY d.upload_date DESC NULLS LAST""",
+            (firm_id,)
+        ).fetchall()
+
+    docs = []
+    for r in rows:
+        docs.append({
+            "id": r["id"],
+            "document_name": r["document_name"] or "Untitled document",
+            "doc_type": r["doc_type"] or "other",
+            "case_id": r["case_id"],
+            "case_number": r["case_number"],
+            "client_name": r["client_name"],
+            "upload_date": str(r["upload_date"]) if r["upload_date"] else None,
+            "original_url": f"/redact/document/{r['id']}/original",
+        })
+    return {"documents": docs}
+
+
+@router.get("/document/{doc_id}/original")
+async def serve_case_document_original(doc_id: int, request: Request):
+    """Serve the original file for a case document by proxying from Supabase Storage."""
+    _require_auth(request)
     firm_id = _get_firm_id(request)
 
     with get_conn(firm_id) as conn:
         doc = conn.execute(
-            """SELECT id, document_name, doc_text, content_hash, case_id
+            "SELECT document_name, file_url FROM case_documents WHERE id = %s AND firm_id = %s",
+            (doc_id, firm_id),
+        ).fetchone()
+
+    if not doc:
+        raise HTTPException(404, "Document not found")
+
+    content = _fetch_document_bytes(doc["file_url"])
+    fname = doc["document_name"] or "document"
+    return Response(
+        content=content,
+        media_type=_media_type_for_filename(fname),
+        headers={"Content-Disposition": f"inline; filename=\"{fname}\""},
+    )
+
+
+@router.post("/case-document/{doc_id}")
+async def redact_case_document(
+    doc_id: int,
+    request: Request,
+    threshold: float = Query(0.5, ge=0.0, le=1.0),
+    style: str = Query("label"),
+    use_claude: bool = Query(True),
+):
+    """Redact a vault document. The original PDF is fetched from storage, redacted, and returned as a PDF."""
+    user_id = _require_auth(request)
+    firm_id = _get_firm_id(request)
+    style = _normalize_style(style)
+
+    with get_conn(firm_id) as conn:
+        doc = conn.execute(
+            """SELECT id, document_name, doc_text, file_url, content_hash, case_id
                FROM case_documents
                WHERE id = %s AND firm_id = %s""",
             (doc_id, firm_id),
@@ -666,43 +770,54 @@ async def redact_case_document(doc_id: int, request: Request, use_claude: bool =
     if not text:
         raise HTTPException(400, "No extracted text available for this document. Run OCR/intake first.")
 
-    try:
-        redacted, findings, confidence = _redact_text(text, 0.5, "label", use_claude, firm_id)
-    except HTTPException:
-        raise
-    except Exception as e:
-        logger.error(f"[redaction] Case-document redaction error: {e}")
-        raise HTTPException(500, "Redaction failed. Please try again.")
+    fname = doc["document_name"] or "document"
+    content = b""
+    if doc.get("file_url"):
+        try:
+            content = _fetch_document_bytes(doc["file_url"])
+        except HTTPException as e:
+            logger.warning(f"[redaction] Could not fetch original PDF for doc {doc_id}: {e.detail}")
 
-    rec_id = str(uuid.uuid4())[:8]
-    base = os.path.splitext(doc["document_name"] or "document")[0]
-    out_name = f"{base}_redacted_{rec_id}.txt"
-    out_path = STORAGE_DIR / out_name
-    out_path.write_text(redacted, encoding="utf-8")
-    size_kb = round(out_path.stat().st_size / 1024, 2)
+    # If we cannot fetch the original PDF bytes, fall back to a text-only redacted output.
+    if not content:
+        try:
+            redacted, findings, confidence = _redact_text(text, threshold, style, use_claude, firm_id)
+        except HTTPException:
+            raise
+        except Exception as e:
+            logger.error(f"[redaction] Case-document redaction error: {e}")
+            raise HTTPException(500, "Redaction failed. Please try again.")
 
-    with get_conn(firm_id) as conn:
-        conn.execute(
-            """INSERT INTO redactions
-               (id, firm_id, filename, original_filename, size_kb, style,
-                total_redactions, confidence_score, file_path, created_at)
-               VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)""",
-            (rec_id, firm_id, out_name, doc["document_name"], size_kb, "label",
-             len(findings), confidence, str(out_path),
-             datetime.now(timezone.utc).isoformat()),
-        )
+        rec_id = str(uuid.uuid4())[:8]
+        base = os.path.splitext(fname)[0]
+        out_name = f"{base}_redacted_{rec_id}.txt"
+        out_path = STORAGE_DIR / out_name
+        out_path.write_text(redacted, encoding="utf-8")
+        size_kb = round(out_path.stat().st_size / 1024, 2)
 
-    categories_found = list({f["category"] for f in findings})
-    return {
-        "success": True,
-        "redaction_id": rec_id,
-        "download_url": f"/redact/{rec_id}/download",
-        "filename": out_name,
-        "total_redactions": len(findings),
-        "categories_found": categories_found,
-        "confidence_score": confidence,
-        "presidio_available": _check_presidio(),
-    }
+        with get_conn(firm_id) as conn:
+            conn.execute(
+                """INSERT INTO redactions
+                   (id, firm_id, filename, original_filename, size_kb, style,
+                    total_redactions, confidence_score, file_path, created_at)
+                   VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)""",
+                (rec_id, firm_id, out_name, fname, size_kb, style,
+                 len(findings), confidence, str(out_path),
+                 datetime.now(timezone.utc).isoformat()),
+            )
+
+        return {
+            "success": True,
+            "redaction_id": rec_id,
+            "download_url": f"/redact/{rec_id}/download",
+            "filename": out_name,
+            "total_redactions": len(findings),
+            "categories_found": list({f["category"] for f in findings}),
+            "confidence_score": confidence,
+            "presidio_available": _check_presidio(),
+        }
+
+    return _process_redaction_file(content, fname, threshold, style, use_claude, firm_id, user_id)
 
 
 @router.get("/{redaction_id}/download")
