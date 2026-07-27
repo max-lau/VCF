@@ -15,7 +15,7 @@ from backend.demo1.pdf_module_export import router as module_pdf_router
 from backend.demo1.audit_trail import AuditMiddleware, init_audit_table, router as audit_router
 from backend.demo1.rate_limit import check_rate_limit
 from backend.demo1.observability.tracer import trace_claude_call
-from backend.demo1.mlops.tracker import log_inference as _mlflow_log
+
 from backend.demo1.pii import redact_text as _pii_redact, redaction_summary as _pii_summary
 from backend.demo1.case_management   import router as cases_router
 from backend.demo1.redaction import router as redaction_router, init_redaction_table
@@ -26,18 +26,15 @@ from backend.demo1.calendar_sync import router as calendar_sync_router
 from backend.demo1.document_annotations import router as document_annotations_router
 from backend.demo1.esignature import router as esign_router
 from backend.demo1.client_portal import router as client_portal_router
-from backend.demo1.acp_vcf_config import APP_NAME, FIRM_NAME, FIRM_ID, VCF_DEADLINES
-from fastapi import FastAPI, HTTPException, Query, Request, BackgroundTasks, Depends
+from backend.demo1.acp_vcf_config import APP_NAME, FIRM_NAME, FIRM_ID
+from fastapi import FastAPI, HTTPException, Query, Request
 from fastapi.responses import JSONResponse
 from starlette.middleware.base import BaseHTTPMiddleware
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import StreamingResponse
+
 from pydantic import BaseModel
 from dotenv import load_dotenv
-from backend.demo1.database import (
-    init_db, save_analysis, query_analyses, get_stats,
-    save_feedback, get_feedback_queue, mark_reviewed, get_retraining_data
-)
+from backend.demo1.database import init_db, query_analyses
 import anthropic
 from backend.demo1.intelligence import get_deadline_radar
 from backend.demo1.vcf_deadlines import router as vcf_deadlines_router
