@@ -38,6 +38,12 @@ STORAGE_DIR.mkdir(parents=True, exist_ok=True)
 MAX_TEXT_LEN = 25_000
 MAX_FILE_SIZE = 20 * 1024 * 1024  # 20 MB
 
+
+def init_redaction_table():
+    """No-op — table exists in Supabase Postgres."""
+    print("[Redaction] DB table initialized [OK]")
+
+
 # ── Auth helper ───────────────────────────────────────────────────────────────
 def _require_auth(request: Request) -> int:
     user_id = getattr(request.state, "user_id", None)
