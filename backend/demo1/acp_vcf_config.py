@@ -25,4 +25,13 @@ VCF_CATEGORIES = [
     "Other Correspondence"
 ]
 
+import os
+
+_VCF_EMAIL_DOMAIN = os.getenv("VCF_DEDICATED_EMAIL_DOMAIN", "").strip()
+_VCF_EMAIL_PREFIX = os.getenv("VCF_DEDICATED_EMAIL_PREFIX", "vcfclaim").strip()
+
 print(f"[ACP-VCF] {APP_NAME} configuration loaded for {FIRM_NAME}")
+if not _VCF_EMAIL_DOMAIN:
+    print("[ACP-VCF] WARNING: VCF_DEDICATED_EMAIL_DOMAIN is not set. New cases will not be assigned a law-firm VCF email.")
+else:
+    print(f"[ACP-VCF] VCF dedicated email domain: {_VCF_EMAIL_PREFIX}@{_VCF_EMAIL_DOMAIN}")

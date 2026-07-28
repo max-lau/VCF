@@ -139,6 +139,7 @@ def generate_vcf_email(conn=None) -> Optional[str]:
     domain = os.getenv("VCF_DEDICATED_EMAIL_DOMAIN", "").strip()
     prefix = os.getenv("VCF_DEDICATED_EMAIL_PREFIX", "vcfclaim").strip()
     if not domain:
+        logger.warning("[vcf_email] VCF_DEDICATED_EMAIL_DOMAIN not set; cannot generate dedicated email")
         return None
     if conn is not None:
         row = conn.execute("SELECT nextval('vcf_email_seq') AS n").fetchone()
