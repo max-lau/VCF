@@ -19,10 +19,11 @@ Deletes:
 Usage:
   C:\vcf> . venv/Scripts/activate
   (venv) PS C:\vcf> python scripts/reset_demo_data.py
+  (venv) PS C:\vcf> python scripts/reset_demo_data.py --dry-run
 """
 import os
 import sys
-import re
+import argparse
 import shutil
 from pathlib import Path
 from urllib.parse import urlparse
@@ -146,10 +147,41 @@ def get_counts(cur):
     return counts
 
 
+def rls_enabled_tables(cur):
+    cur.execute("""
+        SELECT c.relname AS table_name
+        FROM pg_class c
+        JOIN pg_namespace n ON n.oid = c.relnamespace
+        WHERE c.relkind = 'r' AND n.nspname = 'public' AND c.relrowsecurity = true
+    """)
+    return {r["table_name"] for r in cur.fetchall()}
+
+
+def disable_rls(cur, tables):
+    disabled = []
+    for table in tables:
+        if table in TABLES_TO_TRUNCATE:
+            try:
+                cur.execute(f"ALTER TABLE {table} DISABLE ROW LEVEL SECURITY")
+                disabled.append(table)
+            except Exception as e:
+                print(f"  ⚠ could not disable RLS on {table}: {e}")
+    return disabled
+
+
+def enable_rls(cur, tables):
+    for table in tables:
+        try:
+            cur.execute(f"ALTER TABLE {table} ENABLE ROW LEVEL SECURITY")
+        except Exception as e:
+            print(f"  ⚠ could not re-enable RLS on {table}: {e}")
+
+
 def truncate_tables(cur):
     for table in TABLES_TO_TRUNCATE:
         try:
             cur.execute(f"TRUNCATE TABLE {table} CASCADE")
+            print(f"  ✓ truncated {table}")
         except Exception as e:
             print(f"  ⚠ could not truncate {table}: {e}")
 
@@ -233,6 +265,10 @@ def clear_supabase_storage():
 
 
 def main():
+    parser = argparse.ArgumentParser(description="Reset VCFClaimsIQ demo data")
+    parser.add_argument("--dry-run", action="store_true", help="Show what would be deleted without deleting")
+    args = parser.parse_args()
+
     load_env()
     firm_id = os.environ.get("FIRM_ID", "waw_vcf")
 
@@ -240,12 +276,14 @@ def main():
     print("=" * 50)
     print(f"Database: {mask_dsn(os.environ.get('DATABASE_URL', ''))}")
     print(f"Firm ID:  {firm_id}")
+    if args.dry_run:
+        print("MODE: dry-run (no changes will be made)")
     print()
 
     conn = get_db_conn()
     cur = conn.cursor()
 
-    # Set tenant context for RLS
+    # Set tenant context for RLS (defense in depth; we also disable RLS below)
     cur.execute("SELECT set_config('app.current_firm_id', %s, false)", (firm_id,))
 
     counts = get_counts(cur)
@@ -260,16 +298,27 @@ def main():
     print("User accounts, firm config, roles, and audit logs are preserved.")
     print()
 
+    if args.dry_run:
+        print("Dry-run complete. No changes were made.")
+        return 0
+
     answer = input("Type DELETE DEMO DATA to proceed, or press Enter to cancel: ")
     if answer.strip() != "DELETE DEMO DATA":
         print("Cancelled. No changes were made.")
         return 0
 
-    print("\nTruncating tables...")
+    print("\nDisabling RLS on target tables...")
+    rls_tables = rls_enabled_tables(cur)
+    disabled = disable_rls(cur, rls_tables)
+
+    print("Truncating tables...")
     truncate_tables(cur)
 
     print("Restarting serial sequences...")
     reset_sequences(cur)
+
+    print("Re-enabling RLS...")
+    enable_rls(cur, disabled)
 
     print("Clearing local uploads...")
     clear_local_uploads()
