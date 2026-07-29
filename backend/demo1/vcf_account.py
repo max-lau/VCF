@@ -47,7 +47,7 @@ from fastapi import APIRouter, HTTPException, Request
 from pydantic import BaseModel, Field
 
 from backend.demo1.pg import get_conn
-from backend.demo1.case_management import generate_vcf_email
+from backend.demo1.case_management import generate_case_number, generate_vcf_email
 
 logger = logging.getLogger(__name__)
 router = APIRouter()
@@ -484,6 +484,41 @@ def create_prep(body: PrepRequest, request: Request):
         else:
             security.append({"group": group, "question": "", "answer": "",
                              "synthesized": False})  # to be confirmed with client
+
+    # If no case was selected (common in scan → prep workflow), create one now so
+    # the law-firm VCF email can be auto-assigned and tracked.
+    if not body.case_id:
+        with get_conn(firm_id) as conn:
+            case_number = generate_case_number(firm_id, conn)
+            vcf_email = generate_vcf_email(conn)
+            if not vcf_email:
+                raise HTTPException(
+                    500,
+                    "VCF dedicated email domain is not configured. "
+                    "Add VCF_DEDICATED_EMAIL_DOMAIN=wawvcf.com to .env and restart the backend."
+                )
+            row = conn.execute(
+                """INSERT INTO cases
+                   (firm_id, case_number, client_name, client_email, claim_stage,
+                    date_of_birth, ssn_last4, preferred_language, vcf_email)
+                   VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s)
+                   RETURNING id""",
+                (firm_id, case_number,
+                 f"{c.first_name} {c.last_name}".strip(),
+                 (c.email or "").strip() or None,
+                 'intake',
+                 c.date_of_birth or None,
+                 c.ssn_last4 or None,
+                 c.preferred_language or None,
+                 vcf_email),
+            ).fetchone()
+            case_id = row["id"]
+            conn.execute(
+                "INSERT INTO case_notes (firm_id, case_id, note) VALUES (%s,%s,%s)",
+                (firm_id, case_id, f"Case created from VCF prep flow for {c.first_name} {c.last_name}"),
+            )
+        body.case_id = case_id
+        logger.info(f"[vcf_account] auto-created case {case_id} ({case_number}) from prep flow")
 
     # Resolve the VCF email: explicit field wins, then case record (auto-generate
     # if missing), then personal email as a last resort.
