@@ -203,6 +203,13 @@ async def create_case(
                 case_number = generate_case_number(firm_id, conn)
 
             vcf_email = (body.vcf_email or "").strip() or generate_vcf_email(conn)
+            if not vcf_email:
+                logger.error("[case_management] Cannot create case: VCF_DEDICATED_EMAIL_DOMAIN not configured")
+                raise HTTPException(
+                    500,
+                    "VCF dedicated email domain is not configured. "
+                    "Add VCF_DEDICATED_EMAIL_DOMAIN=wawvcf.com to .env and restart the backend."
+                )
             client_email = (body.client_email or "").strip() or None
 
             cur = conn.execute("""

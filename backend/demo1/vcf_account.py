@@ -507,8 +507,17 @@ def create_prep(body: PrepRequest, request: Request):
                     conn.commit()
                     vcf_email = generated
                     logger.info(f"[vcf_account] auto-generated vcf_email {generated} for case {body.case_id}")
+                else:
+                    logger.error("[vcf_account] Cannot generate prep sheet: VCF_DEDICATED_EMAIL_DOMAIN not configured")
+                    raise HTTPException(
+                        500,
+                        "VCF dedicated email domain is not configured. "
+                        "Add VCF_DEDICATED_EMAIL_DOMAIN=wawvcf.com to .env and restart the backend."
+                    )
     if not vcf_email:
         vcf_email = c.email
+    if not vcf_email:
+        raise HTTPException(400, "No VCF email or client email available for prep sheet.")
 
     prep = {
         "register_url": VCF_REGISTER_URL,
