@@ -9,7 +9,8 @@ Vision remains the final fallback for handwriting, complex forms, and failures.
 Rollout phase 1 (Email Intake):
   - Email bodies: plain text / HTML → Markdown (no model).
   - Email attachments:
-      * Office / OpenDocument / CSV / EPUB / TXT → AnyDoc → Markdown.
+      * Office / OpenDocument / CSV / EPUB / TXT → local extractor (AnyDoc if installed,
+        otherwise mammoth/python-docx for docx, plain decoder for txt/csv) → Markdown.
       * PDF / image → existing OCR pipeline (Vision/Tesseract).
 
 Future phase 2 (OCR Intake):
@@ -54,6 +55,20 @@ try:
 except Exception:
     anydoc = None
     _ANYDOC_AVAILABLE = False
+
+try:
+    import mammoth
+    _MAMMOTH_AVAILABLE = True
+except Exception:
+    mammoth = None
+    _MAMMOTH_AVAILABLE = False
+
+try:
+    from docx import Document
+    _PYTHON_DOCX_AVAILABLE = True
+except Exception:
+    Document = None
+    _PYTHON_DOCX_AVAILABLE = False
 
 
 # Extensions handled locally without Vision in phase 1.
@@ -157,6 +172,82 @@ def _anydoc_convert(data: bytes, filename: str) -> Optional[dict]:
     return None
 
 
+def _mammoth_convert(data: bytes, filename: str) -> Optional[dict]:
+    """Use mammoth to convert .docx → HTML → Markdown."""
+    if not _MAMMOTH_AVAILABLE or _ext(filename) != ".docx":
+        return None
+    try:
+        result = mammoth.convert_to_html(io.BytesIO(data))
+        if result.messages:
+            logger.debug(f"[intake_router] mammoth messages for {filename}: {result.messages}")
+        html = result.value
+        if _MARKDOWNIFY_AVAILABLE:
+            md = markdownify.markdownify(html, heading_style="ATX", strip=["script", "style"])
+        else:
+            md = re.sub(r"<[^>]+>", " ", html)
+        return {
+            "text": _collapse_whitespace(md),
+            "text_english": "",
+            "word_count": len(md.split()),
+            "confidence": 99.0,
+            "engine": "mammoth",
+            "route_taken": "mammoth",
+        }
+    except Exception as e:
+        logger.warning(f"[intake_router] mammoth failed for {filename}: {e}")
+    return None
+
+
+def _pythondocx_convert(data: bytes, filename: str) -> Optional[dict]:
+    """Use python-docx to extract text from .docx as a fallback."""
+    if not _PYTHON_DOCX_AVAILABLE or _ext(filename) != ".docx":
+        return None
+    try:
+        doc = Document(io.BytesIO(data))
+        paragraphs = [p.text for p in doc.paragraphs if p.text.strip()]
+        text = "\n\n".join(paragraphs)
+        return {
+            "text": _collapse_whitespace(text),
+            "text_english": "",
+            "word_count": len(text.split()),
+            "confidence": 99.0,
+            "engine": "python-docx",
+            "route_taken": "python-docx",
+        }
+    except Exception as e:
+        logger.warning(f"[intake_router] python-docx failed for {filename}: {e}")
+    return None
+
+
+def _text_convert(data: bytes, filename: str) -> Optional[dict]:
+    """Handle plain text and CSV directly without any Office parser."""
+    ext = _ext(filename)
+    if ext == ".csv":
+        import csv
+        try:
+            text = data.decode("utf-8")
+        except UnicodeDecodeError:
+            text = data.decode("latin-1", errors="ignore")
+        reader = csv.reader(io.StringIO(text))
+        rows = [" | ".join(row) for row in reader]
+        text = "\n".join(rows)
+    elif ext == ".txt":
+        try:
+            text = data.decode("utf-8")
+        except UnicodeDecodeError:
+            text = data.decode("latin-1", errors="ignore")
+    else:
+        return None
+    return {
+        "text": _collapse_whitespace(text),
+        "text_english": "",
+        "word_count": len(text.split()),
+        "confidence": 99.0,
+        "engine": "text",
+        "route_taken": "text",
+    }
+
+
 def _ocr_fallback(data: bytes, filename: str, firm_id: str) -> dict:
     """Fall back to the existing OCR pipeline (Tesseract → Vision)."""
     from backend.demo1.ocr_intake import (
@@ -215,12 +306,18 @@ def route_file(filename: str, data: bytes, firm_id: str) -> dict:
 
     result: Optional[dict] = None
 
-    # 2. Office / OpenDocument / CSV / EPUB / TXT → AnyDoc (when enabled).
-    anydoc_enabled = os.getenv("INTAKE_ANYDOC_ENABLED", "true").lower() in ("1", "true", "yes")
-    if anydoc_enabled and ext in ANYDOC_EXTENSIONS:
-        result = _anydoc_convert(data, filename)
+    # 2. Office / CSV / TXT → local extractors first, Vision last.
+    office_local_enabled = os.getenv("INTAKE_OFFICE_LOCAL_ENABLED", "true").lower() in ("1", "true", "yes")
+    if office_local_enabled and ext in ANYDOC_EXTENSIONS:
+        result = _text_convert(data, filename)
         if result is None:
-            logger.info(f"[intake_router] AnyDoc unavailable for {filename}; falling back to OCR")
+            result = _anydoc_convert(data, filename)
+        if result is None:
+            result = _mammoth_convert(data, filename)
+        if result is None:
+            result = _pythondocx_convert(data, filename)
+        if result is None:
+            logger.info(f"[intake_router] Local office extractors unavailable for {filename}; falling back to OCR")
 
     # 3. PDF / image → existing OCR pipeline (Vision/Tesseract).
     if result is None and ext in OCR_EXTENSIONS:

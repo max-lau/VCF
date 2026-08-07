@@ -105,6 +105,8 @@ marshmallow==3.26.2
 matplotlib==3.11.0
 mdurl==0.1.2
 markdownify>=0.13.0
+mammoth>=1.8.0
+python-docx>=1.1.2
 # anydoc from Firecrawl — install from source until published:
 #   pip install git+https://github.com/firecrawl/anydoc.git
 # anydoc
