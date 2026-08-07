@@ -97,13 +97,6 @@ jsonschema==4.26.0
 jsonschema-specifications==2025.9.1
 kiwisolver==1.5.0
 kubernetes==36.0.2
-langchain==0.2.17
-langchain-classic==1.0.8
-langchain-community==0.2.19
-langchain-core==0.2.43
-langchain-openai==0.1.25
-langchain-protocol==0.0.18
-langchain-text-splitters==0.2.4
 langfuse==4.9.1
 langgraph==1.2.6
 langgraph-checkpoint==4.1.1
@@ -173,7 +166,6 @@ pillow==12.2.0
 pinecone==9.1.0
 pinecone-plugin-interface==0.0.7
 pluggy==1.6.0
-pm2==1.0.0
 preshed==3.0.13
 presidio_analyzer==2.2.362
 presidio_anonymizer==2.2.362
