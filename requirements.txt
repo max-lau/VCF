@@ -117,6 +117,10 @@ MarkupSafe==3.0.3
 marshmallow==3.26.2
 matplotlib==3.11.0
 mdurl==0.1.2
+markdownify>=0.13.0
+# anydoc from Firecrawl — install from source until published:
+#   pip install git+https://github.com/firecrawl/anydoc.git
+# anydoc
 mlflow==3.14.0
 mlflow-skinny==3.14.0
 mlflow-tracing==3.14.0

@@ -127,6 +127,8 @@ def _parse_gmail_message(raw: dict, account: dict) -> Optional[EmailMessage]:
 
 def _save_to_db(msg: EmailMessage, result, firm_id: str):
     from .pg import get_conn
+    from .intake_router import route_email_body
+    body_md = route_email_body(msg.body_text, msg.body_html).get("text", msg.body_text or "")
     intake_id = None
     with get_conn(firm_id) as conn:
         if result.routing_decision in ("intake", "review"):
@@ -144,7 +146,7 @@ def _save_to_db(msg: EmailMessage, result, firm_id: str):
                 (intake_id, msg.account_id, msg.attorney_id, msg.firm_id,
                  result.case_id_matched, msg.provider, msg.provider_message_id,
                  msg.from_address, msg.to_addresses, msg.cc_addresses,
-                 msg.subject, msg.body_text, msg.received_at,
+                 msg.subject, body_md, msg.received_at,
                  json.dumps(result.extracted_entities),
                  json.dumps(result.action_items),
                  json.dumps(result.deadline_dates),
@@ -183,7 +185,7 @@ def _save_to_db(msg: EmailMessage, result, firm_id: str):
                 (msg.firm_id,
                  result.case_id_matched,
                  f"Email: {msg.subject[:100]} [from: {msg.from_address[:60]}]",
-                 msg.body_text[:4000] if msg.body_text else None,
+                 body_md[:4000] if body_md else None,
                  msg.received_at,
                  getattr(msg, 'source_url', None),
                  "matched" if result.case_id_matched else "unmatched",

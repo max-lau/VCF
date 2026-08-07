@@ -263,15 +263,14 @@ def _run_ocr_on_attachment(
     content_hash: str,
     conn,
 ) -> dict:
-    """Run OCR on an email attachment and auto-link it to a case by identity.
+    """Extract text from an email attachment via the intake router and auto-link
+    it to a case by identity. Failures are logged and swallowed so the document
+    stays in the inbox.
 
-    OCR failures are logged and swallowed so the document stays in the inbox.
     Returns a small status dict for debugging/metrics.
     """
-    from backend.demo1.ocr_intake import (
-        extract_text, clean_ocr_text, extract_form_fields,
-        pdf_to_image_pages, _extract_identity_signals, find_case_by_identity,
-    )
+    from backend.demo1.ocr_intake import _extract_identity_signals, find_case_by_identity, extract_form_fields
+    from backend.demo1.intake_router import route_file
 
     result = {
         "ocr_done": False,
@@ -281,19 +280,9 @@ def _run_ocr_on_attachment(
         "error": None,
     }
     try:
-        mime = _mime_type_from_ext(filename)
-        if mime == "application/pdf":
-            pages = pdf_to_image_pages(file_bytes)
-        elif mime.startswith("image/"):
-            pages = file_bytes
-        else:
-            logger.info(f"[Vault OCR] Skipping OCR for non-image/PDF attachment: {filename}")
-            return result
-
-        ocr_result = extract_text(pages, lang="eng", engine="auto",
-                                  mime_type=mime, firm_id=firm_id)
-        text = clean_ocr_text(ocr_result.get("text", ""))
-        form_fields = ocr_result.get("form_fields") or extract_form_fields(text)
+        routed = route_file(filename, file_bytes, firm_id)
+        text = routed.get("text", "")
+        form_fields = routed.get("form_fields") or extract_form_fields(text)
         signals = _extract_identity_signals(form_fields)
 
         matched_case_id = initial_case_id
@@ -347,7 +336,10 @@ def _run_ocr_on_attachment(
         result["case_id"] = matched_case_id
         result["match_status"] = match_status
         result["match_reason"] = match_reason
-        logger.info(f"[Vault OCR] Processed attachment id={doc_id} case={matched_case_id} status={match_status}")
+        logger.info(
+            f"[Vault OCR] Processed attachment id={doc_id} case={matched_case_id} "
+            f"status={match_status} route={routed.get('route_taken')} engine={routed.get('engine')}"
+        )
     except Exception as e:
         logger.warning(f"[Vault OCR] OCR failed for attachment {filename} (doc_id={doc_id}): {e}")
         result["error"] = str(e)
