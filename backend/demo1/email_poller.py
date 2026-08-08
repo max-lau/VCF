@@ -270,8 +270,9 @@ def poll_gmail_account(account: dict):
 
     try:
         service = build("gmail", "v1", credentials=creds)
+        max_results = int(os.getenv("EMAIL_POLL_MAX_RESULTS", "50"))
         result = service.users().messages().list(
-            userId="me", labelIds=["INBOX", "UNREAD"], maxResults=50
+            userId="me", labelIds=["INBOX", "UNREAD"], maxResults=max_results
         ).execute()
 
         messages = result.get("messages", [])
