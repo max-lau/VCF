@@ -19,13 +19,13 @@ for row in cur.fetchall():
 
 print("\n--- Recent case_documents ---")
 cur.execute("""
-    SELECT id, document_name, doc_text, doc_type, created_at
+    SELECT id, document_name, doc_text, doc_type, updated_at
     FROM case_documents
-    ORDER BY created_at DESC LIMIT 10
+    ORDER BY updated_at DESC LIMIT 10
 """)
 for row in cur.fetchall():
     print(row[0], row[1], row[3], str(row[4]))
-    print("TEXT:", (row[2] or "")[:200])
+    print("TEXT:", (row[2] or "")[:300])
     print()
 
 cur.close()
