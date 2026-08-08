@@ -339,6 +339,14 @@ def route_file(filename: str, data: bytes, firm_id: str) -> dict:
         f"engine={result.get('engine')} conf={result.get('confidence')} "
         f"latency={result.get('latency_ms')}ms"
     )
+    # Always-visible summary for local extraction paths (so it shows even when
+    # the app log level is WARNING).
+    if result.get('route_taken') in ('mammoth', 'python-docx', 'text', 'anydoc'):
+        logger.warning(
+            f"[intake_router] LOCAL EXTRACTION: {filename} -> "
+            f"route={result.get('route_taken')} engine={result.get('engine')} "
+            f"words={result.get('word_count')}"
+        )
     return result
 
 
