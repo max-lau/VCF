@@ -47,6 +47,8 @@ CLEARED = Path(os.environ.get(
     "CLEARED_DIR",
     str(BASE_DIR / "uploads" / "email_attachments" / "cleared")
 ))
+QUARANTINE.mkdir(parents=True, exist_ok=True)
+CLEARED.mkdir(parents=True, exist_ok=True)
 
 STRICT_VIRUS_SCAN = os.getenv("ATTACHMENT_STRICT_VIRUS_SCAN", "false").lower() == "true"
 EMAIL_OCR_ENABLED = os.getenv("EMAIL_OCR_ENABLED", "true").lower() != "false"
