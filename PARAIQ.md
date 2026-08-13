@@ -34,7 +34,7 @@ VPS: root@5.161.83.6 — project root: /root/nlp-portfolio
 ### Auth
 - JWT (PyJWT), bcrypt passwords
 - Every token includes jti (uuid4) for blocklist support
-- Super user: maxwell / paraiq2026, role paraiq_super, firm_id default
+- Super user: maxwell (password via PARAIQ_BOT_PASS env var), role paraiq_super, firm_id default
 - Login: POST /auth/login — response field is token (not access_token)
 - Logout: POST /auth/logout — blocks jti in token_blocklist table
 - Frontend stores token in localStorage as paraiq_token
@@ -79,7 +79,7 @@ Billing, Voice Shortcuts, Morning Brief
   - Dashboard mic (VoiceCommand.vue in TopBar)
   - /voice/run FastAPI endpoint (backend/demo1/voice_router.py)
 - Compound commands: get_workload_today, get_case_intelligence
-- Telegram locked to ID 541424804, password paraiq2026
+- Telegram locked to ID 541424804 (bot password via PARAIQ_BOT_PASS env var)
 - Auth uses username field (not email) at /auth/login
 - User-defined shortcuts: voice_shortcuts_router.py, stored in voice_shortcuts table
   - CRUD: GET/POST/PUT/DELETE /voice/shortcuts

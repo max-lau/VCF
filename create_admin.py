@@ -18,7 +18,7 @@ def create_admin():
     )
     
     print("Hashing new password...")
-    new_password = "WAW11BwayWAW"
+    new_password = os.environ["WAW_ADMIN_PASSWORD"]  # from env, never hardcode
     # Use bcrypt directly
     salt = bcrypt.gensalt()
     hashed_password = bcrypt.hashpw(new_password.encode('utf-8'), salt).decode('utf-8')
@@ -36,7 +36,7 @@ def create_admin():
     conn.commit()
     cur.close()
     conn.close()
-    print(f"✅ Admin user ready! Email: admin@waw.com | Password: {new_password}")
+    print("✅ Admin user ready! Email: admin@waw.com (password taken from WAW_ADMIN_PASSWORD)")
 
 if __name__ == "__main__":
     create_admin()

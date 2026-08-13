@@ -36,8 +36,8 @@ TELEGRAM_TOKEN   = os.environ["TELEGRAM_BOT_TOKEN"]
 OPENAI_API_KEY   = os.environ["OPENAI_API_KEY"]
 ANTHROPIC_API_KEY= os.environ["ANTHROPIC_API_KEY"]
 PARAIQ_BASE_URL  = os.environ.get("PARAIQ_BASE_URL", "http://localhost:5003")
-PARAIQ_USER      = os.environ.get("PARAIQ_BOT_USER", "maxwell@openfish.com")
-PARAIQ_PASSWORD  = os.environ.get("PARAIQ_BOT_PASS", "maxwell")
+PARAIQ_USER      = os.environ["PARAIQ_BOT_USER"]  # required env, no hardcoded fallback
+PARAIQ_PASSWORD  = os.environ["PARAIQ_BOT_PASS"]
 
 # Telegram user IDs allowed to use this bot (whitelist for security)
 # Set via env var as comma-separated IDs: "123456789,987654321"

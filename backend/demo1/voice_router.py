@@ -354,8 +354,8 @@ async def voice_run(
         # Get service token
         async with httpx.AsyncClient() as http:
             login = await http.post(f"{PARAIQ_BASE_URL}/auth/login",
-                json={"username":os.environ.get("PARAIQ_BOT_USER","maxwell@openfish.com"),
-                      "password":os.environ.get("PARAIQ_BOT_PASS","paraiq2026")}, timeout=10)
+                json={"username": os.environ["PARAIQ_BOT_USER"],
+                      "password": os.environ["PARAIQ_BOT_PASS"]}, timeout=10)  # required env, no fallback
             login.raise_for_status()
             token = login.json().get("access_token") or login.json().get("token")
 

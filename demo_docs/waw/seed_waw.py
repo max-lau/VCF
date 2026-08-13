@@ -231,7 +231,8 @@ def main():
 
     # ── user ──────────────────────────────────────────────────────────────
     u = data["user"]
-    pw_hash = bcrypt.hashpw(u["password_plain"].encode(), bcrypt.gensalt()).decode()
+    demo_pw = os.environ["WAW_DEMO_PASSWORD"]  # from env, never commit plaintext
+    pw_hash = bcrypt.hashpw(demo_pw.encode(), bcrypt.gensalt()).decode()
     print(f"Seeding user '{u['username']}' (role='{u['role']}' — VERIFY against auth.py) ...")
     if not args.dry_run:
         cur.execute(
@@ -365,7 +366,7 @@ def main():
     else:
         conn.commit()
         print("\nCommitted. Verify tenant isolation:")
-        print("  1) Log in as WaW / 11Bway  -> should see exactly 8 cases.")
+        print("  1) Log in as WaW (password from WAW_DEMO_PASSWORD env) -> should see exactly 8 cases.")
         print("  2) Log in as maxwell (firm 'default') -> should see ZERO waw rows.")
         print("  3) Add firm 'waw' as a third tenant in the cross-tenant CI test matrix.")
 

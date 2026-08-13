@@ -86,3 +86,5 @@ uvicorn.log
 mlflow-artifacts/
 logs/
 structure.txt
+venv/
+*.deb

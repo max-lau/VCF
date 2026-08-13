@@ -79,7 +79,7 @@ Two things I could **not** confirm and flagged inline in the script — check ag
    python3 demo_docs/waw/seed_waw.py
    ```
 
-4. **Verify tenant isolation (your standing rule):** log in as `WaW / 11Bway` → exactly
+4. **Verify tenant isolation (your standing rule):** log in as `WaW` (password from WAW_DEMO_PASSWORD env) → exactly
    8 cases; log in as `maxwell` (firm `default`) → zero WaW rows visible. Add firm
    `waw` to the cross-tenant CI matrix while you're at it — a third tenant makes that
    gate meaningfully stronger.
@@ -108,6 +108,5 @@ Two things I could **not** confirm and flagged inline in the script — check ag
 - The two uploaded-document demos are also your **indirect prompt-injection surface**
   (already on your risk list) — worth a slide in the pitch, actually: "ParaIQ treats
   uploaded documents as untrusted data."
-- `11Bway` is a weak password on an internet-facing app; fine for a demo window, but
-  consider rotating it after the WaW meeting or gating the tenant behind the
-  Cloudflare Access policy.
+- The demo tenant password comes from WAW_DEMO_PASSWORD (env only, never committed).
+  Rotate it after each demo window or gate the tenant behind the Cloudflare Access policy.
